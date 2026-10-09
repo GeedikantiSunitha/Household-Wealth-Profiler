@@ -76,7 +76,7 @@ function logChange(path,from,to){if(Store.mode!=='local')return;S.audit=S.audit|
 const NAV=[
   ['Client data',[['household'],['members'],['income'],['expenses'],['goals'],['accounts'],['db'],['property'],['other'],['liabilities'],['protection'],['assumptions']]],
   ['Onboarding',[['compliance'],['kyc','KYC and onboarding status'],['audit','Audit trail']]],
-  ['Outputs',[['bs','Economic balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks']]]];
+  ['Outputs',[['bs','Economic balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 function renderNav(){
   if(VIEW==='clients'||VIEW==='team'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':'Choose a household to open';return}
   let h='';let step=0;const O=E.onboarding();const bad=E.checks().filter(x=>x.lvl==='bad').length;
@@ -85,10 +85,202 @@ function renderNav(){
     if(id==='checks'&&bad){ct=bad+' to fix';cls='bad'}
     if(id==='kyc'){ct=O.blockerCount?O.blockerCount+' open':O.stage;cls=O.blockerCount?'bad':''}
     const st=s&&sec==='Client data'?`<span class="step">${String(++step).padStart(2,'0')}</span>`:'';
-    h+=`<button type="button" data-nav="${id}" aria-current="${VIEW===id}"><span>${st}${esc(name)}</span><span class="ct ${cls}">${esc(ct)}</span></button>`}}
+    h+=`<button type="button" data-nav="${id}" aria-current="${VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${st}${esc(name)}</span><span class="ct ${cls}">${esc(ct)}</span></button>`}}
   $('#rail').innerHTML=h;
   $('#hhName').textContent=(S.household.name||'Unnamed household')+(S.household.reference?' · '+S.household.reference:'')+' · '+O.stage;
 }
+
+/* ---------- help text ----------
+   Tooltips for every field, group and section so an analyst can see how each input is used.
+   Schema hints (core.js) are used where they exist; FIELD_HELP fills the rest. */
+const FIELD_HELP={
+  'household.name':'Label for the file and the client list, e.g. "Harrington household".',
+  'household.reference':"The firm's own client reference. Recorded only.",
+  'household.adviser':'The adviser responsible for the relationship. Recorded for the file and sign-off.',
+  'household.valuationDate':'Ages, document expiry checks and screening ages are measured from this date. Defaults to today.',
+  'household.willsInPlace':'No wills: flagged in Data checks because intestacy rules would apply. Does not change the figures.',
+  'household.lpaInPlace':'Recorded for the planning file. A missing LPA is a planning point, not a calculation input.',
+  'household.trusts':'Recorded here; structures that affect AML risk are captured under Onboarding and compliance.',
+  'household.objectives':'Captured verbatim for the suitability report and the investment policy statement.',
+  'members.title':'Recorded only.','members.firstName':'Used in names throughout the file.','members.lastName':'Used in names throughout the file.',
+  'members.role':'Primary and partner are adults: they carry income, KYC and suitability. Children and dependants carry only ages and child wrappers.',
+  'members.dob':'Sets age, State Pension age, years to retirement and the survival curve that weights every future cash flow.',
+  'members.sex':'Selects the modal age at death used in the mortality model (see Assumptions).',
+  'members.smoker':'Smokers: modal age at death reduced by 6 years, lowering human capital and the value of future spending.',
+  'members.nationality':'Recorded for CDD. Non-UK nationality with non-UK tax residence triggers the CRS checks.',
+  'members.otherNationality':'Recorded for CDD and FATCA (US) screening.',
+  'members.countryOfBirth':'Standard customer due diligence data point.',
+  'members.address':'Residential address must be verified by the proof of address below.',
+  'members.postcode':'Format is checked against the UK postcode pattern.',
+  'members.prevAddress':'Record if at the current address for under 3 years.',
+  'members.email':'Format is checked. Recorded for contact.','members.phone':'Recorded for contact.',
+  'members.idType':'Photo ID is required for every adult. Missing ID is a KYC blocker.',
+  'members.idNumber':'Document number as it appears on the ID.',
+  'members.idExpiry':'An expired document is a KYC blocker.',
+  'members.idMethod':'In person, certified copy or electronic verification. "Not met face to face" also adds an AML point under Onboarding.',
+  'members.idCheckedDate':'When the document was seen or verified.',
+  'members.poaType':'Proof of address is required and must be dated within 3 months of the valuation date.',
+  'members.pep':'Any politically exposed person makes the AML rating High: EDD, verified source of wealth and senior approval are required.',
+  'members.pepDetail':'The public function, country and any family or close-associate link.',
+  'members.sanctions':'A confirmed match prohibits onboarding. Screening must be dated within 3 months.',
+  'members.adverseMedia':'A confirmed finding adds AML points and needs EDD findings recorded.',
+  'members.sow':'Source of wealth: how the overall wealth was built. Required for every adult; must be verified when the rating is High.',
+  'members.sowEvidence':'What was seen: payslips, accounts, sale completion statement, probate.',
+  'members.tins':'Tax identification numbers for each non-UK tax residence. Missing TIN with non-UK residence is a blocker.',
+  'members.crsSelfCert':'The CRS/FATCA self-certification is required before onboarding completes.',
+  'members.employment':'Employed, self-employed, retired and so on. Students and retired people carry no human capital.',
+  'members.occupation':'Recorded for CDD and source-of-wealth plausibility.',
+  'members.sector':'Recorded for CDD. Higher-risk sectors should be reflected in the adviser’s risk assessment.',
+  'members.retireAge':'Earnings are valued up to this age (65 if blank). Later retirement adds human capital.',
+  'members.residence':'UK, non-UK or split. Non-UK residence requires tax IDs and the CRS self-certification.',
+  'members.scottish':'Scottish income tax bands are not modelled; this flags that the Tax view is indicative only for this person.',
+  'members.usPerson':'US persons bring FATCA reporting. Recorded and flagged for the file.',
+  'members.niYears':'Qualifying years for the new State Pension: 35 for the full amount, pro rata from 10.',
+  'members.retTaxRate':'Marginal rate assumed on pension withdrawals, used for the deferred tax on pension pots.',
+  'members.riskTol':'Willingness to take risk, 1 (lowest) to 7, from the firm’s questionnaire. Adjusted by the loss reaction below.',
+  'members.lossReaction':'Sell all: −2 points; sell some: −1; hold: 0; buy more: +1 on the risk tolerance score.',
+  'members.experience':'Knowledge and experience, required for suitability (COBS 9A). Does not change the figures.',
+  'members.capacity':'Adviser’s view of capacity for loss. Low: −1, high: +1 on the ability-to-take-risk score.',
+  'members.esg':'Sustainability preference, recorded for the IPS.',
+  'members.vulnerability':'FCA drivers: health, life events, resilience, capability. Recording one requires support needs; health also requires explicit consent.',
+  'income.owner':'Who earns or receives it. Earnings use that person’s age, retirement age and survival curve.',
+  'income.type':'Employment, bonus, self-employment and dividends are earnings (human capital). Pensions in payment, annuities and benefits are income rights.',
+  'income.label':'Employer or source. Recorded only.',
+  'income.amount':'Gross amount per year in today’s money.',
+  'income.growth':'Real growth per year on top of inflation, compounding over the stream. Blank = 0.',
+  'expenses.label':'Description. Recorded only.',
+  'expenses.cat':'Essential spending counts in the core funded ratio and cash cover. Discretionary, aspirational, education and care count in the full funded ratio only.',
+  'expenses.amount':'Per year in today’s money.',
+  'expenses.inflation':'Own inflation rate for the line (school fees, care). Blank uses CPI from Assumptions.',
+  'expenses.startIn':'Years until the spending starts. Lines starting later than 0 are excluded from today’s essential outgoings.',
+  'goals.label':'Description. Recorded only.',
+  'goals.amount':'One-off amount in today’s money, inflated to the due date and discounted back at the gilt rate.',
+  'goals.inYears':'Years until the money is needed. Sooner goals are discounted less and weigh more.',
+  'goals.priority':'Need, want or wish. Recorded for the IPS; does not change the figures.',
+  'accounts.owner':'Owner for tax and allowance checks. Joint splits equally between the adults.',
+  'accounts.wrapper':'Sets the tax treatment: pensions carry deferred income tax, taxable accounts carry deferred CGT, ISAs carry none. Also drives allowance checks.',
+  'accounts.provider':'Recorded only.',
+  'accounts.value':'Current value. Adds to financial assets.',
+  'accounts.employerContrib':'Counts towards the pension annual allowance check together with your own contributions.',
+  'accounts.reliefMethod':'Relief at source or net pay: changes how contributions are grossed up in the Tax view.',
+  'accounts.eq':'Share in equities. Drives the equity exposure compared with risk tolerance.',
+  'accounts.bd':'Share in bonds.','accounts.cs':'Share in cash. Cash and easy-access accounts count towards months of cover.',
+  'accounts.al':'Share in alternatives (private equity, property funds, hedge funds). Treated as equity-like.',
+  'accounts.fee':'Total ongoing cost, recorded for the costs disclosure. Does not change the figures.',
+  'accounts.liquidity':'Instant, notice or locked. Locked accounts are excluded from cash cover.',
+  'db.owner':'The scheme member. The pension runs on their survival curve.',
+  'db.scheme':'Scheme name. Recorded only.',
+  'db.status':'Active, deferred or in payment. Pensions already in payment should be recorded under Income.',
+  'db.accrued':'Pension per year earned to date, in today’s money.',
+  'db.nra':'Age the pension starts. Payments before this age are not valued.',
+  'db.indexation':'Increase per year applied to the pension in payment and in deferment.',
+  'db.spousePct':'Survivor’s pension as a share of the member’s. Valued for married couples and civil partners.',
+  'db.cetv':'Cash equivalent transfer value, shown for comparison only. The balance sheet uses the economic value.',
+  'property.owner':'Owner for IHT and CGT. Joint splits equally.',
+  'property.type':'Main residence: residence nil-rate band applies and no CGT. Buy-to-let and second homes: deferred CGT on the gain.',
+  'property.label':'Address or name. Recorded only.',
+  'property.value':'Current market value before the household share is applied.',
+  'property.share':'Household’s share of the property, e.g. 50% if owned with someone outside the household.',
+  'property.baseCost':'Purchase cost plus improvements, used for the deferred CGT on investment property.',
+  'other.owner':'Owner for IHT and CGT.','other.type':'Private company shares, partnership capital, collectibles or loans owed to the household.',
+  'other.label':'Description. Recorded only.','other.value':'Current value. Adds to real assets.',
+  'other.baseCost':'Cost for the deferred CGT estimate.',
+  'other.badr':'Business Asset Disposal Relief: the lower CGT rate applies to the gain on disposal.',
+  'other.bpr':'Business Relief: the asset is excluded from the IHT estate.',
+  'liabilities.owner':'Borrower for the per-person balance sheet view.',
+  'liabilities.type':'Mortgage, buy-to-let mortgage, loan, credit card. Recorded for the file.',
+  'liabilities.lender':'Recorded only.','liabilities.balance':'Outstanding balance today. This is the debt on the balance sheet.',
+  'liabilities.rate':'Recorded for the file and reviews.','liabilities.fixedUntil':'Recorded for the file and reviews.',
+  'liabilities.payment':'Monthly payment × 12 is debt service, added to essential outgoings for months of cover.',
+  'liabilities.term':'Recorded for the file.','liabilities.interestOnly':'Recorded for the file: an interest-only loan needs a repayment plan in the review.',
+  'protection.owner':'The life assured. Life cover is compared with this person’s human capital.',
+  'protection.type':'Life cover and family income benefit count towards the protection gap and the estate. Income protection and critical illness are recorded.',
+  'protection.provider':'Recorded only.',
+  'protection.sum':'Sum assured, or the benefit per year for income-type policies.',
+  'protection.inTrust':'Cover not written in trust is paid into the estate and may attract IHT.',
+  'protection.expiryAge':'Recorded for the file and reviews.','protection.premium':'Recorded for the costs summary.',
+  'compliance.serviceType':'Advisory, discretionary or execution-only. Sets the mandate and the documents required.',
+  'compliance.categorisation':'Retail, professional or eligible counterparty under COBS 3. Retail clients get the fullest protections.',
+  'compliance.meeting':'Not met face to face adds 1 AML point and requires stronger identity verification.',
+  'compliance.referral':'Introducer or source of the lead. Recorded for the file.',
+  'compliance.purpose':'Purpose and intended nature of the relationship is a required CDD record (MLR 2017 reg. 28).',
+  'compliance.expectedInvestment':'Expected amount. Large investments add an AML point relative to the source of wealth.',
+  'compliance.fundsCountry':'Country the money is coming from. A high-risk third country makes the rating High.',
+  'compliance.fundsRoute':'Third-party payment adds 2 AML points; a non-UK bank account adds 1.',
+  'compliance.complexStructure':'Trusts, companies or offshore structures add AML points and need beneficial ownership recorded.',
+  'compliance.cashIntensive':'Cash-intensive business or wealth adds AML points.',
+  'compliance.termsDate':'Client agreement signed. A blocker until recorded.',
+  'compliance.feeDate':'Fee agreement signed. A blocker until recorded.',
+  'compliance.costsDate':'Ex-ante costs and charges disclosure (MiFID II). A blocker until recorded.',
+  'compliance.privacyDate':'Privacy notice provided (UK GDPR). A blocker until recorded.',
+  'compliance.marketingConsent':'Recorded for the file. Not required for onboarding.',
+  'compliance.targetMarket':'PROD target market check: the service and products match this client type.',
+  'compliance.suitabilityDate':'Date the suitability report was issued. Required under COBS 9A before advice is acted on.',
+  'compliance.seniorApprovalDate':'Date senior management approved the relationship. Required for PEPs.',
+  'compliance.preparer':'Who prepared the file. Must differ from the reviewer.',
+  'compliance.preparedDate':'Recorded for the audit trail.',
+  'compliance.reviewDate':'Date of the compliance review. The next review is set from this date and the AML rating.',
+  'compliance.outcome':'Approved, approved with conditions or declined. Approval with open blockers shows as "Approved with open issues".',
+  'compliance.reviewNotes':'Reviewer’s notes for the file.',
+  'assumptions.cpi':'Inflates spending and goals, and the default inflation for spending lines.',
+  'assumptions.rf':'Gilt yield used to discount every future cash flow. Higher = lower present values on both sides.',
+  'assumptions.spIndex':'Growth applied to State Pension income (triple lock proxy).',
+  'assumptions.planAge':'Age at which the plan ends. Spending, income rights and the horizon run to this age.',
+  'assumptions.gM':'Modal age at death for men in the Gompertz mortality model. Health and smoking shift it.',
+  'assumptions.gF':'Modal age at death for women in the Gompertz mortality model.',
+  'assumptions.gB':'Dispersion of the mortality curve around the modal age. Larger = flatter survival curve.',
+  'assumptions.pLow':'Discount premium over gilts for very stable earnings (public sector).',
+  'assumptions.pMed':'Discount premium for stable salaried earnings.','assumptions.pHigh':'Discount premium for variable earnings (commission, partnership).',
+  'assumptions.pVhigh':'Discount premium for volatile earnings (founders, freelancers).',
+  'assumptions.hcAfterTax':'Value human capital after income tax and NI (recommended) or gross.',
+  'assumptions.pa':'Income tax personal allowance.','assumptions.brl':'Income above this is taxed at the higher rate.',
+  'assumptions.arl':'Income above this is taxed at the additional rate.','assumptions.paTaper':'Personal allowance reduces by £1 for every £2 above this income.',
+  'assumptions.r1':'Basic rate of income tax.','assumptions.r2':'Higher rate.','assumptions.r3':'Additional rate.',
+  'assumptions.d1':'Dividend tax at the basic rate band.','assumptions.d2':'Dividend tax at the higher rate band.','assumptions.d3':'Dividend tax at the additional rate band.',
+  'assumptions.divAll':'Dividends within this allowance are tax free.','assumptions.psaB':'Personal savings allowance for basic-rate taxpayers.',
+  'assumptions.psaH':'Personal savings allowance for higher-rate taxpayers (nil for additional rate).',
+  'assumptions.srs':'Starting rate band for savings income when other income is low.',
+  'assumptions.ni1':'Employee National Insurance main rate.','assumptions.ni2':'Employee NI rate above the upper earnings limit.',
+  'assumptions.c41':'Class 4 NI main rate for the self-employed.','assumptions.c42':'Class 4 NI rate above the upper limit.',
+  'assumptions.hicbc':'High income child benefit charge starts at this adjusted net income.',
+  'assumptions.isa':'Annual ISA subscription limit, checked against contributions.','assumptions.lisa':'Lifetime ISA limit, within the ISA allowance.',
+  'assumptions.jisa':'Junior ISA limit per child.','assumptions.aa':'Pension annual allowance across all schemes, including employer contributions.',
+  'assumptions.mpaa':'Money Purchase Annual Allowance once pension income has been flexibly accessed.',
+  'assumptions.aaMin':'Minimum tapered annual allowance for the highest earners.',
+  'assumptions.tThresh':'Taper threshold income: below this the annual allowance is not tapered.',
+  'assumptions.tAdj':'Taper adjusted income: the allowance reduces £1 for every £2 above this.',
+  'assumptions.lsa':'Pension lump sum allowance: the tax-free cash limit used in deferred pension tax.',
+  'assumptions.spFull':'Full new State Pension per week, pro-rated by NI qualifying years.',
+  'assumptions.cgtAE':'Capital gains annual exempt amount.','assumptions.cgtL':'CGT rate for basic-rate taxpayers.',
+  'assumptions.cgtH':'CGT rate for higher-rate taxpayers, used for deferred CGT.','assumptions.badrRate':'CGT rate under Business Asset Disposal Relief.',
+  'assumptions.nrb':'IHT nil-rate band per person; doubled for married couples and civil partners.',
+  'assumptions.rnrb':'Residence nil-rate band when a main residence passes to direct descendants.',
+  'assumptions.rnrbTaper':'The residence band reduces £1 for every £2 of estate above this.',
+  'assumptions.ihtRate':'IHT rate on the estate above the available bands.',
+  'assumptions.pensionIHT':'From April 2027 unused pensions are in the estate. Tick to include them in the IHT estimate.'};
+const GROUP_HELP={
+  'Identity':'Personal details and NI number for customer due diligence.',
+  'Contact and address':'Verified residential address. Proof of address must be within 3 months.',
+  'Identity verification':'Photo ID, how it was checked and when. Expired ID is a blocker.',
+  'Screening':'Sanctions, PEP and adverse media results, entered by hand from your screening provider. Must be within 3 months.',
+  'Source of wealth and tax status':'How the wealth was built, the evidence seen, and CRS/FATCA tax residence data.',
+  'Work and retirement':'Employment and retirement age set the human capital calculation.',
+  'Tax and residence':'Residence, NI record and expected retirement tax rate for the Tax view and deferred pension tax.',
+  'Investor profile and suitability':'Willingness and capacity for loss, knowledge and experience, and vulnerability: the suitability record.',
+  'The relationship':'Service, categorisation, how the client was met and where the money comes from. These set the AML score.',
+  'Enhanced due diligence':'Required when the rating is High: EDD findings, verified source of wealth and senior approval.',
+  'Disclosures and consents':'Documents the client must receive or sign before onboarding completes.',
+  'Sign-off':'Four-eyes review: the reviewer must differ from the preparer.',
+  'Economic':'Inflation, discount rate, mortality and horizon that drive every present value.',
+  'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
+  'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
+  'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
+const NAV_HELP={household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+  expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
+  other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
+  compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
+  bs:'Present value of everything owned, earned and committed.',tax:'Income tax, NI and unused allowances per person.',risk:'Ability and willingness to take risk, and the IPS.',checks:'Data gaps and inconsistencies to fix.',guide:'How the calculations and onboarding rules work.'};
+const tipBtn=(label,text,cls='')=>text?`<button type="button" class="tip ${cls}" aria-label="About ${esc(label)}" data-tip="${esc(text)}">i</button>`:'';
 
 /* ---------- form rendering ---------- */
 function ownerOptions(withJoint){let o=withJoint?[['JOINT','Joint (adults equally)']]:[];return o.concat(S.members.map(m=>[m.ref,`${m.ref} · ${m.firstName||''} ${m.lastName||''}`.trim()]))}
@@ -98,7 +290,8 @@ function fieldHTML(col,idx,f,val){
   const vmsg=VALIDATE[f.k]?VALIDATE[f.k](val):'';
   const hint=vmsg?`<span class="hint err" id="${id}-h">${esc(vmsg)}</span>`:f.h?`<span class="hint" id="${id}-h">${esc(f.h)}</span>`:'';
   const aria=(vmsg||f.h?` aria-describedby="${id}-h"`:'')+(vmsg?' aria-invalid="true"':'');
-  if(f.t===YN)return `<div class="f chk"><input type="checkbox" id="${id}" ${data} ${yes(val)?'checked':''}><label for="${id}">${esc(f.l)}</label></div>`;
+  const tip=tipBtn(f.l,FIELD_HELP[`${col}.${f.k}`]||f.h);
+  if(f.t===YN)return `<div class="f chk"><input type="checkbox" id="${id}" ${data} ${yes(val)?'checked':''}><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span></div>`;
   let ctl;
   if(f.t==='sel'||f.t==='member'||f.t==='owner'){const opts=f.t==='sel'?optList(f.o):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
     ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
@@ -106,10 +299,10 @@ function fieldHTML(col,idx,f,val){
   else if(f.t==='date')ctl=`<input type="date" id="${id}" ${data}${aria} value="${esc(val)}">`;
   else if(f.t==='num'||f.t==='pct'||f.t==='int')ctl=`<input type="number" inputmode="decimal" step="${f.t==='int'?1:'any'}" id="${id}" ${data}${aria} value="${esc(val)}">`;
   else ctl=`<input type="text" id="${id}" ${data}${aria} value="${esc(val)}" autocomplete="off">`;
-  return `<div class="f${f.w?' wide':''}"><label for="${id}">${esc(f.l)}</label>${ctl}${hint}</div>`;
+  return `<div class="f${f.w?' wide':''}"><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span>${ctl}${hint}</div>`;
 }
 function fieldsBlock(key,idx,rec){const s=SCHEMA[key];
-  if(s.groups)return s.groups.filter(g=>!(g.adultOnly&&key==='members'&&!isAdult(rec))).map(g=>`<div class="grp"><h4>${esc(g.t)}</h4><div class="fields">${g.fields.map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div></div>`).join('');
+  if(s.groups)return s.groups.filter(g=>!(g.adultOnly&&key==='members'&&!isAdult(rec))).map(g=>`<div class="grp"><h4>${esc(g.t)}${tipBtn(g.t,GROUP_HELP[g.t])}</h4><div class="fields">${g.fields.map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div></div>`).join('');
   return `<div class="fields">${s.fields.map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div>`}
 function summary(key,r){
   const who=r.owner?memberName(r.owner):'';
@@ -417,12 +610,56 @@ async function renderTeam(){
   $('#main').innerHTML=h;
 }
 
+function renderGuide(){
+  const a=S.assumptions;const C=E.compute();const k=C.kpi;
+  const sec=(id,t,body)=>`<div class="panel" id="g-${id}"><h3>${t}</h3>${body}</div>`;
+  const toc=[['flow','Workflow'],['ebs','Economic balance sheet'],['hc','Human capital'],['liab','Liabilities side'],['ratios','Reading the ratios'],['tax','Tax'],['iht','Inheritance tax'],['risk','Risk profile'],['aml','KYC and AML'],['limits','Limits']];
+  let h=`<div class="sec-head"><div><h2>How the model works</h2><p>The framework behind every figure and status in this file, written for analysts and compliance staff. Hover the <span class="tip" aria-hidden="true">i</span> next to any field for how that input is used.</p></div></div>`;
+  h+=`<div class="guide"><div class="toc">${toc.map(([id,t])=>`<a href="#g-${id}">${t}</a>`).join('')}</div>`;
+  h+=sec('flow','Workflow',`<div class="flow"><span>Discovery</span><i>→</i><span>KYC and AML</span><i>→</i><span>Suitability</span><i>→</i><span>Disclosures</span><i>→</i><span>Compliance review</span><i>→</i><span>Decision</span></div>
+    <p>Client data is entered once under <b>Client data</b>. The outputs are recalculated from it on every change: nothing is typed into the balance sheet or the KYC status directly. The onboarding status is the first stage that still has a blocker; once there are none the file is <b>Ready for review</b>, and the reviewer’s outcome sets the decision and the next review date.</p>
+    <p>Every save creates a version and an audit entry (who changed which field, from what, to what). Records are never deleted, in line with the 5-year retention rule in the Money Laundering Regulations.</p>`);
+  h+=sec('ebs','Economic balance sheet (CFA private wealth framework)',`<p>A conventional net worth statement counts only what can be sold today. The economic balance sheet adds the present value of what the household <i>will</i> earn and receive, and of what it has <i>committed</i> to spend, so that the two sides can be compared on the same footing.</p>
+    <div class="formula">Assets      = financial capital + real assets + human capital + pension and income rights<br>Liabilities = debt + PV(spending to plan age) + PV(goals and legacy) + deferred tax<br>Economic net worth = Assets − Liabilities &nbsp;&nbsp;·&nbsp;&nbsp; Funded ratio = Assets ÷ Liabilities</div>
+    <p>All present values use the gilt rate (${a.rf}% in Assumptions) and are in today’s money. Every future amount for a person is multiplied by the probability that they are alive to earn or spend it, so the model needs date of birth, sex, health and smoking for each adult.</p>
+    <p>For this household: assets ${gbpK(C.tot.HH.A)}, liabilities ${gbpK(C.tot.HH.L)}, economic net worth ${gbpK(k.econNW)}. Traditional net worth (market assets less debt) is ${gbpK(k.tradNW)}.</p>`);
+  h+=sec('hc','Human capital',`<p>Human capital is the value today of future earnings. For each earner, each year’s pay to retirement age is grown at its growth rate, reduced to after-tax using the Tax view’s marginal rates, multiplied by the probability of survival to that year, and discounted.</p>
+    <div class="formula">HC = Σ<sub>t</sub> pay<sub>t</sub> × (1 − tax rate) × P(alive at t) ÷ (1 + gilt rate + premium)<sup>t</sup></div>
+    <p>The <b>premium</b> depends on income stability (very stable ${a.pLow}%, stable ${a.pMed}%, variable ${a.pHigh}%, volatile ${a.pVhigh}%). Volatile earnings are worth less today and are treated as more equity-like when the risk view measures total equity exposure, because a founder’s pay already behaves like a share portfolio.</p>
+    <p>Pensions in payment, annuities, State Pension and benefits such as ESA are <b>income rights</b>: the same survival-weighted present value, but discounted at the gilt rate alone because they do not depend on employment.</p>
+    <h4>Mortality</h4><p>Survival follows a Gompertz curve with a modal age at death of ${a.gM} (men) and ${a.gF} (women) and dispersion ${a.gB} years. Smoking takes 6 years off the modal age, impaired health 5, a serious condition 12; excellent health adds 1.5.</p>`);
+  h+=sec('liab','Liabilities side',`<ul><li><b>Debt</b>: outstanding balances as recorded.</li>
+    <li><b>Spending</b>: each line is inflated at its own rate (or CPI, ${a.cpi}%) and discounted at the gilt rate for every year it runs, with payments assumed at the start of each year (the prudent choice). Essential lines are weighted by survival when that option is on.</li>
+    <li><b>Goals and legacy</b>: one-off amounts inflated to their date and discounted back. The legacy target is treated as a goal at second death.</li>
+    <li><b>Deferred tax</b>: income tax on pension pots above the tax-free lump sum at the expected retirement rate; CGT on gains above base cost in taxable accounts and investment property; tax on bond gains.</li></ul>`);
+  h+=sec('ratios','Reading the ratios',`<table><thead><tr><th>Measure</th><th>Meaning</th><th>Reading</th></tr></thead><tbody>
+    <tr><td>Funded ratio</td><td>All economic assets ÷ all liabilities</td><td>≥ 1.2 surplus · 1.0–1.2 tight · &lt; 1.0 shortfall: the plan is not fully funded on these assumptions</td></tr>
+    <tr><td>Core funded ratio</td><td>Assets ÷ (debt + essential spending + deferred tax)</td><td>Whether the non-negotiables are covered even if wants and wishes are dropped</td></tr>
+    <tr><td>Human capital share</td><td>Human capital ÷ economic assets</td><td>High share = the household depends on future earnings; protection and earnings risk matter more than portfolio risk</td></tr>
+    <tr><td>Cash runway</td><td>Liquid cash ÷ monthly essential outgoings and debt service</td><td>Months the household can run without income</td></tr>
+    <tr><td>Equity exposure incl. human capital</td><td>Equity-like assets (portfolio + equity-like earnings) ÷ (portfolio + human capital)</td><td>True risk position, compared with the risk tolerance</td></tr></tbody></table>`);
+  h+=sec('tax','Tax and allowances',`<p>The Tax view runs each adult’s income through 2026/27 rest-of-UK income tax and National Insurance: personal allowance (tapered above £${Number(a.paTaper).toLocaleString('en-GB')}), basic, higher and additional rate bands, separate dividend rates and the dividend allowance, savings allowance and starting rate for savings, employee or Class 4 NI, and the child benefit charge. Pension contributions are grossed up according to the relief method.</p>
+    <p>Allowance checks compare contributions this tax year with the ISA, Junior ISA and pension annual allowances (including the taper for high earners and the MPAA where flagged). The purpose is to spot unused allowances and cliff edges, not to prepare a return.</p>`);
+  h+=sec('iht','Inheritance tax on second death',`<div class="formula">Estate = financial assets (excluding pensions until Apr 2027) + real assets − debt − Business Relief assets − child wrappers + life cover not in trust<br>Bands  = nil-rate band × 2 if married − gifts in last 7 years, plus residence band (capped at the home’s net value, tapered above £${Number(a.rnrbTaper).toLocaleString('en-GB')})<br>IHT    = max(0, Estate − Bands) × ${a.ihtRate}%</div>
+    <p>The estimate assumes everything passes to the surviving spouse first (no tax on first death) and to direct descendants on second death, so the residence band applies only when there are children. Tick <i>Include pensions in estate</i> under Assumptions to see the position from April 2027.</p>`);
+  h+=sec('risk','Risk profile',`<h4>Ability to take risk</h4><p>Scored from the balance sheet, not from opinion: funded status (+2 to −2), time horizon to plan age (+1 to −1), liquidity in months (+1 to −1), earnings stability (+1 to −1), leverage (−1 if debt exceeds half of financial assets) and the adviser’s capacity-for-loss view (+1 to −1). A total of 3 or more is <b>above average</b>, −1 or less <b>below average</b>.</p>
+    <h4>Willingness to take risk</h4><p>Each adult’s risk tolerance (1–7) is adjusted for their stated reaction to a 25% fall (sell all −2, sell some −1, hold 0, buy more +1). The household average of 5 or more is above average; under 3.5 below average.</p>
+    <h4>Overall</h4><p>The lower of ability and willingness, which is the usual regulatory expectation. When the two differ the Compliance section requires a written rationale for the agreed level, and the IPS records both.</p>`);
+  h+=sec('aml','KYC and AML rules',`<h4>Customer due diligence (each adult)</h4><p>Personal details, NI number format, photo ID that has not expired, proof of address and sanctions, PEP and adverse media screening dated within 3 months, PEP status, source of wealth, and CRS/FATCA self-certification with tax IDs for any non-UK residence. Each gap is a blocker at the KYC stage.</p>
+    <h4>AML risk score</h4><table><thead><tr><th>Factor</th><th>Points</th></tr></thead><tbody><tr><td>Politically exposed person, or links to a high-risk third country</td><td>Always High</td></tr><tr><td>Third-party payment of funds</td><td>2</td></tr><tr><td>Confirmed adverse media</td><td>2</td></tr><tr><td>Client not met face to face</td><td>1</td></tr><tr><td>Funds from a non-UK bank account</td><td>1</td></tr><tr><td>Trusts, companies or offshore structures</td><td>1–2</td></tr><tr><td>Cash-intensive business or wealth</td><td>1</td></tr><tr><td>Large expected investment relative to the source of wealth</td><td>1</td></tr></tbody></table>
+    <p>0–1 points is <b>Low</b> (review every 3 years), 2–3 <b>Medium</b> (2 years), 4 or more <b>High</b> (yearly). High requires enhanced due diligence: EDD findings and a verified source of wealth, and for PEPs, named senior management approval. A confirmed sanctions match is <b>Prohibited</b>.</p>
+    <h4>Suitability and disclosures</h4><p>Risk attitude, loss reaction, knowledge and experience, capacity for loss, objectives and the target market check are required. Client agreement, fee agreement, ex-ante costs and the privacy notice are blockers until recorded. The reviewer must differ from the preparer.</p>
+    <p class="note">These rules are a starting framework from MLR 2017, JMLSG guidance, FCA COBS and the Consumer Duty. The firm’s MLRO must adapt them to its own risk assessment before use.</p>`);
+  h+=sec('limits','What the model does not do',`<ul><li>Scottish income tax bands and pension carry-forward are not modelled.</li><li>Screening results are entered by hand; no sanctions, PEP or electronic ID provider is called.</li><li>Investment returns are not projected: the balance sheet values everything at the risk-free rate, which is deliberate for a funding view but means it is not a cash-flow forecast.</li><li>Tax figures are indicative and must be checked against HMRC for the year in question.</li></ul>`);
+  return h+'</div>';
+}
+
 function render(){
   renderNav();renderTopbar();const m=$('#main');
   if(VIEW==='clients')return renderClients();
   if(VIEW==='team')return renderTeam();
   if(VIEW==='audit')return renderAudit();
-  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else m.innerHTML=renderChecks();
+  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
   const server=Store.mode==='server';const inHH=VIEW!=='clients'&&VIEW!=='team';
