@@ -8,7 +8,7 @@
 (function(){
 'use strict';
 const H=window.HWP;
-const {SCHEMA,COLS,SINGLES,YN,ROLES,WGROUP,EXP_CATS,fieldsOf,optList,N,has,yes}=H;
+const {SCHEMA,COLS,SINGLES,YN,ROLES,WGROUP,EXP_CATS,ASSET_CLASSES,ROLLUP,fieldsOf,optList,N,has,yes}=H;
 
 /* ---------- state ---------- */
 let S,E;
@@ -77,6 +77,7 @@ const NAV=[
   ['Client data',[['household'],['members'],['income'],['expenses'],['goals'],['accounts'],['db'],['property'],['other'],['liabilities'],['protection'],['assumptions']]],
   ['Onboarding',[['compliance'],['kyc','KYC and onboarding status'],['audit','Audit trail']]],
   ['Relationship',[['contacts'],['actions'],['complaints'],['reviews','Reviews due']]],
+  ['Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
   ['Outputs',[['bs','Economic balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 function renderNav(){
   if(VIEW==='clients'||VIEW==='team'||VIEW==='diary'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button><button type="button" data-act="diary" aria-current="${VIEW==='diary'}" title="Every review, expiry, action and complaint deadline across all households"><span>Reviews due</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':VIEW==='diary'?'Reviews due across the firm':'Choose a household to open';return}
@@ -87,6 +88,7 @@ function renderNav(){
     if(id==='kyc'){ct=O.blockerCount?O.blockerCount+' open':O.stage;cls=O.blockerCount?'bad':''}
     if(id==='reviews'){const R=E.reviews(O);ct=R.overdue?R.overdue+' overdue':R.soon?R.soon+' due soon':'';cls=R.overdue?'bad':''}
     if(id==='actions'){const n=S.actions.filter(a=>a.status==='Open').length;ct=n?n+' open':''}
+    if(id==='drift'){const MC=E.mandateCheck();ct=MC.status;cls=MC.status==='Incomplete'?'bad':''}
     const st=s&&sec==='Client data'?`<span class="step">${String(++step).padStart(2,'0')}</span>`:'';
     h+=`<button type="button" data-nav="${id}" aria-current="${VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${st}${esc(name)}</span><span class="ct ${cls}">${esc(ct)}</span></button>`}}
   $('#rail').innerHTML=h;
@@ -202,6 +204,12 @@ const FIELD_HELP={
   'protection.sum':'Sum assured, or the benefit per year for income-type policies.',
   'protection.inTrust':'Cover not written in trust is paid into the estate and may attract IHT.',
   'protection.expiryAge':'Recorded for the file and reviews.','protection.premium':'Recorded for the costs summary.',
+  'models.name':'Shown in the mandate\u2019s model list.','models.riskMin':'Lowest risk tolerance (1\u20137) this model suits. The mandate check flags an agreed risk outside the range.','models.riskMax':'Highest risk tolerance this model suits.',
+  'models.benchmark':'Used on the mandate and, from Stage 3, for performance comparison.','models.description':'Who the model is designed for. Shown to advisers when choosing.',
+  'models.ukEq':'Target weight. All eight must add up to 100%.','models.glEq':'Target weight.','models.emEq':'Target weight.','models.gilts':'Target weight.','models.corp':'Target weight.','models.prop':'Target weight.','models.alt':'Target weight.','models.cash':'Target weight.',
+  'mandate.model':'The firm\u2019s model this household follows. Its allocation becomes the target in the mandate check.','mandate.objective':'Recorded for the IPS and the suitability report.',
+  'mandate.incomeNeed':'Natural income the portfolio must produce. Recorded for the IPS; compared with portfolio yield from Stage 3.','mandate.horizon':'Years until the money is needed. Recorded for the IPS.',
+  'mandate.agreedOn':'Until this is set, the mandate check shows the mandate as not yet agreed.','mandate.agreedBy':'Who agreed it on the client side.','mandate.notes':'Anything else agreed.',
   'contacts.date':'When the contact happened.','contacts.type':'Review meeting resets the annual suitability review to 12 months later. Life event creates a reassess-suitability item until the next review meeting.',
   'contacts.with':'Who took part: client names, adviser, paraplanner.','contacts.by':'Who wrote the note.','contacts.summary':'What was discussed and agreed. Part of the permanent file.',
   'actions.created':'When the action was raised.','actions.description':'What will be done.','actions.owner':'Who is responsible.','actions.due':'Open actions with a due date appear in Reviews due; overdue ones are highlighted.',
@@ -281,11 +289,14 @@ const GROUP_HELP={
   'Enhanced due diligence':'Required when the rating is High: EDD findings, verified source of wealth and senior approval.',
   'Disclosures and consents':'Documents the client must receive or sign before onboarding completes.',
   'Sign-off':'Four-eyes review: the reviewer must differ from the preparer.',
+  'Service and model':'Which model the portfolio follows and the risk level agreed. These set the target allocation.',
+  'Objectives and constraints':'What the portfolio is for and what it may not hold. Recorded for the IPS; the drift tolerance drives the mandate check.',
+  'Agreement':'When the mandate was agreed and last reviewed. Sets the annual mandate review date.',
   'Economic':'Inflation, discount rate, mortality and horizon that drive every present value.',
   'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
   'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
   'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
-const NAV_HELP={contacts:'Meetings, calls, review meetings and life events.',actions:'Agreed actions with owners and due dates.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+const NAV_HELP={mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Agreed actions with owners and due dates.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
   expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
   other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
   compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
@@ -303,8 +314,8 @@ function fieldHTML(col,idx,f,val){
   const tip=tipBtn(f.l,FIELD_HELP[`${col}.${f.k}`]||f.h);
   if(f.t===YN)return `<div class="f chk"><input type="checkbox" id="${id}" ${data} ${yes(val)?'checked':''}><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span></div>`;
   let ctl;
-  if(f.t==='sel'||f.t==='member'||f.t==='owner'){const opts=f.t==='sel'?optList(f.o):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
-    ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
+  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?S.models.map(m=>[m.name,m.name]):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
+    ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':f.t==='model'?'Select model…':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
   else if(f.t==='area')ctl=`<textarea id="${id}" ${data}${aria}>${esc(val)}</textarea>`;
   else if(f.t==='date')ctl=`<input type="date" id="${id}" ${data}${aria} value="${esc(val)}">`;
   else if(f.t==='num'||f.t==='pct'||f.t==='int')ctl=`<input type="number" inputmode="decimal" step="${f.t==='int'?1:'any'}" id="${id}" ${data}${aria} value="${esc(val)}">`;
@@ -326,6 +337,7 @@ function summary(key,r){
     case 'property':case 'other':return [r.type,`${who}${r.label?' · '+r.label:''}`,gbp(N(r.value))];
     case 'liabilities':return [r.type,`${who}${r.lender?' · '+r.lender:''}${has(r.rate)?' · '+r.rate+'%':''}`,gbp(N(r.balance))];
     case 'protection':return [r.type,`${who}${yes(r.inTrust)?' · in trust':''}`,gbp(N(r.sum))];
+    case 'models':{const eq=N(r.ukEq)+N(r.glEq)+N(r.emEq);return [r.name||'Model',`risk ${r.riskMin||'?'}–${r.riskMax||'?'}${r.benchmark?' · '+r.benchmark:''}`,`${eq}% equity`]}
     case 'contacts':return [r.type||'Contact',`${fmtDate(r.date)}${r.with?' · '+r.with:''}`,''];
     case 'actions':return [r.description||'Action',`${r.owner||''}${r.due?' · due '+fmtDate(r.due):''}`,r.status||''];
     case 'complaints':return [(r.summary||'Complaint').slice(0,70),`received ${fmtDate(r.received)} · ${r.stage||''}`,r.outcome||''];
@@ -406,12 +418,21 @@ const HOW={
   complaints:{feeds:['Reviews due','Compliance MI'],pts:[
     'DISP requires a final response within 8 weeks of receipt. The deadline appears in Reviews due until the stage is Final response sent, Referred to FOS or Closed.',
     'Outcome and redress are recorded for the complaints register and FCA returns.']},
+  mandate:{feeds:['Mandate check','Reviews due','KYC status'],pts:[
+    'The chosen model portfolio sets the target allocation; the mandate check compares it with the current accounts and flags any class outside the drift tolerance.',
+    'The agreed risk level is checked against the model\u2019s range and against the risk profile. Agreeing a level outside the profile requires a written rationale under Onboarding and compliance.',
+    'Until a model and risk level are recorded, the KYC status carries a suitability item to review.',
+    'The agreement date starts the annual mandate review in Reviews due. Record the last review date to reset it.']},
+  models:{feeds:['Mandate','Mandate check'],pts:[
+    'Each model is a target allocation across the eight asset classes with a risk range and a benchmark. Allocations must add up to 100%; Data checks flags any that do not.',
+    'The five defaults are benchmarked to the ARC Private Client Indices. Edit them to the firm\u2019s own models; changes apply to this household\u2019s file.',
+    'The eight classes roll up to equities, bonds, property and alternatives, and cash for the comparison with accounts.']},
   assumptions:{feeds:['Every output'],pts:[
     'The gilt rate discounts every future cash flow. A higher rate lowers human capital, pension rights and the value of future spending at the same time; the net effect shows in the funded ratio.',
     'CPI inflates spending and goals. The gap between inflation and the gilt rate is what matters.',
     'Mortality ages, dispersion and plan-to age set the survival weights and the horizon.',
     'Tax bands and allowances drive the Tax view and the deferred tax on pensions and gains.']}};
-const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints']);
+const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models']);
 function howHTML(key){const w=HOW[key];if(!w)return '';let open=true;try{open=localStorage.getItem(HOW_LS)!=='0'}catch(e){}
   return `<div class="how"><div class="how-h"><b>How this section is used</b><span class="feeds">${w.feeds.map(f=>`<span class="feed">${esc(f)}</span>`).join('')}</span></div><details id="howDetails"${open?' open':''}><summary>What the inputs change</summary><ul>${w.pts.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></details></div>`}
 document.addEventListener('toggle',e=>{if(e.target.id==='howDetails')try{localStorage.setItem(HOW_LS,e.target.open?'1':'0')}catch(x){}},true);
@@ -678,6 +699,20 @@ function renderGuide(){
 }
 
 const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
+function renderDrift(){
+  const M=E.mandateCheck();const S_=S.mandate;const scls={'In line':'good',Drift:'warn',Incomplete:'bad'}[M.status];
+  let h=`<div class="sec-head"><div><h2>Mandate check</h2><p>The agreed mandate against the risk profile and the current accounts. Targets come from the model portfolio; the current split is value-weighted across every account under Savings and investments.</p></div><div class="addrow"><button class="btn" type="button" data-nav="mandate">Edit mandate</button></div></div>`+bannerHTML(false);
+  h+=`<div class="kpis">
+    <div class="kpi"><div class="k">Model portfolio</div><div class="v t">${esc(M.model?M.model.name:'None chosen')}</div><div class="s">${esc(M.benchmark||'')}</div></div>
+    <div class="kpi"><div class="k">Agreed risk level</div><div class="v">${M.risk||'–'}</div><div class="s">Profile: ${esc(M.profile)} (${M.suggested[0]}–${M.suggested[1]})${M.model?` · model ${M.model.riskMin}–${M.model.riskMax}`:''}</div></div>
+    <div class="kpi"><div class="k">Status</div><div class="v t">${M.status}</div><div class="s"><span class="pill ${scls}">${M.breaches?M.breaches+' class'+(M.breaches>1?'es':'')+' outside ±'+M.tol+' pts':M.model?'within ±'+M.tol+' pts':'set up the mandate'}</span></div></div>
+    <div class="kpi"><div class="k">Next mandate review</div><div class="v t">${M.nextReview?fmtDate(M.nextReview):'–'}</div><div class="s">${S_.basis||''}${S_.rebalance?' · rebalance '+S_.rebalance.toLowerCase():''}</div></div></div>`;
+  if(M.issues.length)h+=`<div class="panel"><h3>To resolve</h3><ul class="list">${M.issues.map(i=>`<li><span class="pill ${i.lvl==='bad'?'bad':'warn'}">${i.lvl==='bad'?'Blocker':'Review'}</span><span class="grow">${esc(i.msg)}</span>${i.where&&i.where!=='drift'?`<button class="btn" type="button" data-nav="${esc(i.where)}">Open</button>`:''}</li>`).join('')}</ul></div>`;
+  h+=`<div class="two"><div class="panel"><h3>Allocation against target</h3>${M.invested?`<div class="tbl-wrap"><table><thead><tr><th>Asset class</th><th class="n">Target</th><th class="n">Current</th><th class="n">Difference</th><th></th></tr></thead><tbody>${M.classes.map(c=>`<tr><td>${esc(c.l)}</td><td class="n">${c.target.toFixed(0)}%</td><td class="n">${c.current.toFixed(0)}%</td><td class="n">${c.diff>0?'+':''}${c.diff.toFixed(1)}</td><td>${M.model?`<span class="pill ${c.breach?'warn':'good'}">${c.breach?'drift':'ok'}</span>`:''}</td></tr>`).join('')}</tbody></table></div><p class="note">Invested value ${gbp(M.invested)}. Equities include the equity share of alternatives only where accounts record it as equity. Holding-level drift across the eight classes arrives with portfolio tracking.</p>`:'<p class="muted">No account values recorded.</p>'}</div>
+    <div class="panel"><h3>${esc(M.model?M.model.name+' target':'Model target')}</h3>${M.model?`<div class="tbl-wrap"><table><thead><tr><th>Asset class</th><th class="n">Target</th></tr></thead><tbody>${M.target8.map(t=>`<tr><td>${esc(t.l)}</td><td class="n">${t.pct}%</td></tr>`).join('')}<tr class="t"><td>Total</td><td class="n">${M.target8.reduce((a,t)=>a+t.pct,0)}%</td></tr></tbody></table></div>${M.model.description?`<p class="note">${esc(M.model.description)}</p>`:''}`:'<p class="muted">Choose a model portfolio under Mandate.</p>'}</div></div>`;
+  h+=`<div class="panel"><h3>Objectives and constraints</h3><p><b>Objective:</b> ${esc(S_.objective||'–')}${has(S_.incomeNeed)?` · <b>Income required:</b> ${gbp(N(S_.incomeNeed))} a year`:''}${has(S_.horizon)?` · <b>Horizon:</b> ${S_.horizon} years`:''}</p><p><b>Restrictions:</b> ${esc(S_.restrictions||'None recorded')}</p><p class="muted">${S_.agreedOn?`Agreed ${fmtDate(S_.agreedOn)}${S_.agreedBy?' by '+esc(S_.agreedBy):''}.`:'Not yet agreed with the client.'}${S_.reviewedOn?` Last reviewed ${fmtDate(S_.reviewedOn)}.`:''}</p></div>`;
+  return h;
+}
 function renderReviews(){
   const R=E.reviews();
   let h=`<div class="sec-head"><div><h2>Reviews due</h2><p>Every dated obligation for this household: the annual suitability review, the KYC refresh, document expiries, open actions, life events and complaint deadlines. Worked out from the file; nothing is entered here.</p></div></div>`+bannerHTML(false);
@@ -704,7 +739,7 @@ function render(){
   if(VIEW==='team')return renderTeam();
   if(VIEW==='diary')return renderDiary();
   if(VIEW==='audit')return renderAudit();
-  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else m.innerHTML=renderChecks();
+  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
   const server=Store.mode==='server';const inHH=!['clients','team','diary'].includes(VIEW);
@@ -795,9 +830,9 @@ function outVal(f,v){if(f.t===YN)return yes(v)?'Yes':'No';if(f.t==='sel'){const 
 async function buildWorkbook(withData){
   const XLSX=await loadXLSX();const wb=XLSX.utils.book_new();
   const readme=[['Household Wealth Profiler: data template'],['One sheet per data type. Keep the sheet names and the header row. Each row is one record.'],['Link records to people with the Reference code from the Members sheet (P1, P2, C1…). Use JOINT for jointly owned items.'],['Percent columns take numbers such as 2.5 for 2.5%. Yes/No columns take Yes or No. Dates use YYYY-MM-DD.'],[],['Sheet','Column','Type','Allowed values / guidance']];
-  for(const key of ['household','compliance',...COLS,'assumptions'])for(const f of fieldsOf(SCHEMA[key]))readme.push([SCHEMA[key].sheet,f.l,{text:'Text',num:'Number',pct:'Percent',int:'Whole number',date:'Date',sel:'List',bool:'Yes / No',area:'Text',owner:'Person ref or JOINT',member:'Person ref'}[f.t],(f.t==='sel'?optList(f.o).map(o=>o[1]).join(' | '):'')+(f.h?(f.t==='sel'?' — ':'')+f.h:'')]);
+  for(const key of ['household','mandate','compliance',...COLS,'assumptions'])for(const f of fieldsOf(SCHEMA[key]))readme.push([SCHEMA[key].sheet,f.l,{text:'Text',num:'Number',pct:'Percent',int:'Whole number',date:'Date',sel:'List',bool:'Yes / No',area:'Text',owner:'Person ref or JOINT',member:'Person ref'}[f.t],(f.t==='sel'?optList(f.o).map(o=>o[1]).join(' | '):'')+(f.h?(f.t==='sel'?' — ':'')+f.h:'')]);
   const rws=XLSX.utils.aoa_to_sheet(readme);rws['!cols']=[{wch:16},{wch:40},{wch:18},{wch:90}];XLSX.utils.book_append_sheet(wb,rws,'README');
-  for(const key of ['household','compliance']){const fs=fieldsOf(SCHEMA[key]);const ws=XLSX.utils.aoa_to_sheet([['Field','Value'],...fs.map(f=>[f.l,withData?outVal(f,S[key][f.k]):''])]);ws['!cols']=[{wch:44},{wch:50}];XLSX.utils.book_append_sheet(wb,ws,SCHEMA[key].sheet)}
+  for(const key of ['household','mandate','compliance']){const fs=fieldsOf(SCHEMA[key]);const ws=XLSX.utils.aoa_to_sheet([['Field','Value'],...fs.map(f=>[f.l,withData?outVal(f,S[key][f.k]):''])]);ws['!cols']=[{wch:44},{wch:50}];XLSX.utils.book_append_sheet(wb,ws,SCHEMA[key].sheet)}
   for(const key of COLS){const fs=fieldsOf(SCHEMA[key]);const aoa=[fs.map(f=>f.l)];if(withData)S[key].forEach(r=>aoa.push(fs.map(f=>outVal(f,r[f.k]))));const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=fs.map(f=>({wch:Math.max(12,Math.min(30,f.l.length+2))}));XLSX.utils.book_append_sheet(wb,ws,SCHEMA[key].sheet)}
   {const fs=fieldsOf(SCHEMA.assumptions);const src=withData?S.assumptions:H.defaults('assumptions');const ws=XLSX.utils.aoa_to_sheet([['Field','Value'],...fs.map(f=>[f.l,outVal(f,src[f.k])])]);ws['!cols']=[{wch:40},{wch:14}];XLSX.utils.book_append_sheet(wb,ws,'Assumptions')}
   if(withData){const C=E.compute();const gl=Object.fromEntries([...GROUPS_A,...GROUPS_L]);const aoa=[['Side','Group','Line',...C.views.map(v=>v==='HH'?'Household':memberName(v))]];

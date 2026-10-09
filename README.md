@@ -189,6 +189,18 @@ the client list:
 - KYC and AML refresh on the risk-rating cycle; photo ID expiry; proof of address and screening within 3 months.
 - Open actions by due date; a life event recorded after the last review; complaint final responses within 8 weeks.
 
+## Mandate
+
+Each file carries the firm's **model portfolios** (five risk-rated defaults benchmarked to the
+ARC Private Client Indices, editable) across eight asset classes: UK, global developed and
+emerging equity, gilts and index-linked, corporate bonds, property, alternatives, cash. The
+**Mandate** records the model, agreed risk level (1–7), basis (advisory or discretionary),
+objective, income need, horizon, restrictions, rebalancing rule and drift tolerance, and when it
+was agreed and last reviewed. **Mandate check** compares the agreed risk with the model's range
+and the risk profile (a level outside the profile needs a written rationale), and the model's
+target with the value-weighted split of the accounts, flagging any class outside the tolerance.
+The agreement date starts an annual mandate review in Reviews due.
+
 ## Calculations
 
 - Income tax and NI use 2026/27 rest-of-UK bands, editable under Assumptions. Check them against HMRC before relying on them. Scottish bands and pension carry forward are not modelled.

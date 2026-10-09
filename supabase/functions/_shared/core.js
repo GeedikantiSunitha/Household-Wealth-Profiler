@@ -16,6 +16,9 @@
    the Excel template, import, export and the audit trail.
    ========================================================= */
 const YN = 'bool';
+/* Eight UK asset classes for mandates and holdings; each rolls up to the four the balance sheet uses */
+const ASSET_CLASSES=[['ukEq','UK equity','eq'],['glEq','Global developed equity','eq'],['emEq','Emerging market equity','eq'],['gilts','Gilts and index-linked','bd'],['corp','Corporate bonds','bd'],['prop','Property','al'],['alt','Alternatives','al'],['cash','Cash','cs']];
+const ROLLUP=[['eq','Equities'],['bd','Bonds'],['al','Property and alternatives'],['cs','Cash']];
 const ROLES = [['primary','Primary client'],['partner','Spouse / partner'],['child','Child'],['dependant','Other dependant']];
 const INCOME_TYPES = ['Employment salary','Bonus / commission','Self-employment profit','Director dividends','Rental profit','State Pension (in payment)','DB pension (in payment)','Annuity','ESA (Employment and Support Allowance)','Other state benefits','Trust distribution','Maintenance received','Other income'];
 const HC_TYPES = ['Employment salary','Bonus / commission','Self-employment profit','Director dividends'];
@@ -226,6 +229,36 @@ const SCHEMA = {
     {k:'closedOn',l:'Closed on',t:'date'},
     {k:'notes',l:'Handling notes',t:'area',w:1},
   ]},
+  models:{title:'Model portfolios',sheet:'Models',item:'model portfolio',desc:"The firm's risk-rated model portfolios. Each household's mandate points at one. Allocations must add up to 100%.",fields:[
+    {k:'name',l:'Name',t:'text'},
+    {k:'riskMin',l:'Risk level from',t:'int',h:'Lowest risk tolerance (1–7) this model suits'},
+    {k:'riskMax',l:'Risk level to',t:'int'},
+    {k:'benchmark',l:'Benchmark',t:'text',h:'e.g. ARC Sterling Balanced Asset PCI, or a composite'},
+    ...ASSET_CLASSES.map(([k,l])=>({k,l:l+' %',t:'pct'})),
+    {k:'description',l:'Who it is for',t:'text',w:1},
+  ]},
+  mandate:{single:true,title:'Mandate',sheet:'Mandate',desc:'The investment mandate agreed with the client: the model portfolio and risk level, objectives and constraints, and when it was agreed and last reviewed.',groups:[
+    {t:'Service and model',fields:[
+      {k:'basis',l:'Management basis',t:'sel',o:['Advisory','Discretionary'],d:'Advisory',h:'Discretionary: the firm trades without consulting the client within this mandate. Advisory: each recommendation is agreed first.'},
+      {k:'model',l:'Model portfolio',t:'model'},
+      {k:'agreedRisk',l:'Agreed risk level (1–7)',t:'int',h:'Normally the overall risk tolerance from the risk profile. Record the rationale under Onboarding and compliance if it differs.'},
+      {k:'benchmark',l:'Benchmark',t:'text',h:"Blank uses the model's benchmark"},
+    ]},
+    {t:'Objectives and constraints',fields:[
+      {k:'objective',l:'Primary objective',t:'sel',o:['Growth','Balanced growth and income','Income','Capital preservation'],d:'Growth'},
+      {k:'incomeNeed',l:'Natural income required £ per year',t:'num'},
+      {k:'horizon',l:'Time horizon (years)',t:'int'},
+      {k:'restrictions',l:'Restrictions and exclusions',t:'area',w:1,h:'e.g. no tobacco or controversial weapons; no single holding above 10%; retain the employer shares'},
+      {k:'rebalance',l:'Rebalancing',t:'sel',o:['On drift','Quarterly','Half-yearly','Annually'],d:'On drift'},
+      {k:'driftTol',l:'Drift tolerance (percentage points)',t:'num',d:5,h:'An asset class this far from its target is flagged'},
+    ]},
+    {t:'Agreement',fields:[
+      {k:'agreedOn',l:'Agreed with the client on',t:'date'},
+      {k:'agreedBy',l:'Agreed by (client)',t:'text'},
+      {k:'reviewedOn',l:'Mandate last reviewed',t:'date',h:'The mandate is reviewed at least annually'},
+      {k:'notes',l:'Notes',t:'area',w:1},
+    ]},
+  ]},
   compliance:{single:true,title:'Onboarding and compliance',sheet:'Compliance',desc:'The relationship, disclosures, enhanced due diligence and the four-eyes sign-off. Identity and screening for each adult are recorded under People.',groups:[
     {t:'The relationship',fields:[
       {k:'serviceType',l:'Service',t:'sel',o:['Ongoing advice','Discretionary management','One-off financial plan'],d:'Ongoing advice'},
@@ -286,8 +319,16 @@ const SCHEMA = {
       {k:'pensionIHT',l:'Include pensions in estate (from Apr 2027)',t:YN,d:true}]}
   ]}
 };
-const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints'];
-const SINGLES = ['household','compliance','assumptions'];
+const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models'];
+const SINGLES = ['household','mandate','compliance','assumptions'];
+/* Default model portfolios: five risk-rated models benchmarked to the ARC Private Client Indices. Firms edit these. */
+const DEFAULT_MODELS=[
+  {name:'Defensive',riskMin:1,riskMax:2,benchmark:'ARC Sterling Cautious PCI',ukEq:8,glEq:12,emEq:0,gilts:35,corp:25,prop:5,alt:5,cash:10,description:'Capital preservation with modest growth; short horizons or low capacity for loss'},
+  {name:'Cautious',riskMin:3,riskMax:3,benchmark:'ARC Sterling Cautious PCI',ukEq:12,glEq:23,emEq:3,gilts:25,corp:20,prop:5,alt:7,cash:5,description:'Growth ahead of inflation with limited drawdowns'},
+  {name:'Balanced',riskMin:4,riskMax:4,benchmark:'ARC Sterling Balanced Asset PCI',ukEq:18,glEq:32,emEq:6,gilts:15,corp:15,prop:5,alt:7,cash:2,description:'Long-term growth with a meaningful bond cushion'},
+  {name:'Growth',riskMin:5,riskMax:6,benchmark:'ARC Sterling Steady Growth PCI',ukEq:22,glEq:43,emEq:10,gilts:7,corp:8,prop:4,alt:5,cash:1,description:'Equity-led growth for long horizons and strong capacity for loss'},
+  {name:'Adventurous',riskMin:7,riskMax:7,benchmark:'ARC Sterling Equity Risk PCI',ukEq:25,glEq:52,emEq:15,gilts:0,corp:2,prop:3,alt:3,cash:0,description:'Near-full equity exposure; accepts large falls'}];
+function defaultModels(){return DEFAULT_MODELS.map(m=>Object.assign(defaults('models'),m))}
 const fieldsOf = s => s.groups ? s.groups.flatMap(g=>g.fields) : s.fields;
 
 /* =========================================================
@@ -295,12 +336,13 @@ const fieldsOf = s => s.groups ? s.groups.flatMap(g=>g.fields) : s.fields;
    ========================================================= */
 function today(){return new Date().toISOString().slice(0,10)}
 function defaults(key){const o={};for(const f of fieldsOf(SCHEMA[key])){if(f.d!==undefined)o[f.k]=typeof f.d==='function'?f.d():f.d;else o[f.k]=f.t===YN?false:'';}return o}
-function blank(){const s={isSample:false};for(const k of SINGLES)s[k]=defaults(k);for(const c of COLS)s[c]=[];return s}
+function blank(){const s={isSample:false};for(const k of SINGLES)s[k]=defaults(k);for(const c of COLS)s[c]=[];s.models=defaultModels();return s}
 function mk(key,o){return Object.assign(defaults(key),o)}
 function normalise(s){
   s=s&&typeof s==='object'?s:{};const out=blank();out.isSample=!!s.isSample;
   for(const k of SINGLES)out[k]=Object.assign(defaults(k),pick(s[k],k));
   for(const c of COLS)out[c]=(Array.isArray(s[c])?s[c]:[]).map(r=>Object.assign(defaults(c),pick(r,c)));
+  if(!Array.isArray(s.models))out.models=defaultModels(); // files saved before model portfolios existed
   if(Array.isArray(s.audit))out.audit=s.audit.slice(-2000);
   return out;
 }
@@ -344,6 +386,7 @@ function sample(){
     mk('goals',{label:'University, Arjun',amount:45000,inYears:2,priority:'need'}),
     mk('goals',{label:'University, Maya',amount:45000,inYears:7,priority:'need'}),
     mk('goals',{label:'House deposits for children',amount:100000,inYears:12,priority:'want'})];
+  Object.assign(s.mandate,{basis:'Advisory',model:'Balanced',agreedRisk:4,objective:'Balanced growth and income',horizon:20,restrictions:'No tobacco. Keep the LLP capital account outside the managed portfolio.',rebalance:'On drift',driftTol:5,agreedOn:addDays(today(),-9),agreedBy:'James and Priya Harrington'});
   s.contacts=[
     mk('contacts',{date:addDays(today(),-9),type:'Meeting',with:'James and Priya Harrington',by:'Sam Adviser',summary:'Discovery meeting at the office. Walked through objectives, the LLP income and the plan for the Leeds flat.'})];
   s.actions=[
@@ -621,6 +664,31 @@ function riskProfile(C){
   return {f,abilityScore,ability,willingness,overall,willAvg,will};
 }
 
+/* Mandate: target allocation from the chosen model, current allocation from the accounts, drift and consistency */
+function mandateCheck(C){
+  C=C||compute();const R=riskProfile(C);const M=S.mandate;const model=S.models.find(x=>x.name===M.model)||null;
+  const target8=ASSET_CLASSES.map(([k,l,g])=>({k,l,g,pct:model?N(model[k]):0}));
+  const roll={eq:0,bd:0,al:0,cs:0};for(const t of target8)roll[t.g]+=t.pct;
+  const inv=S.accounts.filter(a=>N(a.value)>0);const invested=inv.reduce((s,a)=>s+N(a.value),0);const cur={eq:0,bd:0,al:0,cs:0};
+  for(const a of inv){const v=N(a.value);cur.eq+=v*N(a.eq)/100;cur.bd+=v*N(a.bd)/100;cur.al+=v*N(a.al)/100;cur.cs+=v*N(a.cs)/100}
+  for(const k in cur)cur[k]=invested?cur[k]/invested*100:0;
+  const tol=has(M.driftTol)?N(M.driftTol):5;
+  const classes=ROLLUP.map(([k,l])=>({k,l,target:roll[k],current:cur[k],diff:cur[k]-roll[k],breach:!!model&&invested>0&&Math.abs(cur[k]-roll[k])>tol}));
+  const breaches=classes.filter(c=>c.breach).length;
+  const suggested={'Below average':[1,3],'Average':[3,5],'Above average':[5,7]}[R.overall]||[1,7];
+  const risk=N(M.agreedRisk);const issues=[];
+  if(!model)issues.push({lvl:'bad',msg:'No model portfolio selected',where:'mandate'});
+  if(!risk)issues.push({lvl:'bad',msg:'Agreed risk level not recorded',where:'mandate'});
+  if(model){const sum=target8.reduce((s,t)=>s+t.pct,0);if(Math.abs(sum-100)>0.5)issues.push({lvl:'bad',msg:`${model.name} allocation adds up to ${+sum.toFixed(1)}%, not 100%`,where:'models'})}
+  if(model&&risk&&(risk<N(model.riskMin)||risk>N(model.riskMax)))issues.push({lvl:'bad',msg:`Agreed risk ${risk} is outside the ${model.name} range ${model.riskMin}–${model.riskMax}`,where:'mandate'});
+  if(risk&&(risk<suggested[0]||risk>suggested[1])&&!has(S.compliance.riskNote))issues.push({lvl:'warn',msg:`Agreed risk ${risk} is outside the ${R.overall.toLowerCase()} profile range ${suggested[0]}–${suggested[1]}: record the rationale under Onboarding and compliance`,where:'compliance'});
+  if(!M.agreedOn)issues.push({lvl:'warn',msg:'Mandate not yet agreed with the client: no agreement date',where:'mandate'});
+  if(breaches)issues.push({lvl:'warn',msg:`${breaches} asset class${breaches>1?'es are':' is'} more than ${tol} points from target`,where:'drift'});
+  const base=M.reviewedOn||M.agreedOn;const nextReview=base?addYears(base,1):'';
+  const status=issues.some(i=>i.lvl==='bad')?'Incomplete':breaches?'Drift':'In line';
+  return {model,target8,classes,tol,breaches,suggested,risk,issues,nextReview,invested,status,benchmark:M.benchmark||(model?model.benchmark:''),profile:R.overall};
+}
+
 /* Review diary: every dated obligation for this household, soonest first.
    Annual suitability review (COBS 9A / Consumer Duty): 12 months after approval or the last review meeting.
    KYC refresh on the AML cycle; ID expiry; proof of address and screening within 3 months;
@@ -636,6 +704,7 @@ function reviews(O){
     if(m.idExpiry)add('Photo ID expires',m.idExpiry,nm,'members',m.idType||'');
     if(m.poaDate)add('Proof of address refresh',addMonths(m.poaDate,3),nm,'members','Must be dated within 3 months');
     if(m.screenDate)add('Screening refresh',addMonths(m.screenDate,3),nm,'members','Sanctions, PEP and adverse media within 3 months')}
+  {const b=S.mandate.reviewedOn||S.mandate.agreedOn;if(b)add('Mandate review',addYears(b,1),'','mandate','Annual review of the agreed mandate')}
   for(const a of S.actions)if(a.status==='Open'&&a.due)add('Action: '+(a.description||''),a.due,a.owner,'actions','');
   for(const e of S.contacts)if(e.type==='Life event'&&e.date&&(!lastReview||e.date>lastReview))add('Reassess suitability after life event',e.date,e.with,'contacts',e.summary||'');
   for(const k of S.complaints)if(k.received&&!['Final response sent','Referred to FOS','Closed'].includes(k.stage))add('Complaint: final response due',addDays(k.received,56),'','complaints',(k.summary||'').slice(0,100));
@@ -647,6 +716,7 @@ function reviews(O){
 function checks(){
   const out=[];const push=(lvl,msg,where)=>out.push({lvl,msg,where});
   if(!S.members.length)push('bad','No people recorded.','members');
+  for(const m of S.models){const sum=ASSET_CLASSES.reduce((t,[k])=>t+N(m[k]),0);if(Math.abs(sum-100)>0.5)push('bad',`Model portfolio ${m.name||'(unnamed)'} adds up to ${+sum.toFixed(1)}%, not 100%.`,'models')}
   const refs=S.members.map(m=>m.ref);
   if(new Set(refs).size!==refs.length)push('bad','Two people share the same reference code.','members');
   if(!S.members.some(m=>m.role==='primary'))push('warn','No primary client is marked.','members');
@@ -778,6 +848,7 @@ function onboarding(C){
   if(!has(c.purpose))add('kyc','warn','Record the purpose and intended nature of the relationship','','compliance');
   // Suitability (household)
   if(!has(S.household.objectives))add('suitability','bad',"Record the client's objectives",'','household');
+  if(!S.mandate.model||!N(S.mandate.agreedRisk))add('suitability','warn','Mandate: choose a model portfolio and record the agreed risk level','','mandate');
   if(R.ability!==R.willingness&&!has(c.riskNote))add('suitability','bad',`Willingness (${R.willingness.toLowerCase()}) differs from ability (${R.ability.toLowerCase()}): record the rationale for the agreed risk level`,'','compliance');
   if(R.will.length>1&&Math.max(...R.will)-Math.min(...R.will)>=2&&!has(c.riskNote))add('suitability','warn','Partners have different risk attitudes: explain how this is reflected','','compliance');
   if(c.categorisation!=='retail')add('suitability','warn','Professional categorisation: keep the assessment and the client\'s written request on file','','compliance');
@@ -819,7 +890,7 @@ function onboarding(C){
     blockerCount:items.filter(x=>x.lvl==='bad').length,warnCount:items.filter(x=>x.lvl==='warn').length,risk:R};
 }
 
-return {A,compute,memberTax,riskProfile,checks,onboarding,reviews,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
+return {A,compute,memberTax,riskProfile,checks,onboarding,reviews,mandateCheck,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
 }
 
 function fieldLabel(key,k){const f=fieldsOf(SCHEMA[key]).find(x=>x.k===k);return f?f.l:k}
@@ -835,7 +906,7 @@ function diff(before,after){const a=flatten(before||blank()),b=flatten(after);co
   for(const c of COLS){const n=cnt(c);if(n.a!==n.b)ch.push({field:`${c}.count`,from:n.b,to:n.a})}
   return ch}
 
-return {SCHEMA,COLS,SINGLES,YN,ROLES,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
+return {SCHEMA,COLS,SINGLES,YN,ROLES,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
   fieldsOf,fieldLabel,defaults,blank,normalise,sample,bind,coerce,optList,today,N,has,yes,
   validNino,validPostcode,validEmail,parseDate,addYears,addMonths,addDays,flatten,diff,normKey};
 });
