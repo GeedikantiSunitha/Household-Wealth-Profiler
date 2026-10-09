@@ -105,6 +105,7 @@ test('create, open, save, version conflict and audit trail', async () => {
   assert.equal(list.length, 1);
   assert.equal(list[0].name, H.sample().household.name);
   assert.equal(list[0].stage, H.bind(H.sample()).onboarding().stage);
+  assert.equal(list[0].due, H.bind(H.sample()).reviews().nextDue); assert.equal(typeof list[0].overdue, 'number');
 
   const rec = (await call('GET', '/households/' + id, { token: 'chris' })).body;
   rec.state.household.reference = 'ALD-0042';

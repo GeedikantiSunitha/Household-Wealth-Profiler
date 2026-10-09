@@ -178,6 +178,17 @@ review and adapt them to the firm's own risk assessment before use.** Screening
 results are entered by hand; the app does not call a sanctions, PEP or electronic ID
 provider.
 
+## Relationship management
+
+After onboarding, the **Relationship** section holds the contact log (meetings, calls, review
+meetings, life events), agreed actions with owners and due dates, and complaints handled under
+DISP. **Reviews due** is worked out from the file for each household, and across the firm from
+the client list:
+
+- Annual suitability review: 12 months after approval or the last review meeting (COBS 9A, Consumer Duty).
+- KYC and AML refresh on the risk-rating cycle; photo ID expiry; proof of address and screening within 3 months.
+- Open actions by due date; a life event recorded after the last review; complaint final responses within 8 weeks.
+
 ## Calculations
 
 - Income tax and NI use 2026/27 rest-of-UK bands, editable under Assumptions. Check them against HMRC before relying on them. Scottish bands and pension carry forward are not modelled.

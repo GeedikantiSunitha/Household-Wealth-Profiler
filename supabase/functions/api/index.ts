@@ -16,7 +16,7 @@ const db = {
     return m && { ...m, firm_name: m.firms.name, firm_status: m.firms.status, seats: m.firms.seats };
   },
   listHouseholds: async (firm: string) => must(await sb.from('households')
-    .select('id, name, reference, stage, rating, next_review, blockers, version, updated_at, updated_by')
+    .select('id, name, reference, stage, rating, next_review, blockers, review_due, review_overdue, version, updated_at, updated_by')
     .eq('firm_id', firm).order('updated_at', { ascending: false }).limit(10000)),
   getHousehold: async (id: string, firm: string) => must(await sb.from('households').select('*').eq('id', id).eq('firm_id', firm).maybeSingle()),
   audit: async (id: string, firm: string, limit: number) => must(await sb.from('audit_log').select('*')

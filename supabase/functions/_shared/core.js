@@ -202,6 +202,30 @@ const SCHEMA = {
     {k:'expiryAge',l:'Cover ends at age',t:'int'},
     {k:'premium',l:'Premium £ per month',t:'num'},
   ]},
+  contacts:{title:'Contact log',sheet:'Contacts',item:'contact',desc:'Meetings, calls and letters, review meetings and life events. The relationship history for the file.',fields:[
+    {k:'date',l:'Date',t:'date',d:today},
+    {k:'type',l:'Type',t:'sel',o:['Meeting','Call','Email','Letter','Review meeting','Life event'],d:'Meeting',h:'Review meeting resets the annual review date. Life event prompts a suitability reassessment.'},
+    {k:'with',l:'Who was involved',t:'text'},
+    {k:'by',l:'Recorded by',t:'text'},
+    {k:'summary',l:'Summary',t:'area',w:1},
+  ]},
+  actions:{title:'Actions',sheet:'Actions',item:'action',desc:'Things the firm has agreed to do for this household, with an owner and a due date.',fields:[
+    {k:'created',l:'Raised on',t:'date',d:today},
+    {k:'description',l:'Action',t:'text',w:1},
+    {k:'owner',l:'Owner',t:'text'},
+    {k:'due',l:'Due',t:'date'},
+    {k:'status',l:'Status',t:'sel',o:['Open','Done','Cancelled'],d:'Open'},
+    {k:'doneOn',l:'Completed on',t:'date'},
+  ]},
+  complaints:{title:'Complaints',sheet:'Complaints',item:'complaint',desc:'Complaints from this household, handled under the FCA DISP rules: acknowledge promptly and send a final response within 8 weeks.',fields:[
+    {k:'received',l:'Received on',t:'date',d:today},
+    {k:'summary',l:'Complaint',t:'area',w:1},
+    {k:'stage',l:'Stage',t:'sel',o:['Received','Acknowledged','Investigating','Final response sent','Referred to FOS','Closed'],d:'Received'},
+    {k:'outcome',l:'Outcome',t:'sel',o:['','Upheld','Partly upheld','Not upheld']},
+    {k:'redress',l:'Redress paid £',t:'num'},
+    {k:'closedOn',l:'Closed on',t:'date'},
+    {k:'notes',l:'Handling notes',t:'area',w:1},
+  ]},
   compliance:{single:true,title:'Onboarding and compliance',sheet:'Compliance',desc:'The relationship, disclosures, enhanced due diligence and the four-eyes sign-off. Identity and screening for each adult are recorded under People.',groups:[
     {t:'The relationship',fields:[
       {k:'serviceType',l:'Service',t:'sel',o:['Ongoing advice','Discretionary management','One-off financial plan'],d:'Ongoing advice'},
@@ -262,7 +286,7 @@ const SCHEMA = {
       {k:'pensionIHT',l:'Include pensions in estate (from Apr 2027)',t:YN,d:true}]}
   ]}
 };
-const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection'];
+const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints'];
 const SINGLES = ['household','compliance','assumptions'];
 const fieldsOf = s => s.groups ? s.groups.flatMap(g=>g.fields) : s.fields;
 
@@ -320,6 +344,11 @@ function sample(){
     mk('goals',{label:'University, Arjun',amount:45000,inYears:2,priority:'need'}),
     mk('goals',{label:'University, Maya',amount:45000,inYears:7,priority:'need'}),
     mk('goals',{label:'House deposits for children',amount:100000,inYears:12,priority:'want'})];
+  s.contacts=[
+    mk('contacts',{date:addDays(today(),-9),type:'Meeting',with:'James and Priya Harrington',by:'Sam Adviser',summary:'Discovery meeting at the office. Walked through objectives, the LLP income and the plan for the Leeds flat.'})];
+  s.actions=[
+    mk('actions',{created:addDays(today(),-9),description:'Obtain proof of address for Priya',owner:'Sam Adviser',due:addDays(today(),5)}),
+    mk('actions',{created:addDays(today(),-9),description:'Send ex-ante costs and charges disclosure',owner:'Sam Adviser',due:addDays(today(),-2)})];
   s.accounts=[
     mk('accounts',{owner:'JOINT',wrapper:'Current account',provider:'High-street bank',value:25000,cs:100,yield:0.5}),
     mk('accounts',{owner:'P1',wrapper:'Cash savings',provider:'Easy-access saver',value:60000,cs:100,yield:4}),
@@ -366,6 +395,8 @@ const isAdultRole=m=>m.role==='primary'||m.role==='partner';
 function parseDate(s){if(!s)return null;const d=new Date(String(s).slice(0,10)+'T00:00:00Z');return isNaN(d)?null:d}
 function daysBetween(a,b){return (b-a)/864e5}
 function addYears(s,n){const d=parseDate(s);if(!d)return '';d.setUTCFullYear(d.getUTCFullYear()+n);return d.toISOString().slice(0,10)}
+function addMonths(s,n){const d=parseDate(s);if(!d)return '';d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,10)}
+function addDays(s,n){const d=parseDate(s);if(!d)return '';d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
 
 /* Validators used by onboarding checks */
 function validNino(v){const s=String(v||'').replace(/\s+/g,'').toUpperCase();return /^(?!BG|GB|NK|KN|TN|NT|ZZ)[ABCEGHJ-PRSTW-Z][ABCEGHJ-NPRSTW-Z]\d{6}[A-D]$/.test(s)}
@@ -590,6 +621,28 @@ function riskProfile(C){
   return {f,abilityScore,ability,willingness,overall,willAvg,will};
 }
 
+/* Review diary: every dated obligation for this household, soonest first.
+   Annual suitability review (COBS 9A / Consumer Duty): 12 months after approval or the last review meeting.
+   KYC refresh on the AML cycle; ID expiry; proof of address and screening within 3 months;
+   open actions; life events since the last review; complaint final responses (DISP: 8 weeks). */
+function reviews(O){
+  O=O||onboarding(compute());const t0=parseDate(today());const items=[];
+  const add=(type,due,who,where,detail)=>{const d=parseDate(due);if(!d)return;const days=Math.round((d-t0)/864e5);items.push({type,due:String(due).slice(0,10),who:who||'',where,detail:detail||'',days,status:days<0?'overdue':days<=60?'soon':'later'})};
+  const meetings=S.contacts.filter(x=>x.type==='Review meeting'&&x.date).map(x=>x.date);
+  const lastReview=[O.approvedOn,...meetings].filter(Boolean).sort().pop()||'';
+  if(lastReview)add('Annual suitability review',addYears(lastReview,1),'','contacts',`Last review ${lastReview}. Record a Review meeting in the contact log to reset it.`);
+  if(O.nextReview)add('KYC and AML refresh',O.nextReview,'','compliance',`${O.rating} risk: every ${O.reviewYears} year${O.reviewYears>1?'s':''}`);
+  for(const m of S.members.filter(isAdult)){const nm=memberName(m.ref);
+    if(m.idExpiry)add('Photo ID expires',m.idExpiry,nm,'members',m.idType||'');
+    if(m.poaDate)add('Proof of address refresh',addMonths(m.poaDate,3),nm,'members','Must be dated within 3 months');
+    if(m.screenDate)add('Screening refresh',addMonths(m.screenDate,3),nm,'members','Sanctions, PEP and adverse media within 3 months')}
+  for(const a of S.actions)if(a.status==='Open'&&a.due)add('Action: '+(a.description||''),a.due,a.owner,'actions','');
+  for(const e of S.contacts)if(e.type==='Life event'&&e.date&&(!lastReview||e.date>lastReview))add('Reassess suitability after life event',e.date,e.with,'contacts',e.summary||'');
+  for(const k of S.complaints)if(k.received&&!['Final response sent','Referred to FOS','Closed'].includes(k.stage))add('Complaint: final response due',addDays(k.received,56),'','complaints',(k.summary||'').slice(0,100));
+  items.sort((a,b)=>a.due.localeCompare(b.due)||a.type.localeCompare(b.type));
+  return {items,overdue:items.filter(x=>x.status==='overdue').length,soon:items.filter(x=>x.status==='soon').length,nextDue:items.length?items[0].due:''};
+}
+
 /* Data quality checks */
 function checks(){
   const out=[];const push=(lvl,msg,where)=>out.push({lvl,msg,where});
@@ -766,7 +819,7 @@ function onboarding(C){
     blockerCount:items.filter(x=>x.lvl==='bad').length,warnCount:items.filter(x=>x.lvl==='warn').length,risk:R};
 }
 
-return {A,compute,memberTax,riskProfile,checks,onboarding,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
+return {A,compute,memberTax,riskProfile,checks,onboarding,reviews,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
 }
 
 function fieldLabel(key,k){const f=fieldsOf(SCHEMA[key]).find(x=>x.k===k);return f?f.l:k}
@@ -784,5 +837,5 @@ function diff(before,after){const a=flatten(before||blank()),b=flatten(after);co
 
 return {SCHEMA,COLS,SINGLES,YN,ROLES,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
   fieldsOf,fieldLabel,defaults,blank,normalise,sample,bind,coerce,optList,today,N,has,yes,
-  validNino,validPostcode,validEmail,parseDate,addYears,flatten,diff,normKey};
+  validNino,validPostcode,validEmail,parseDate,addYears,addMonths,addDays,flatten,diff,normKey};
 });

@@ -76,14 +76,17 @@ function logChange(path,from,to){if(Store.mode!=='local')return;S.audit=S.audit|
 const NAV=[
   ['Client data',[['household'],['members'],['income'],['expenses'],['goals'],['accounts'],['db'],['property'],['other'],['liabilities'],['protection'],['assumptions']]],
   ['Onboarding',[['compliance'],['kyc','KYC and onboarding status'],['audit','Audit trail']]],
+  ['Relationship',[['contacts'],['actions'],['complaints'],['reviews','Reviews due']]],
   ['Outputs',[['bs','Economic balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 function renderNav(){
-  if(VIEW==='clients'||VIEW==='team'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':'Choose a household to open';return}
+  if(VIEW==='clients'||VIEW==='team'||VIEW==='diary'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button><button type="button" data-act="diary" aria-current="${VIEW==='diary'}" title="Every review, expiry, action and complaint deadline across all households"><span>Reviews due</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':VIEW==='diary'?'Reviews due across the firm':'Choose a household to open';return}
   let h='';let step=0;const O=E.onboarding();const bad=E.checks().filter(x=>x.lvl==='bad').length;
   for(const [sec,items] of NAV){h+=`<h6>${sec}</h6>`;for(const [id,lbl] of items){const s=SCHEMA[id];const name=lbl||s.title;
     let ct='',cls='';if(s&&!s.single)ct=S[id].length;
     if(id==='checks'&&bad){ct=bad+' to fix';cls='bad'}
     if(id==='kyc'){ct=O.blockerCount?O.blockerCount+' open':O.stage;cls=O.blockerCount?'bad':''}
+    if(id==='reviews'){const R=E.reviews(O);ct=R.overdue?R.overdue+' overdue':R.soon?R.soon+' due soon':'';cls=R.overdue?'bad':''}
+    if(id==='actions'){const n=S.actions.filter(a=>a.status==='Open').length;ct=n?n+' open':''}
     const st=s&&sec==='Client data'?`<span class="step">${String(++step).padStart(2,'0')}</span>`:'';
     h+=`<button type="button" data-nav="${id}" aria-current="${VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${st}${esc(name)}</span><span class="ct ${cls}">${esc(ct)}</span></button>`}}
   $('#rail').innerHTML=h;
@@ -199,6 +202,13 @@ const FIELD_HELP={
   'protection.sum':'Sum assured, or the benefit per year for income-type policies.',
   'protection.inTrust':'Cover not written in trust is paid into the estate and may attract IHT.',
   'protection.expiryAge':'Recorded for the file and reviews.','protection.premium':'Recorded for the costs summary.',
+  'contacts.date':'When the contact happened.','contacts.type':'Review meeting resets the annual suitability review to 12 months later. Life event creates a reassess-suitability item until the next review meeting.',
+  'contacts.with':'Who took part: client names, adviser, paraplanner.','contacts.by':'Who wrote the note.','contacts.summary':'What was discussed and agreed. Part of the permanent file.',
+  'actions.created':'When the action was raised.','actions.description':'What will be done.','actions.owner':'Who is responsible.','actions.due':'Open actions with a due date appear in Reviews due; overdue ones are highlighted.',
+  'actions.status':'Open actions appear in Reviews due. Done and Cancelled are kept for the record.','actions.doneOn':'Date completed.',
+  'complaints.received':'Date the complaint was received. DISP requires a final response within 8 weeks of this date.','complaints.summary':'The complaint in the client\u2019s words.',
+  'complaints.stage':'Received, Acknowledged, Investigating, Final response sent, Referred to FOS or Closed. The 8-week deadline shows in Reviews due until a final response is sent.',
+  'complaints.outcome':'Upheld, partly upheld or not upheld, for the complaints register and FCA returns.','complaints.redress':'Compensation or redress paid.','complaints.closedOn':'Date the complaint was closed.','complaints.notes':'Handling notes: who investigated, evidence, root cause.',
   'compliance.serviceType':'Advisory, discretionary or execution-only. Sets the mandate and the documents required.',
   'compliance.categorisation':'Retail, professional or eligible counterparty under COBS 3. Retail clients get the fullest protections.',
   'compliance.meeting':'Not met face to face adds 1 AML point and requires stronger identity verification.',
@@ -275,7 +285,7 @@ const GROUP_HELP={
   'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
   'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
   'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
-const NAV_HELP={household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+const NAV_HELP={contacts:'Meetings, calls, review meetings and life events.',actions:'Agreed actions with owners and due dates.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
   expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
   other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
   compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
@@ -316,6 +326,9 @@ function summary(key,r){
     case 'property':case 'other':return [r.type,`${who}${r.label?' · '+r.label:''}`,gbp(N(r.value))];
     case 'liabilities':return [r.type,`${who}${r.lender?' · '+r.lender:''}${has(r.rate)?' · '+r.rate+'%':''}`,gbp(N(r.balance))];
     case 'protection':return [r.type,`${who}${yes(r.inTrust)?' · in trust':''}`,gbp(N(r.sum))];
+    case 'contacts':return [r.type||'Contact',`${fmtDate(r.date)}${r.with?' · '+r.with:''}`,''];
+    case 'actions':return [r.description||'Action',`${r.owner||''}${r.due?' · due '+fmtDate(r.due):''}`,r.status||''];
+    case 'complaints':return [(r.summary||'Complaint').slice(0,70),`received ${fmtDate(r.received)} · ${r.stage||''}`,r.outcome||''];
   }return ['','',''];
 }
 function bannerHTML(household=true){let h='';
@@ -383,12 +396,22 @@ const HOW={
     'A PEP or a high-risk third country is always high and requires EDD findings and verified source of wealth. PEPs also need named senior approval.',
     'Client agreement, fee agreement, costs disclosure and privacy notice are blockers until recorded.',
     'The reviewer must be a different person from the preparer. An approval with open blockers shows as Approved with open issues.']},
+  contacts:{feeds:['Reviews due','Audit trail'],pts:[
+    'A Review meeting resets the annual suitability review: the next one falls 12 months later.',
+    'A Life event (marriage, inheritance, redundancy, retirement, a health change) creates a reassess-suitability item that stays until a review meeting is recorded after it.',
+    'Other entries build the contact history for the file. None of them change the figures.']},
+  actions:{feeds:['Reviews due'],pts:[
+    'Open actions with a due date appear in Reviews due, overdue ones first.',
+    'Mark an action Done or Cancelled to clear it; the audit trail keeps the history.']},
+  complaints:{feeds:['Reviews due','Compliance MI'],pts:[
+    'DISP requires a final response within 8 weeks of receipt. The deadline appears in Reviews due until the stage is Final response sent, Referred to FOS or Closed.',
+    'Outcome and redress are recorded for the complaints register and FCA returns.']},
   assumptions:{feeds:['Every output'],pts:[
     'The gilt rate discounts every future cash flow. A higher rate lowers human capital, pension rights and the value of future spending at the same time; the net effect shows in the funded ratio.',
     'CPI inflates spending and goals. The gap between inflation and the gilt rate is what matters.',
     'Mortality ages, dispersion and plan-to age set the survival weights and the horizon.',
     'Tax bands and allowances drive the Tax view and the deferred tax on pensions and gains.']}};
-const HOW_LS='hwp-how-open';
+const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints']);
 function howHTML(key){const w=HOW[key];if(!w)return '';let open=true;try{open=localStorage.getItem(HOW_LS)!=='0'}catch(e){}
   return `<div class="how"><div class="how-h"><b>How this section is used</b><span class="feeds">${w.feeds.map(f=>`<span class="feed">${esc(f)}</span>`).join('')}</span></div><details id="howDetails"${open?' open':''}><summary>What the inputs change</summary><ul>${w.pts.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></details></div>`}
 document.addEventListener('toggle',e=>{if(e.target.id==='howDetails')try{localStorage.setItem(HOW_LS,e.target.open?'1':'0')}catch(x){}},true);
@@ -434,7 +457,7 @@ function refreshImpact(label,f){const el=$('#impact');if(!el)return;const moved=
 function renderInput(key){
   const s=SCHEMA[key];let h=`<div class="sec-head"><div><h2>${esc(s.title)}</h2><p>${esc(s.desc||'')}</p></div>`;
   if(!s.single)h+=`<div class="addrow"><button class="btn" type="button" data-act="toggleAll" data-col="${key}">Expand all</button><button class="btn primary" type="button" data-act="add" data-col="${key}">Add ${esc(s.item)}</button></div>`;
-  h+=`</div>`+bannerHTML()+impactHTML()+howHTML(key);
+  h+=`</div>`+bannerHTML()+(RECORD_ONLY.has(key)?'':impactHTML())+howHTML(key);
   if(s.single){h+=`<div class="card" data-open="true"><div class="card-b" style="border-top:0">${fieldsBlock(key,0,S[key])}</div></div>`;
     if(key==='assumptions')h+=`<p class="note">Figures reflect the 2026/27 tax year as announced. From April 2027 unused pensions fall into the estate for IHT, and savings and property income rates rise by 2 points; update these inputs when they take effect.</p><div class="addrow"><button class="btn" type="button" data-act="resetAssump">Restore defaults</button></div>`;
     if(key==='compliance')h+=`<div class="addrow"><button class="btn" type="button" data-nav="kyc">See onboarding status</button></div>`;
@@ -592,7 +615,7 @@ async function renderClients(){
   let list=[];try{list=await Store.list()}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>Could not load households. ${esc(e.message)}</div></div>`;return}
   if(VIEW!=='clients')return;
   const rc={Low:'good',Medium:'warn',High:'bad',Prohibited:'bad'};
-  h+=`<div class="panel">${list.length?`<div class="tbl-wrap"><table class="clients"><thead><tr><th>Household</th><th>Status</th><th>AML</th><th>Next review</th><th>Last change</th><th></th></tr></thead><tbody>${list.map(x=>`<tr><td><b>${esc(x.name||'Unnamed')}</b><br><span class="muted">${esc(x.reference||'')}</span></td><td>${esc(x.stage)}${x.blockers?` <span class="pill bad">${x.blockers}</span>`:''}</td><td><span class="pill ${rc[x.rating]||'neu'}">${esc(x.rating)}</span></td><td>${x.nextReview?fmtDate(x.nextReview):'–'}</td><td>${esc(fmtTs(x.updatedAt))}<br><span class="muted">${esc(x.updatedBy||'')}</span></td><td><button class="btn" type="button" data-act="openHousehold" data-id="${esc(x.id)}">Open</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No households yet. Create one to start onboarding.</div>'}</div>`;
+  h+=`<div class="panel">${list.length?`<div class="tbl-wrap"><table class="clients"><thead><tr><th>Household</th><th>Status</th><th>AML</th><th>Next due</th><th>Last change</th><th></th></tr></thead><tbody>${list.map(x=>`<tr><td><b>${esc(x.name||'Unnamed')}</b><br><span class="muted">${esc(x.reference||'')}</span></td><td>${esc(x.stage)}${x.blockers?` <span class="pill bad">${x.blockers}</span>`:''}</td><td><span class="pill ${rc[x.rating]||'neu'}">${esc(x.rating)}</span></td><td>${x.due?fmtDate(x.due):'–'}${x.overdue?` <span class="pill bad">${x.overdue} overdue</span>`:''}</td><td>${esc(fmtTs(x.updatedAt))}<br><span class="muted">${esc(x.updatedBy||'')}</span></td><td><button class="btn" type="button" data-act="openHousehold" data-id="${esc(x.id)}">Open</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No households yet. Create one to start onboarding.</div>'}</div>`;
   $('#main').innerHTML=h;
 }
 
@@ -654,15 +677,37 @@ function renderGuide(){
   return h+'</div>';
 }
 
+const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
+function renderReviews(){
+  const R=E.reviews();
+  let h=`<div class="sec-head"><div><h2>Reviews due</h2><p>Every dated obligation for this household: the annual suitability review, the KYC refresh, document expiries, open actions, life events and complaint deadlines. Worked out from the file; nothing is entered here.</p></div></div>`+bannerHTML(false);
+  h+=`<div class="kpis"><div class="kpi"><div class="k">Overdue</div><div class="v">${R.overdue}</div></div><div class="kpi"><div class="k">Due in 60 days</div><div class="v">${R.soon}</div></div><div class="kpi"><div class="k">Next due</div><div class="v t">${R.nextDue?fmtDate(R.nextDue):'Nothing scheduled'}</div></div></div>`;
+  if(!R.items.length)return h+`<div class="empty">Nothing is due. Items appear once the file is approved, documents have dates, or actions, life events and complaints are recorded.</div>`;
+  h+=`<div class="panel"><div class="tbl-wrap"><table><thead><tr><th>Due</th><th>Status</th><th>Item</th><th>Who</th><th>Detail</th><th></th></tr></thead><tbody>${R.items.map(i=>`<tr><td style="white-space:nowrap">${fmtDate(i.due)}</td><td><span class="pill ${REVIEW_CLS[i.status]}">${i.status==='overdue'?Math.abs(i.days)+' days overdue':i.status==='soon'?'in '+i.days+' days':'scheduled'}</span></td><td><b>${esc(i.type)}</b></td><td>${esc(i.who)}</td><td class="muted">${esc(i.detail)}</td><td><button class="btn" type="button" data-nav="${esc(i.where)}">Open</button></td></tr>`).join('')}</tbody></table></div></div>`;
+  return h;
+}
+async function renderDiary(){
+  let h=`<div class="sec-head"><div><h2>Reviews due</h2><p>Households with the soonest obligation first. Open a household and go to Reviews due for the detail.</p></div></div>`;
+  $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
+  let list=[];try{list=await Store.list()}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>${esc(e.message)}</div></div>`;return}
+  if(VIEW!=='diary')return;
+  const t=H.today();const rows=list.filter(x=>x.due).sort((a,b)=>a.due.localeCompare(b.due));
+  const overdue=rows.reduce((n,x)=>n+(x.overdue||0),0);
+  h+=`<div class="kpis"><div class="kpi"><div class="k">Households with something overdue</div><div class="v">${rows.filter(x=>x.overdue).length}</div></div><div class="kpi"><div class="k">Overdue items</div><div class="v">${overdue}</div></div><div class="kpi"><div class="k">Due in the next 60 days</div><div class="v">${rows.filter(x=>x.due>=t&&x.due<=H.addDays(t,60)).length}</div></div></div>`;
+  h+=`<div class="panel">${rows.length?`<div class="tbl-wrap"><table class="clients"><thead><tr><th>Household</th><th>Next due</th><th>Overdue</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td><b>${esc(x.name||'Unnamed')}</b><br><span class="muted">${esc(x.reference||'')}</span></td><td>${fmtDate(x.due)}</td><td>${x.overdue?`<span class="pill bad">${x.overdue} overdue</span>`:`<span class="pill ${x.due<=H.addDays(t,60)?'warn':'neu'}">${x.due<=H.addDays(t,60)?'due soon':'scheduled'}</span>`}</td><td>${esc(x.stage)}</td><td><button class="btn" type="button" data-act="openHousehold" data-id="${esc(x.id)}" data-view="reviews">Open</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nothing is due across the firm.</div>'}</div>`;
+  $('#main').innerHTML=h;
+}
+
 function render(){
   renderNav();renderTopbar();const m=$('#main');
   if(VIEW==='clients')return renderClients();
   if(VIEW==='team')return renderTeam();
+  if(VIEW==='diary')return renderDiary();
   if(VIEW==='audit')return renderAudit();
-  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else m.innerHTML=renderChecks();
+  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
-  const server=Store.mode==='server';const inHH=VIEW!=='clients'&&VIEW!=='team';
+  const server=Store.mode==='server';const inHH=!['clients','team','diary'].includes(VIEW);
   $('#btnClients').hidden=!server||!inHH;
   for(const id of ['#btnImport','#btnExport','#btnJson'])$(id).hidden=!inHH;
   $('#resetWrap').hidden=server||!inHH;
@@ -692,7 +737,7 @@ document.addEventListener('click',async e=>{
     banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};IMPACT.why=`<b>${esc(SCHEMA[col].item)} removed.</b> The figures above compare with when you opened this section.`;render();return}
   if(act==='undo'&&banner&&banner.undo){const u=banner.undo;S[u.col].splice(u.idx,0,u.rem);logChange(`${u.col}.count`,S[u.col].length-1,S[u.col].length);banner=null;Store.touch();render();return}
   if(act==='closeBanner'){banner=null;render();return}
-  if(act==='goClients'||act==='team'){await Store.flush();VIEW=act==='team'?'team':'clients';banner=null;render();return}
+  if(act==='goClients'||act==='team'||act==='diary'){await Store.flush();VIEW=act==='goClients'?'clients':act;banner=null;render();return}
   if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}await Store.cloud.signOut();location.reload();return}
   if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
     try{await Store.api('POST','members',body);banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
@@ -707,7 +752,7 @@ document.addEventListener('click',async e=>{
   if(act==='confirmReset'){setState(H.blank());S.household.name='';OPEN.clear();OPEN.add('members:0');Store.saveLocal();VIEW='household';resetUI(false);render();toast('Started a blank household');return}
   if(act==='loadSample'){setState(H.sample());Store.saveLocal();resetUI(false);render();toast('Sample household loaded');return}
   if(act==='cancelReset'){resetUI(false);return}
-  if(act==='openHousehold'){try{await Store.open(b.dataset.id);banner=null;VIEW='kyc';OPEN.clear();OPEN.add('members:0');render()}catch(err){toast('Could not open the household: '+err.message)}return}
+  if(act==='openHousehold'){try{await Store.open(b.dataset.id);banner=null;VIEW=b.dataset.view||'kyc';OPEN.clear();OPEN.add('members:0');render()}catch(err){toast('Could not open the household: '+err.message)}return}
   if(act==='newBlank'||act==='newSample'){try{const st=act==='newSample'?H.sample():H.blank();st.isSample=act==='newSample';await Store.create(st);setState(H.normalise(st));VIEW='household';banner=null;render()}catch(err){toast('Could not create the household: '+err.message)}return}
   if(act==='reloadHousehold'){try{await Store.open(Store.id);Store.err=null;banner=null;render();toast('Loaded the latest version')}catch(err){toast(err.message)}return}
 });

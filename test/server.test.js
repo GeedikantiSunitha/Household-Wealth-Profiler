@@ -66,7 +66,7 @@ test('create, save, version conflict and audit trail', async () => {
   assert.ok(audit.some(a => a.field === 'created' && a.user === 'sam'));
 
   const list = await (await fetch(BASE + '/api/households', { headers: SAM })).json();
-  assert.equal(list.length, 1); assert.equal(list[0].updatedBy, 'chris'); assert.ok(list[0].stage);
+  assert.equal(list.length, 1); assert.equal(list[0].updatedBy, 'chris'); assert.ok(list[0].stage); assert.equal(typeof list[0].due, 'string'); assert.equal(typeof list[0].overdue, 'number');
 });
 
 test('files on disk are encrypted and every version is kept', () => {

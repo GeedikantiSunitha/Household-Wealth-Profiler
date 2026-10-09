@@ -30,11 +30,11 @@ async function readBody(req) {
 
 function summarise(HWP, state) {
   const s = HWP.normalise(state);
-  let stage = '', rating = '', nextReview = '', blockers = 0;
-  try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview || ''; blockers = O.blockerCount; } catch (e) { stage = 'Error'; }
-  return { name: s.household.name || '', reference: s.household.reference || '', stage, rating, nextReview, blockers };
+  let stage = '', rating = '', nextReview = '', blockers = 0, due = '', overdue = 0;
+  try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview || ''; blockers = O.blockerCount; const R = E.reviews(O); due = R.nextDue; overdue = R.overdue; } catch (e) { stage = 'Error'; }
+  return { name: s.household.name || '', reference: s.household.reference || '', stage, rating, nextReview, blockers, due, overdue };
 }
-const listRow = r => ({ id: r.id, name: r.name, reference: r.reference, stage: r.stage, rating: r.rating, nextReview: r.next_review, blockers: r.blockers, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by });
+const listRow = r => ({ id: r.id, name: r.name, reference: r.reference, stage: r.stage, rating: r.rating, nextReview: r.next_review, blockers: r.blockers, due: r.review_due, overdue: r.review_overdue, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by });
 const memberRow = m => ({ userId: m.user_id, email: m.email, name: m.display_name, role: m.role, active: m.active, createdAt: m.created_at });
 
 export async function handle(req, deps) {
