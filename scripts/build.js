@@ -12,6 +12,7 @@ const css = read('styles.css');
 // Escape closing tags so inlined code cannot end its own <script> block early
 const safe = js => js.replace(/<\/script/gi, '<\\/script');
 const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))
+  .replace(/<script src="(config|cloud)\.js"><\/script>\n?/g, '') // the single file has no server or cloud sign-in
   .replace('<script src="core.js"></script>', () => `<script>\n${safe(read('core.js'))}\n</script>`)
   .replace('<script src="app.js"></script>', () => `<script>\n${safe(read('app.js'))}\n</script>`);
 const fonts = html.match(/<link rel="preconnect"[^>]*>\s*<link rel="stylesheet" href="https:\/\/fonts[^>]*>/)[0];

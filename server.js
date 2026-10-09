@@ -37,6 +37,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 2 * 1024 * 1024;
+// Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
+// to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.
+const CLIENT_IP_HEADER = (process.env.CLIENT_IP_HEADER || '').toLowerCase();
 const USERS = new Map();
 for (const entry of (process.env.AUTH_USERS || '').split(';').map(s => s.trim()).filter(Boolean)) {
   const [name, salt, hash] = entry.split(':');
@@ -115,7 +118,7 @@ function summarise(rec) {
 const failures = new Map(); // ip -> {n, until}
 const authCache = new Map(); // sha256(header) -> {user, exp}
 function authenticate(req) {
-  const ip = req.socket.remoteAddress || '';
+  const ip = (CLIENT_IP_HEADER && req.headers[CLIENT_IP_HEADER]) || req.socket.remoteAddress || '';
   const f = failures.get(ip);
   if (f && f.until > Date.now()) return { locked: true };
   const h = req.headers.authorization || '';

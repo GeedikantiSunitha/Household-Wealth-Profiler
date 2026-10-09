@@ -2,6 +2,8 @@
    Uses window.HWP (core.js) for every calculation.
    Runs in two modes:
    - server: talks to server.js (logins, encrypted storage, versions, audit trail)
+   - cloud:  the Supabase edition (config.js sets supabaseUrl); same as server mode, but signs in
+             through cloud.js and calls the `api` Edge Function with a bearer token
    - local:  no server found; drafts stay in this browser only */
 (function(){
 'use strict';
@@ -29,16 +31,22 @@ const isAdult=m=>E.isAdult(m);
 
 /* ---------- storage: server or this browser ---------- */
 const LS='hwp-draft-v2',LS_USER='hwp-user';
-const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,
+const CFG=window.HWP_CONFIG||{};
+const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,cloud:null,role:'',firm:'',seats:0,
   async init(){
+    if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');
+      Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firm:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
     try{const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});
       if(r.ok&&(r.headers.get('content-type')||'').includes('json')){const j=await r.json();if(j&&j.user){this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;return}}}catch(e){}
     this.mode='local';try{this.user=localStorage.getItem(LS_USER)||''}catch(e){this.user=''}
   },
   loadLocal(){try{const r=localStorage.getItem(LS);return r?H.normalise(JSON.parse(r)):null}catch(e){return null}},
   saveLocal(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}},
-  async api(method,path,body){const r=await fetch('api/'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json','Accept':'application/json'},body:body?JSON.stringify(body):undefined});
+  async api(method,path,body){const headers={'Accept':'application/json'};if(body)headers['Content-Type']='application/json';
+    if(this.cloud){headers.Authorization='Bearer '+await this.cloud.token();headers.apikey=CFG.supabaseKey}
+    const r=await fetch(this.cloud?CFG.supabaseUrl.replace(/\/+$/,'')+'/functions/v1/api/'+path:'api/'+path,{method,credentials:this.cloud?'omit':'same-origin',headers,body:body?JSON.stringify(body):undefined});
     let j=null;try{j=await r.json()}catch(e){}
+    if(this.cloud&&(r.status===401||(j&&j.code==='mfa_required'))){location.reload();return new Promise(()=>{})}
     if(!r.ok){const err=new Error((j&&j.error)||('Request failed ('+r.status+')'));err.status=r.status;err.body=j;throw err}return j},
   async list(){return this.api('GET','households')},
   async open(id){const j=await this.api('GET','households/'+encodeURIComponent(id));this.id=j.id;this.version=j.version;setState(H.normalise(j.state));this.dirty=false;return j},
@@ -70,7 +78,7 @@ const NAV=[
   ['Onboarding',[['compliance'],['kyc','KYC and onboarding status'],['audit','Audit trail']]],
   ['Outputs',[['bs','Economic balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks']]]];
 function renderNav(){
-  if(VIEW==='clients'){$('#rail').innerHTML=`<h6>Clients</h6><button type="button" aria-current="true"><span>All households</span></button>`;$('#hhName').textContent='Choose a household to open';return}
+  if(VIEW==='clients'||VIEW==='team'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':'Choose a household to open';return}
   let h='';let step=0;const O=E.onboarding();const bad=E.checks().filter(x=>x.lvl==='bad').length;
   for(const [sec,items] of NAV){h+=`<h6>${sec}</h6>`;for(const [id,lbl] of items){const s=SCHEMA[id];const name=lbl||s.title;
     let ct='',cls='';if(s&&!s.single)ct=S[id].length;
@@ -117,14 +125,123 @@ function summary(key,r){
     case 'protection':return [r.type,`${who}${yes(r.inTrust)?' · in trust':''}`,gbp(N(r.sum))];
   }return ['','',''];
 }
-function bannerHTML(){let h='';
-  if(S&&S.isSample)h+=`<div class="banner sample"><div><b>Sample household.</b> These are made-up figures to show how the model works. Replace them with client data, import a file, or start blank.</div></div>`;
+function bannerHTML(household=true){let h='';
+  if(household&&S&&S.isSample)h+=`<div class="banner sample"><div><b>Sample household.</b> These are made-up figures to show how the model works. Replace them with client data, import a file, or start blank.</div></div>`;
   if(banner)h+=`<div class="banner ${banner.cls||''}"><div>${banner.html}</div>${banner.sticky?'':'<button class="btn ghost x" type="button" data-act="closeBanner" aria-label="Dismiss">✕</button>'}</div>`;
   return h}
+/* ---------- explaining impact ----------
+   Each input section shows (1) which outputs it feeds and what its fields change, and (2) a live
+   read-out of the headline figures compared with when the section was opened, updated as you type. */
+const HOW={
+  household:{feeds:['IHT','Funded ratio','Data checks'],pts:[
+    'Relationship status: married couples and civil partners get two nil-rate bands against IHT on second death; other couples get one.',
+    'Gifts in the last 7 years reduce the nil-rate band available.',
+    "Legacy target is added to the liabilities side, inflated and discounted to today's money, so a larger target lowers the funded ratio.",
+    'Wills, powers of attorney and trusts do not change the figures. Missing wills are flagged in Data checks.',
+    'UK nation: Scotland flags that Scottish income tax bands apply, which are not modelled.']},
+  members:{feeds:['Human capital','Life expectancy','KYC and AML','Risk profile','Tax'],pts:[
+    'Date of birth, sex, health and smoking set the assumed life expectancy, which weights every future cash flow. A shorter life expectancy lowers both human capital and the value of future spending.',
+    'Income stability sets the discount premium on earnings and how equity-like they are: volatile earnings are valued lower and count as more equity exposure.',
+    'Planned retirement age sets how many years of earnings count (65 if blank).',
+    'Photo ID, document expiry, proof of address, screening dates and PEP status drive the KYC status. Expired ID, or proof and screening older than 3 months, are blockers.',
+    'Risk attitude, loss reaction, knowledge and capacity for loss feed the risk profile and are required for suitability.']},
+  income:{feeds:['Human capital','Income rights','Tax','Funded ratio'],pts:[
+    'Earnings (salary, bonus, self-employment profit, dividends) become human capital: the after-tax value of future pay to retirement, weighted by survival and discounted at the gilt rate plus a stability premium.',
+    'Pensions in payment, annuities and benefits become income rights valued at the gilt rate.',
+    'Growth % compounds the amount each year. Starts at and Ends at age bound the stream; a blank end age means retirement age for earnings and the plan end age for other income.',
+    'Taxable lines feed the Tax and allowances view. Untick for tax-free income.']},
+  expenses:{feeds:['Liabilities side','Core funded ratio','Liquidity'],pts:[
+    'Each line is inflated (at its own rate, or CPI) and discounted at the gilt rate, then added to the liabilities side of the balance sheet.',
+    'Essential spending that has already started counts in the core funded ratio and in months of cash cover. Other categories affect only the full funded ratio.',
+    'Starts in and Lasts (years) bound the stream, for example school fees for 7 years or care costs starting in 35 years.',
+    'Leave mortgage payments out: the balance is already under Liabilities.']},
+  goals:{feeds:['Liabilities side','Funded ratio'],pts:[
+    "Each goal is a one-off liability on its date, inflated and discounted back to today's money. A goal due sooner is discounted less and weighs more.",
+    'Priority is recorded for the investment policy statement. It does not change the figures.']},
+  accounts:{feeds:['Financial assets','Deferred tax','Allowances','Equity exposure','Liquidity'],pts:[
+    'Value adds to financial assets. Pension wrappers carry deferred tax on withdrawal; taxable accounts carry deferred capital gains tax on value above base cost.',
+    'Contributions this tax year drive the ISA and pension annual allowance checks on the Tax view.',
+    'The equities, bonds, cash and alternatives split sets the portfolio equity exposure compared with risk tolerance.',
+    'Income yield feeds the taxable income estimate. Uncalled commitments are shown as a future call on cash.',
+    'Cash and easy-access accounts count towards months of essential outgoings covered.']},
+  db:{feeds:['Pension rights','Funded ratio','IHT'],pts:[
+    'Accrued pension is valued as an income right from normal retirement age, indexed at the rate given, weighted by survival and discounted at the gilt rate.',
+    "For married couples the spouse's pension % adds the value of the survivor's pension.",
+    'The CETV is shown for comparison only. The balance sheet uses the economic value of the promised income, not the transfer value.']},
+  property:{feeds:['Real assets','IHT','Deferred CGT'],pts:[
+    'Market value × household share adds to real assets.',
+    'A main residence qualifies for the residence nil-rate band (capped at its net value, tapered above a £2m estate) and is exempt from CGT.',
+    'Purchase cost sets the deferred CGT on investment property.',
+    'Record mortgages under Liabilities and rent under Income.']},
+  other:{feeds:['Real assets','IHT','Deferred CGT'],pts:[
+    'Value adds to real assets; base cost sets the deferred CGT.',
+    'Business Relief eligible assets are taken out of the IHT estate.',
+    'Business Asset Disposal Relief applies the lower CGT rate to the gain.']},
+  liabilities:{feeds:['Debt','Core funded ratio','Liquidity'],pts:[
+    'Balance is the debt on the economic balance sheet. The core funded ratio measures assets against debt, essential spending and deferred tax.',
+    'Monthly payment × 12 is debt service, added to essential outgoings for the months-of-cash measure.',
+    'Lender, fixed-until date and remaining term are recorded for the file and do not change the figures.']},
+  protection:{feeds:['Protection gap','IHT estate'],pts:[
+    "Life cover and family income benefit are compared with each earner's human capital to show the protection gap.",
+    'Cover not written in trust is added to the IHT estate.',
+    'Expiry age and premium are recorded for the file.']},
+  compliance:{feeds:['AML rating','KYC status','Sign-off'],pts:[
+    'How the client was met, the funds route and country, structures, high-risk country links and cash-intensive wealth each add AML points: 0–1 low, 2–3 medium, 4 or more high.',
+    'A PEP or a high-risk third country is always high and requires EDD findings and verified source of wealth. PEPs also need named senior approval.',
+    'Client agreement, fee agreement, costs disclosure and privacy notice are blockers until recorded.',
+    'The reviewer must be a different person from the preparer. An approval with open blockers shows as Approved with open issues.']},
+  assumptions:{feeds:['Every output'],pts:[
+    'The gilt rate discounts every future cash flow. A higher rate lowers human capital, pension rights and the value of future spending at the same time; the net effect shows in the funded ratio.',
+    'CPI inflates spending and goals. The gap between inflation and the gilt rate is what matters.',
+    'Mortality ages, dispersion and plan-to age set the survival weights and the horizon.',
+    'Tax bands and allowances drive the Tax view and the deferred tax on pensions and gains.']}};
+const HOW_LS='hwp-how-open';
+function howHTML(key){const w=HOW[key];if(!w)return '';let open=true;try{open=localStorage.getItem(HOW_LS)!=='0'}catch(e){}
+  return `<div class="how"><div class="how-h"><b>How this section is used</b><span class="feeds">${w.feeds.map(f=>`<span class="feed">${esc(f)}</span>`).join('')}</span></div><details id="howDetails"${open?' open':''}><summary>What the inputs change</summary><ul>${w.pts.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></details></div>`}
+document.addEventListener('toggle',e=>{if(e.target.id==='howDetails')try{localStorage.setItem(HOW_LS,e.target.open?'1':'0')}catch(x){}},true);
+
+const sgn=n=>n>0?'+':'−';
+const DELTA={
+  money:(a,b)=>{const d=b-a;return !isFinite(d)||Math.abs(d)<0.5?null:[sgn(d)+gbpK(Math.abs(d)),Math.sign(d)]},
+  ratio:(a,b)=>{if(!isFinite(a)||!isFinite(b))return a===b?null:['changed',0];const d=b-a;return Math.abs(d)<0.005?null:[sgn(d)+Math.abs(d).toFixed(2)+'×',Math.sign(d)]},
+  pct:(a,b)=>{const d=(b-a)*100;return !isFinite(d)||Math.abs(d)<0.05?null:[sgn(d)+Math.abs(d).toFixed(1)+' pts',0]},
+  count:(a,b)=>{const d=b-a;return d?[sgn(d)+Math.abs(d),Math.sign(d)]:null},
+  text:(a,b)=>a===b?null:['was '+a,0]};
+function metrics(){const C=E.compute();const k=C.kpi;const T=C.tot.HH;const O=E.onboarding(C);
+  const fx=x=>isFinite(x)?x.toFixed(2)+'×':'n/a';
+  const fin=[
+    {id:'nw',k:'Economic net worth',v:T.A-T.L,f:gbpK,d:DELTA.money,up:'good'},
+    {id:'fr',k:'Funded ratio',v:T.L?T.A/T.L:Infinity,f:fx,d:DELTA.ratio,up:'good'},
+    {id:'cf',k:'Core funded ratio',v:k.coreFunded,f:fx,d:DELTA.ratio,up:'good'},
+    {id:'iht',k:'IHT on second death',v:k.iht,f:gbpK,d:DELTA.money,up:'bad'},
+    {id:'eq',k:'Equity exposure',v:k.totalEqPct,f:x=>pct(x),d:DELTA.pct,up:null}];
+  const kyc=[
+    {id:'st',k:'Onboarding status',v:O.stage,f:String,d:DELTA.text,up:null},
+    {id:'aml',k:'AML rating',v:`${O.rating} (score ${O.score})`,f:String,d:DELTA.text,up:null},
+    {id:'bl',k:'Blockers',v:O.blockerCount,f:String,d:DELTA.count,up:'bad'},
+    {id:'rv',k:'Items to review',v:O.warnCount,f:String,d:DELTA.count,up:'bad'}];
+  if(VIEW==='compliance')return kyc;
+  if(VIEW==='members')return [fin[0],fin[1],kyc[1],kyc[2],kyc[3]];
+  return [...fin,kyc[2]];
+}
+let IMPACT={view:null,base:{},why:''},impT;
+function imCell(m){const base=IMPACT.base[m.id];const d=base===undefined?null:m.d(base,m.v);let cls='';
+  if(d&&d[1]&&m.up)cls=(d[1]>0)===(m.up==='good')?'up':'down';
+  return `<div class="im" data-m="${m.id}"><div class="k">${esc(m.k)}</div><div class="v">${esc(m.f(m.v))}</div><div class="d ${cls}">${d?esc(d[0]):''}</div></div>`}
+function impactHTML(){const ms=metrics();
+  if(IMPACT.view!==VIEW)IMPACT={view:VIEW,base:Object.fromEntries(ms.map(m=>[m.id,m.v])),why:''};
+  return `<div class="impact" id="impact"><div class="impact-h"><b>Live effect of this section</b><span>Changes are compared with when you opened this section</span></div><div class="impact-grid">${ms.map(imCell).join('')}</div><div class="impact-why" id="impactWhy">${IMPACT.why||'Edit a field below and these figures update as you type.'}</div></div>`}
+function refreshImpact(label,f){const el=$('#impact');if(!el)return;const moved=[];
+  for(const m of metrics()){const cell=el.querySelector(`.im[data-m="${m.id}"]`);if(!cell)continue;const tmp=document.createElement('div');tmp.innerHTML=imCell(m);const nc=tmp.firstChild;
+    if(nc.querySelector('.v').textContent!==cell.querySelector('.v').textContent){moved.push(`${m.k} ${nc.querySelector('.v').textContent}`);nc.classList.add('flash');setTimeout(()=>nc.classList.remove('flash'),800)}
+    cell.replaceWith(nc)}
+  IMPACT.why=moved.length?`<b>${esc(label)}</b> changed: ${esc(moved.join(' · '))}.`:`<b>${esc(label)}</b> recorded. No change to the figures above${f&&f.h?': '+esc(f.h):'.'}`;
+  const w=$('#impactWhy');if(w)w.innerHTML=IMPACT.why}
+
 function renderInput(key){
   const s=SCHEMA[key];let h=`<div class="sec-head"><div><h2>${esc(s.title)}</h2><p>${esc(s.desc||'')}</p></div>`;
   if(!s.single)h+=`<div class="addrow"><button class="btn" type="button" data-act="toggleAll" data-col="${key}">Expand all</button><button class="btn primary" type="button" data-act="add" data-col="${key}">Add ${esc(s.item)}</button></div>`;
-  h+=`</div>`+bannerHTML();
+  h+=`</div>`+bannerHTML()+impactHTML()+howHTML(key);
   if(s.single){h+=`<div class="card" data-open="true"><div class="card-b" style="border-top:0">${fieldsBlock(key,0,S[key])}</div></div>`;
     if(key==='assumptions')h+=`<p class="note">Figures reflect the 2026/27 tax year as announced. From April 2027 unused pensions fall into the estate for IHT, and savings and property income rates rise by 2 points; update these inputs when they take effect.</p><div class="addrow"><button class="btn" type="button" data-act="resetAssump">Restore defaults</button></div>`;
     if(key==='compliance')h+=`<div class="addrow"><button class="btn" type="button" data-nav="kyc">See onboarding status</button></div>`;
@@ -286,18 +403,33 @@ async function renderClients(){
   $('#main').innerHTML=h;
 }
 
+async function renderTeam(){
+  let h=`<div class="sec-head"><div><h2>Team</h2><p>People at ${esc(Store.firm)} who can sign in. Each person needs their own login so the audit trail shows who did what. Deactivating someone signs them out at once; their past entries stay in the audit trail.</p></div></div>`+bannerHTML(false);
+  $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
+  let list=[];try{list=await Store.api('GET','members')}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>${esc(e.message)}</div></div>`;return}
+  if(VIEW!=='team')return;
+  const used=list.filter(x=>x.active).length;
+  h+=`<div class="panel"><h3>Invite someone</h3><p class="muted">${used} of ${Store.seats} seats in use. They get an email link to choose a password and set up two-step verification.</p>
+    <div class="fields"><div class="f"><label for="invName">Name</label><input id="invName" autocomplete="off"></div><div class="f"><label for="invEmail">Email</label><input id="invEmail" type="email" autocomplete="off"></div>
+    <div class="f"><label for="invRole">Role</label><select id="invRole"><option value="adviser">Adviser: works on client files</option><option value="admin">Administrator: also manages the team</option></select></div></div>
+    <div class="addrow"><button class="btn primary" type="button" data-act="invite"${used>=Store.seats?' disabled':''}>Send invitation</button></div></div>`;
+  h+=`<div class="panel"><div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${list.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.email)}</td><td>${x.role==='admin'?'Administrator':'Adviser'}</td><td><span class="pill ${x.active?'good':'neu'}">${x.active?'Active':'Deactivated'}</span></td><td>${x.email===Store.email?'<span class="muted">You</span>':`<button class="btn" type="button" data-act="memberActive" data-uid="${esc(x.userId)}" data-on="${x.active?'0':'1'}">${x.active?'Deactivate':'Reactivate'}</button>`}</td></tr>`).join('')}</tbody></table></div></div>`;
+  $('#main').innerHTML=h;
+}
+
 function render(){
   renderNav();renderTopbar();const m=$('#main');
   if(VIEW==='clients')return renderClients();
+  if(VIEW==='team')return renderTeam();
   if(VIEW==='audit')return renderAudit();
   if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
-  const server=Store.mode==='server';const inHH=VIEW!=='clients';
+  const server=Store.mode==='server';const inHH=VIEW!=='clients'&&VIEW!=='team';
   $('#btnClients').hidden=!server||!inHH;
   for(const id of ['#btnImport','#btnExport','#btnJson'])$(id).hidden=!inHH;
   $('#resetWrap').hidden=server||!inHH;
-  $('#who').innerHTML=server?`Signed in as <b>${esc(Store.user)}</b>`:`<label for="whoIn">Working as</label><input id="whoIn" value="${esc(Store.user)}" placeholder="Your name">`;
+  $('#who').innerHTML=server?`Signed in as <b>${esc(Store.user)}</b>${Store.cloud?' <button class="btn ghost" type="button" data-act="signOut">Sign out</button>':''}`:`<label for="whoIn">Working as</label><input id="whoIn" value="${esc(Store.user)}" placeholder="Your name">`;
   saveStatus();
 }
 
@@ -309,6 +441,7 @@ function onEdit(e){const el=e.target;
   if(!el.dataset||!el.dataset.k)return;const {col,idx,k}=el.dataset;const s=SCHEMA[col];const f=fieldsOf(s).find(x=>x.k===k);
   const v=parseVal(f,el.value,el.type==='checkbox'?el:null);const rec=s.single?S[col]:S[col][+idx];const old=rec[k];if(old===v)return;rec[k]=v;
   logChange(s.single?`${col}.${k}`:`${col}[${idx}].${k}`,old,v);Store.touch();
+  clearTimeout(impT);impT=setTimeout(()=>refreshImpact(`${s.title}: ${f.l}`,f),120);
   if(VALIDATE[k]){const msg=VALIDATE[k](v);const h=document.getElementById(el.id+'-h');el.setAttribute('aria-invalid',msg?'true':'false');if(h){h.textContent=msg||f.h||'';h.className='hint'+(msg?' err':'')}}
   if(!s.single){const card=document.querySelector(`[data-card="${col}:${idx}"]`);if(card){const [t,meta,val]=summary(col,rec);card.querySelector('.sum').innerHTML=`<b>${esc(t)}</b><span class="meta">${esc(meta)}</span>`;card.querySelector('.val').textContent=val}}
   clearTimeout(navT);navT=setTimeout(renderNav,250);
@@ -319,14 +452,19 @@ document.addEventListener('click',async e=>{
   const nav=e.target.closest('[data-nav]');if(nav&&nav.dataset.nav){VIEW=nav.dataset.nav;if(banner&&!banner.sticky)banner=null;render();window.scrollTo({top:0});return}
   const b=e.target.closest('[data-act]');if(!b)return;const act=b.dataset.act,col=b.dataset.col,idx=+b.dataset.idx;
   if(act==='del'){e.stopPropagation();const rem=S[col].splice(idx,1)[0];logChange(`${col}.count`,S[col].length+1,S[col].length);Store.touch();
-    banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};render();return}
+    banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};IMPACT.why=`<b>${esc(SCHEMA[col].item)} removed.</b> The figures above compare with when you opened this section.`;render();return}
   if(act==='undo'&&banner&&banner.undo){const u=banner.undo;S[u.col].splice(u.idx,0,u.rem);logChange(`${u.col}.count`,S[u.col].length-1,S[u.col].length);banner=null;Store.touch();render();return}
   if(act==='closeBanner'){banner=null;render();return}
+  if(act==='goClients'||act==='team'){await Store.flush();VIEW=act==='team'?'team':'clients';banner=null;render();return}
+  if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}await Store.cloud.signOut();location.reload();return}
+  if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
+    try{await Store.api('POST','members',body);banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
+  if(act==='memberActive'){try{await Store.api('PATCH','members/'+encodeURIComponent(b.dataset.uid),{active:b.dataset.on==='1'});banner=null}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
   if(act==='toggle'){if(e.target.closest('[data-act="del"]'))return;const key=col+':'+idx;OPEN.has(key)?OPEN.delete(key):OPEN.add(key);const card=b.closest('.card');card.dataset.open=OPEN.has(key);b.setAttribute('aria-expanded',OPEN.has(key));return}
   if(act==='toggleAll'){const all=S[col].every((_,i)=>OPEN.has(col+':'+i));S[col].forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='add'){const r=H.defaults(col);if(col==='members'){const ad=S.members.filter(isAdult).length;r.ref=ad<1?'P1':ad<2?'P2':'C'+(S.members.filter(m=>m.role==='child').length+1);r.role=ad<1?'primary':ad<2?'partner':'child'}
     else if(['income','db','protection'].includes(col))r.owner=S.members[0]?.ref||'';else if(fieldsOf(SCHEMA[col]).some(f=>f.t==='owner'))r.owner=S.members.filter(isAdult).length>1?'JOINT':(S.members[0]?.ref||'');
-    S[col].push(r);logChange(`${col}.count`,S[col].length-1,S[col].length);OPEN.add(col+':'+(S[col].length-1));Store.touch();render();const cards=document.querySelectorAll('.card');cards[cards.length-1]?.scrollIntoView({behavior:'smooth',block:'center'});return}
+    S[col].push(r);logChange(`${col}.count`,S[col].length-1,S[col].length);OPEN.add(col+':'+(S[col].length-1));Store.touch();IMPACT.why=`<b>${esc(SCHEMA[col].item)} added.</b> Fill it in and the figures above update as you type.`;render();const cards=document.querySelectorAll('.card');cards[cards.length-1]?.scrollIntoView({behavior:'smooth',block:'center'});return}
   if(act==='bsview'){BSVIEW=b.dataset.v;render();return}
   if(act==='resetAssump'){S.assumptions=H.defaults('assumptions');logChange('assumptions','edited','defaults restored');Store.touch();render();toast('Assumptions restored to 2026/27 defaults');return}
   if(act==='confirmReset'){setState(H.blank());S.household.name='';OPEN.clear();OPEN.add('members:0');Store.saveLocal();VIEW='household';resetUI(false);render();toast('Started a blank household');return}
@@ -408,7 +546,8 @@ $('#btnClients').onclick=async()=>{await Store.flush();VIEW='clients';banner=nul
 /* ---------- start ---------- */
 (async()=>{
   try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{DL=d},()=>{})}catch(e){DL=null}
-  await Store.init();
+  try{await Store.init()}catch(e){if(!CFG.supabaseUrl)throw e;document.body.classList.add('gated');
+    $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p>${Store.cloud?'<div class="addrow"><button class="btn" type="button" data-act="signOut">Sign out</button></div>':''}</div>`;return}
   if(Store.mode==='server'){setState(H.blank());VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}
   resetUI(false);render();

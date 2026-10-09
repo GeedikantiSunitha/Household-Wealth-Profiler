@@ -1,0 +1,30 @@
+# Fly.io configuration. Change `app` to a unique name before the first deploy.
+# Data lives on one volume, so run exactly one machine: do not scale above 1.
+app = "wealth-profiler"
+primary_region = "lhr"   # London
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  DATA_DIR = "/data"
+  CLIENT_IP_HEADER = "fly-client-ip"
+
+[mounts]
+  source = "wp_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    timeout = "3s"
+    method = "GET"
+    path = "/healthz"

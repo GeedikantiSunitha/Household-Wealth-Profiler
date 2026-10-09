@@ -20,7 +20,7 @@ const J = { 'Content-Type': 'application/json' };
 let proc;
 
 test.before(async () => {
-  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY,
+  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY, CLIENT_IP_HEADER: 'X-Client-IP',
     AUTH_USERS: [user('sam', 'correct horse'), user('chris', 'battery staple')].join(';') }, stdio: 'pipe' });
   for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
   throw new Error('server did not start');
@@ -93,6 +93,13 @@ test('there is no way to delete a client file', async () => {
   const r = await fetch(`${BASE}/api/households/${id}`, { method: 'DELETE', headers: { ...SAM, ...J } });
   assert.equal(r.status, 404);
   assert.ok(fs.existsSync(path.join(DATA, 'households', id, 'current.json')));
+});
+
+test('behind a proxy, a lockout applies only to the client address the proxy reports', async () => {
+  const from = ip => ({ 'X-Client-IP': ip });
+  for (let i = 0; i < 10; i++) await fetch(BASE + '/api/me', { headers: { ...auth('sam', 'nope' + i), ...from('203.0.113.9') } });
+  assert.equal((await fetch(BASE + '/api/me', { headers: { ...SAM, ...from('203.0.113.9') } })).status, 429);
+  assert.equal((await fetch(BASE + '/api/me', { headers: { ...SAM, ...from('198.51.100.7') } })).status, 200);
 });
 
 test('ten wrong passwords lock the address out for 15 minutes', async () => {

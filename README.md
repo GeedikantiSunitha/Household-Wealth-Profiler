@@ -10,13 +10,94 @@ There are no runtime dependencies. You need Node.js 18.17 or later.
 ## Quick start (your own machine)
 
 ```sh
-npm test          # 58 tests: tax, balance sheet, IHT, KYC rules, server security
+npm test          # tax, balance sheet, IHT, KYC rules, server security, Supabase edition
 npm run dev       # http://localhost:8080, sign in as demo / demo, data in ./data-dev
 ```
 
 `npm run dev` turns off encryption and HSTS. Use it only for trying the app locally.
 
-## Deploy
+## Supabase edition (hosted, for selling to multiple firms)
+
+One deployment serves many customer firms. Each firm's records are kept apart, each
+person has their own login with two-step verification, and you control each firm's seats
+and can suspend a firm.
+
+| Part | Where |
+|---|---|
+| Database, sign-in, API | Supabase project in London (eu-west-2): `supabase/migrations`, `supabase/functions/api` |
+| Web front end | Any static host. The scripts use Cloudflare Pages. `npm run build:web` builds `dist/web` with security headers |
+
+How it differs from the self-hosted server:
+
+- **Sign-in:** Supabase Auth with email and password plus an authenticator-app code (TOTP). Public sign-up is off: you create firms, and firm administrators invite their own staff from the **Team** screen.
+- **Data:** Postgres. All reads and writes go through the `api` Edge Function, which uses the same `core.js` rules, versioning and field-level audit trail as `server.js`. Browsers have no direct table access.
+- **Retention:** database triggers stop anyone deleting households or changing or deleting versions and audit entries, including the service role.
+- **Encryption at rest:** Supabase encrypts its storage (AES-256). There is no separate `DATA_KEY`.
+
+### Deploy
+
+1. Create a Supabase project in **London (eu-west-2)**. Use the Pro plan or above for real client data: Free projects pause and have no backups.
+2. In Supabase under Authentication > Emails, set up **custom SMTP** (Postmark, Resend, SES). The built-in sender only emails your own team, so customer invitations would not arrive.
+3. Install the Supabase CLI, run `supabase login` and `npx wrangler login`, then:
+
+```sh
+export SUPABASE_PROJECT_REF=abcdefghijklmnopqrst
+export SUPABASE_PUBLISHABLE_KEY=sb_publishable_...      # never the secret key
+export APP_ORIGIN=https://wealth-profiler.pages.dev    # or your own domain
+export PAGES_PROJECT=wealth-profiler
+scripts/deploy-supabase.sh
+```
+
+### Running the service
+
+```sh
+export SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY=sb_secret_... APP_ORIGIN=https://...
+node scripts/firms.js create "Alder Wealth" jo@alderwealth.co.uk "Jo Alder" 5   # firm, seats, first administrator
+node scripts/firms.js list
+node scripts/firms.js seats <firm-id> 10
+node scripts/firms.js suspend <firm-id>     # e.g. unpaid; data is kept
+```
+
+Not built yet: self-service sign-up and card billing (for example Stripe), which would call
+the same actions as `firms.js`. Before selling, you will also need a data processing agreement
+with each customer, Supabase's DPA, a privacy notice, ICO registration, and usually Cyber
+Essentials and a penetration test. Regulated firms will ask for these in their supplier due diligence.
+
+After changing `public/core.js`, run `npm run sync:supabase`. A test fails until you do.
+
+## Deploy (self-hosted, one firm)
+
+### Fly.io (London) — quickest route
+
+Fly.io gives you HTTPS, a UK region and an encrypted volume, and runs the Dockerfile
+as it is. Needs a Fly account with a card on file (about $3–5 a month for one small
+machine and a 1 GB volume).
+
+```sh
+curl -L https://fly.io/install.sh | sh      # install flyctl
+fly auth login
+scripts/deploy-fly.sh my-firm-profiler adviser1   # app name, then one or more usernames
+```
+
+The script asks for each password, creates the encryption key and prints it once
+(**save it in a password manager**), stores both as Fly secrets, creates the volume
+and deploys. Share `https://<app-name>.fly.dev` and the username and password with each user.
+Run exactly one machine; the data is on a single volume. Turn on daily volume
+snapshots with `fly volumes update <id> --scheduled-snapshots=true`.
+
+To add or change users later, run the script again with every username. It keeps the existing key.
+
+### DCDeploy
+
+DCDeploy builds the Dockerfile from a GitHub repository. Its data centre is in Frankfurt (EU).
+
+1. Connect this repository (private). Leave the build context and Dockerfile path at `./`.
+2. Port: `8080`. Run **one instance, always on**; do not enable scale-to-zero or add instances, because the data sits on a single volume.
+3. Environment variables: `AUTH_USERS` and `DATA_KEY` (step 1 above), and `CLIENT_IP_HEADER=cf-connecting-ip` if DCDeploy confirms it sets that header on every request (it appears to sit behind Cloudflare). Without it, failed sign-ins from anyone count against the same address.
+4. Add a persistent volume mounted at `/data`.
+5. Back the volume up on a schedule yourself; DCDeploy's docs do not describe built-in snapshots. Keep the backup and `DATA_KEY` in different places.
+
+### Any other host
 
 ### 1. Create users and an encryption key
 
@@ -72,7 +153,7 @@ serve the patched 0.20.3 from your own server; the app uses it automatically.
 
 | Area | How |
 |---|---|
-| Sign-in | Named users, passwords hashed with scrypt, 10 failed attempts lock the address out for 15 minutes |
+| Sign-in | Named users, passwords hashed with scrypt, 10 failed attempts lock the address out for 15 minutes. Behind a proxy, set `CLIENT_IP_HEADER` to the header carrying the real client address (Fly.io: `fly-client-ip`) |
 | Storage | One folder per household under `DATA_DIR/households/<id>/` |
 | Encryption at rest | AES-256-GCM on every file, including the audit log |
 | Versions | Every save is kept in `versions/`. Two people editing at once cannot overwrite each other: the second save is refused and they reload |
@@ -113,7 +194,10 @@ public/core.js      schema, tax engine, balance sheet, KYC/AML rules (browser an
 public/app.js       the interface
 public/index.html   page shell
 public/styles.css   styles
-server.js           API, sign-in, encryption, versions, audit trail
+public/cloud.js     sign-in and two-step verification for the Supabase edition
+server.js           API, sign-in, encryption, versions, audit trail (self-hosted)
+supabase/           database migration and the `api` Edge Function (Supabase edition)
+scripts/firms.js    create and manage customer firms (Supabase edition)
 scripts/build.js    builds dist/wealth-profiler.html, a single file that runs without a server
 test/               node:test suites
 ```
