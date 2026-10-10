@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-/* Household Wealth Profiler server. No dependencies: Node 18+ only.
+/* Household Wealth Profiler server. Node 18+; the "pg" package only when DATABASE_URL is set.
    - Serves the app from ./public
    - Named logins (HTTP Basic over HTTPS) with scrypt-hashed passwords
    - Client files encrypted at rest with AES-256-GCM (DATA_KEY)
+   - Stored as files under DATA_DIR, or in PostgreSQL when DATABASE_URL is set (db/schema.sql)
    - Every save is versioned; older versions are kept
    - Server-side audit trail: who changed which field, when, from what, to what
    - No delete endpoint: AML records must be kept for 5 years after the relationship ends
@@ -11,6 +12,10 @@
      node server.js                          start the server
      node server.js hash-password NAME PASS  print an AUTH_USERS entry
      node server.js gen-key                  print a new DATA_KEY
+     node server.js import-files [DIR]       copy file-store households (DATA_DIR) into PostgreSQL
+
+   Settings come from the environment, or from a .env file next to this one (Node 20.12+).
+   Variables already set in the environment win over .env.
 */
 'use strict';
 const http = require('http');
@@ -32,9 +37,15 @@ if (cmd === 'hash-password') {
 if (cmd === 'gen-key') { console.log(crypto.randomBytes(32).toString('base64')); process.exit(0); }
 
 /* ---------- configuration ---------- */
+const ENV_FILE = path.join(__dirname, '.env');
+if (fs.existsSync(ENV_FILE)) {
+  if (typeof process.loadEnvFile === 'function') process.loadEnvFile(ENV_FILE);
+  else console.warn('.env found but this Node version cannot read it (needs 20.12+). Set the variables in the environment instead.');
+}
 const PORT = +process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
+const DATABASE_URL = process.env.DATABASE_URL || '';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 2 * 1024 * 1024;
 // Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
@@ -50,7 +61,7 @@ if (process.env.DATA_KEY) {
   KEY = Buffer.from(process.env.DATA_KEY, 'base64');
   if (KEY.length !== 32) { console.error('DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key'); process.exit(1); }
 }
-if (!USERS.size) { console.error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).'); process.exit(1); }
+if (!USERS.size && cmd !== 'import-files') { console.error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).'); process.exit(1); }
 if (!KEY && process.env.ALLOW_PLAINTEXT !== '1') { console.error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.'); process.exit(1); }
 
 /* ---------- encryption at rest ---------- */
@@ -71,34 +82,132 @@ function open(text) {
 }
 
 /* ---------- storage ---------- */
+// Two stores with the same shape. Records and audit entries are sealed (encrypted when DATA_KEY
+// is set) before they reach the disk or the database.
+//   list()               every current record
+//   get(id)              current record or null
+//   create(rec, audit)   new household at version 1
+//   update(id, decide)   decide(current) returns { result, next?, audit? }; when next is given it is
+//                        saved as the new version together with its audit entries, atomically
+//   audit(id)            audit entries, newest first
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const hhDir = id => path.join(DATA_DIR, 'households', id);
-async function writeAtomic(file, text) {
-  await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = file + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
-  await fsp.writeFile(tmp, text, { mode: 0o600 });
-  await fsp.rename(tmp, file);
+
+function fileStore(dir) {
+  const hhDir = id => path.join(dir, 'households', id);
+  async function writeAtomic(file, text) {
+    await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    const tmp = file + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
+    await fsp.writeFile(tmp, text, { mode: 0o600 });
+    await fsp.rename(tmp, file);
+  }
+  async function readRecord(id) {
+    try { return JSON.parse(open(await fsp.readFile(path.join(hhDir(id), 'current.json'), 'utf8'))); }
+    catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  }
+  async function writeRecord(rec) {
+    const text = seal(JSON.stringify(rec));
+    await writeAtomic(path.join(hhDir(rec.id), 'versions', `${String(rec.version).padStart(6, '0')}.json`), text);
+    await writeAtomic(path.join(hhDir(rec.id), 'current.json'), text);
+  }
+  async function appendAudit(id, entries) {
+    if (!entries.length) return;
+    const lines = entries.map(e => seal(JSON.stringify(e)) + '\n').join('');
+    await fsp.mkdir(hhDir(id), { recursive: true, mode: 0o700 });
+    await fsp.appendFile(path.join(hhDir(id), 'audit.log'), lines, { mode: 0o600 });
+  }
+  async function ids() {
+    try { return (await fsp.readdir(path.join(dir, 'households'))).filter(x => ID_RE.test(x)); }
+    catch (e) { if (e.code === 'ENOENT') return []; throw e; }
+  }
+  return {
+    describe: 'data in ' + dir,
+    async init() { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); },
+    ids,
+    async list() { const out = []; for (const id of await ids()) { const rec = await readRecord(id); if (rec) out.push(rec); } return out; },
+    get: readRecord,
+    async versions(id) {
+      let names = [];
+      try { names = (await fsp.readdir(path.join(hhDir(id), 'versions'))).filter(f => /^\d+\.json$/.test(f)).sort(); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+      const out = [];
+      for (const f of names) out.push(JSON.parse(open(await fsp.readFile(path.join(hhDir(id), 'versions', f), 'utf8'))));
+      return out;
+    },
+    async create(rec, audit) { await writeRecord(rec); await appendAudit(rec.id, audit); },
+    async update(id, decide) {
+      const out = await decide(await readRecord(id));
+      if (out.next) { await writeRecord(out.next); await appendAudit(id, out.audit || []); }
+      return out.result;
+    },
+    async audit(id) {
+      let text = '';
+      try { text = await fsp.readFile(path.join(hhDir(id), 'audit.log'), 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+      return text.split('\n').filter(Boolean).map(l => JSON.parse(open(l))).reverse();
+    },
+  };
 }
-async function readRecord(id) {
-  try { return JSON.parse(open(await fsp.readFile(path.join(hhDir(id), 'current.json'), 'utf8'))); }
-  catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+
+function pgStore(url) {
+  let pg;
+  try { pg = require('pg'); } catch (e) { console.error('DATABASE_URL is set but the "pg" package is missing. Run: npm install'); process.exit(1); }
+  const pool = new pg.Pool({ connectionString: url, max: +process.env.DATABASE_POOL_MAX || 10 });
+  pool.on('error', err => console.error(new Date().toISOString(), 'database connection error', err.message));
+  async function tx(fn) {
+    const c = await pool.connect();
+    try { await c.query('begin'); const r = await fn(c); await c.query('commit'); return r; }
+    catch (e) { await c.query('rollback').catch(() => {}); throw e; }
+    finally { c.release(); }
+  }
+  const sealAll = entries => entries.map(e => seal(JSON.stringify(e)));
+  async function insertVersion(c, rec, audit) {
+    const doc = seal(JSON.stringify(rec));
+    await c.query('insert into household_versions (household_id, version, doc, saved_at) values ($1, $2, $3, $4)', [rec.id, rec.version, doc, rec.updatedAt]);
+    if (audit.length) await c.query('insert into audit_log (household_id, entry) select $1, unnest($2::text[])', [rec.id, sealAll(audit)]);
+    return doc;
+  }
+  let where = 'PostgreSQL';
+  try { const u = new URL(url); where = `PostgreSQL ${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`; } catch (e) {}
+  return {
+    describe: 'data in ' + where,
+    async init() { await pool.query(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8')); },
+    async list() { return (await pool.query('select doc from households')).rows.map(r => JSON.parse(open(r.doc))); },
+    async get(id) { const r = (await pool.query('select doc from households where id = $1', [id])).rows[0]; return r ? JSON.parse(open(r.doc)) : null; },
+    async create(rec, audit) {
+      await tx(async c => {
+        const doc = seal(JSON.stringify(rec));
+        await c.query('insert into households (id, version, doc, updated_at) values ($1, $2, $3, $4)', [rec.id, rec.version, doc, rec.updatedAt]);
+        await insertVersion(c, rec, audit);
+      });
+    },
+    // The row lock (select ... for update) serialises saves across every server process
+    async update(id, decide) {
+      return tx(async c => {
+        const r = (await c.query('select doc from households where id = $1 for update', [id])).rows[0];
+        const out = await decide(r ? JSON.parse(open(r.doc)) : null);
+        if (out.next) {
+          const doc = await insertVersion(c, out.next, out.audit || []);
+          await c.query('update households set version = $2, doc = $3, updated_at = $4 where id = $1', [id, out.next.version, doc, out.next.updatedAt]);
+        }
+        return out.result;
+      });
+    },
+    async audit(id) { return (await pool.query('select entry from audit_log where household_id = $1 order by id desc', [id])).rows.map(r => JSON.parse(open(r.entry))); },
+    // import-files: copies one household's whole history; false when it is already there
+    async importHousehold(versions, audit) {
+      const last = versions[versions.length - 1];
+      return tx(async c => {
+        if ((await c.query('select 1 from households where id = $1', [last.id])).rows.length) return false;
+        await c.query('insert into households (id, version, doc, updated_at) values ($1, $2, $3, $4)', [last.id, last.version, seal(JSON.stringify(last)), last.updatedAt]);
+        for (const v of versions) await insertVersion(c, v, []);
+        if (audit.length) await c.query('insert into audit_log (household_id, entry) select $1, unnest($2::text[])', [last.id, sealAll(audit)]);
+        return true;
+      });
+    },
+    end: () => pool.end(),
+  };
 }
-async function writeRecord(rec) {
-  const text = seal(JSON.stringify(rec));
-  await writeAtomic(path.join(hhDir(rec.id), 'versions', `${String(rec.version).padStart(6, '0')}.json`), text);
-  await writeAtomic(path.join(hhDir(rec.id), 'current.json'), text);
-}
-async function appendAudit(id, entries) {
-  if (!entries.length) return;
-  const lines = entries.map(e => seal(JSON.stringify(e)) + '\n').join('');
-  await fsp.mkdir(hhDir(id), { recursive: true, mode: 0o700 });
-  await fsp.appendFile(path.join(hhDir(id), 'audit.log'), lines, { mode: 0o600 });
-}
-async function readAudit(id) {
-  let text = '';
-  try { text = await fsp.readFile(path.join(hhDir(id), 'audit.log'), 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-  return text.split('\n').filter(Boolean).map(l => JSON.parse(open(l))).reverse();
-}
+
+const store = DATABASE_URL ? pgStore(DATABASE_URL) : fileStore(DATA_DIR);
+
 // One write at a time per household
 const locks = new Map();
 function withLock(id, fn) {
@@ -202,10 +311,7 @@ async function handle(req, res) {
   if (p === '/api/me' && req.method === 'GET') return send(res, 200, { user, encrypted: !!KEY });
 
   if (p === '/api/households' && req.method === 'GET') {
-    let ids = [];
-    try { ids = (await fsp.readdir(path.join(DATA_DIR, 'households'))).filter(x => ID_RE.test(x)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-    const list = [];
-    for (const id of ids) { const rec = await readRecord(id); if (rec) list.push(summarise(rec)); }
+    const list = (await store.list()).map(summarise);
     list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
     return send(res, 200, list);
   }
@@ -215,10 +321,7 @@ async function handle(req, res) {
     delete state.audit;
     const now = new Date().toISOString();
     const rec = { id: crypto.randomUUID(), version: 1, state, createdAt: now, createdBy: user, updatedAt: now, updatedBy: user };
-    await withLock(rec.id, async () => {
-      await writeRecord(rec);
-      await appendAudit(rec.id, [{ ts: now, user, field: 'created', from: '', to: state.household.name || '' }]);
-    });
+    await withLock(rec.id, () => store.create(rec, [{ ts: now, user, field: 'created', from: '', to: state.household.name || '' }]));
     return send(res, 201, { id: rec.id, version: rec.version });
   }
   const m = /^\/api\/households\/([^/]+)(\/audit)?$/.exec(p);
@@ -226,29 +329,27 @@ async function handle(req, res) {
     const id = m[1];
     if (!ID_RE.test(id)) return send(res, 404, { error: 'Not found' });
     if (m[2] && req.method === 'GET') {
-      if (!(await readRecord(id))) return send(res, 404, { error: 'Not found' });
-      return send(res, 200, (await readAudit(id)).slice(0, 5000));
+      if (!(await store.get(id))) return send(res, 404, { error: 'Not found' });
+      return send(res, 200, (await store.audit(id)).slice(0, 5000));
     }
     if (!m[2] && req.method === 'GET') {
-      const rec = await readRecord(id);
+      const rec = await store.get(id);
       return rec ? send(res, 200, rec) : send(res, 404, { error: 'Not found' });
     }
     if (!m[2] && req.method === 'PUT') {
       const body = await readBody(req);
-      return withLock(id, async () => {
-        const rec = await readRecord(id);
-        if (!rec) return send(res, 404, { error: 'Not found' });
-        if (+body.version !== rec.version) return send(res, 409, { error: 'This household was changed by someone else', version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt });
+      const [status, out] = await withLock(id, () => store.update(id, rec => {
+        if (!rec) return { result: [404, { error: 'Not found' }] };
+        if (+body.version !== rec.version) return { result: [409, { error: 'This household was changed by someone else', version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt }] };
         const state = HWP.normalise(body.state);
         delete state.audit;
         const now = new Date().toISOString();
         const changes = HWP.diff(rec.state, state).map(c => ({ ts: now, user, ...c, version: rec.version + 1 }));
-        if (!changes.length) return send(res, 200, { version: rec.version, changes: 0 });
+        if (!changes.length) return { result: [200, { version: rec.version, changes: 0 }] };
         const next = { ...rec, version: rec.version + 1, state, updatedAt: now, updatedBy: user };
-        await writeRecord(next);
-        await appendAudit(id, changes);
-        return send(res, 200, { version: next.version, changes: changes.length });
-      });
+        return { next, audit: changes, result: [200, { version: next.version, changes: changes.length }] };
+      }));
+      return send(res, status, out);
     }
   }
   return send(res, 404, { error: 'Not found' });
@@ -263,8 +364,29 @@ const server = http.createServer((req, res) => {
 });
 server.headersTimeout = 20e3;
 server.requestTimeout = 30e3;
+// Copies households from a file store into PostgreSQL with their versions and audit trail
+async function importFiles(dir) {
+  if (!DATABASE_URL) { console.error('Set DATABASE_URL to the database to copy into.'); process.exit(1); }
+  const from = fileStore(path.resolve(dir));
+  await store.init();
+  let copied = 0, skipped = 0;
+  for (const id of await from.ids()) {
+    const versions = await from.versions(id);
+    if (!versions.length) { const cur = await from.get(id); if (cur) versions.push(cur); }
+    if (!versions.length) continue;
+    if (await store.importHousehold(versions, (await from.audit(id)).reverse())) copied++; else skipped++;
+  }
+  console.log(`Copied ${copied} household(s) from ${path.resolve(dir)} (${skipped} already in the database).`);
+  await store.end();
+}
+
 if (require.main === module) {
-  fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  server.listen(PORT, HOST, () => console.log(`Household Wealth Profiler on http://${HOST}:${PORT} · ${USERS.size} user(s) · encryption ${KEY ? 'on' : 'OFF'} · data in ${DATA_DIR}`));
+  if (cmd === 'import-files') {
+    importFiles(process.argv[3] || DATA_DIR).catch(e => { console.error(e.message); process.exit(1); });
+  } else {
+    store.init().then(() => {
+      server.listen(PORT, HOST, () => console.log(`Household Wealth Profiler on http://${HOST}:${PORT} · ${USERS.size} user(s) · encryption ${KEY ? 'on' : 'OFF'} · ${store.describe}`));
+    }, e => { console.error('Could not open storage:', e.message); process.exit(1); });
+  }
 }
 module.exports = { server };

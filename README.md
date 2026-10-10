@@ -5,11 +5,13 @@ clients, couples with one or two earners, children), runs KYC and AML checks, an
 produces a CFA-style economic balance sheet, a tax and allowances view, a risk
 profile with an investment policy statement, and an audit trail.
 
-There are no runtime dependencies. You need Node.js 18.17 or later.
+You need Node.js 18.17 or later (20.12 or later to read a `.env` file). The only runtime
+package is `pg`, and it is used only when the data is kept in PostgreSQL.
 
 ## Quick start (your own machine)
 
 ```sh
+npm install
 npm test          # tax, balance sheet, IHT, KYC rules, server security, Supabase edition
 npm run dev       # http://localhost:8080, sign in as demo / demo, data in ./data-dev
 ```
@@ -142,7 +144,48 @@ profiler.yourfirm.co.uk {
 }
 ```
 
-### 4. Optional: host the spreadsheet library yourself
+### 4. Optional: keep the data in PostgreSQL
+
+By default the server stores files under `DATA_DIR`. Set `DATABASE_URL` and it uses
+PostgreSQL 14 or later instead. It creates its tables on start-up from [db/schema.sql](db/schema.sql)
+(`households`, `household_versions`, `audit_log`). Database triggers refuse any delete or
+rewrite of households, versions and audit entries. Rows are encrypted with `DATA_KEY` just
+like the files, so the database never holds readable client data. Saves lock the household's
+row, so several server processes can share one database safely.
+
+Create a database and a user for the app (run once in `psql` as an administrator):
+
+```sql
+create user hwp_app with password 'a long random password';
+create database wealth_profiler owner hwp_app;
+```
+
+Then put the settings in `.env` next to `server.js` (copy [.env.example](.env.example)):
+
+```ini
+AUTH_USERS=sam:...                 # node server.js hash-password sam 'a long passphrase'
+DATA_KEY=...                       # node server.js gen-key
+DATABASE_URL=postgres://hwp_app:PASSWORD@localhost:5432/wealth_profiler
+```
+
+Run `npm install` and then `npm start`. The start-up line shows where the data is kept.
+`.env` belongs on the server only, never in `public/`: everything there is sent to browsers.
+Add `?sslmode=require` when the database is on another machine, and URL-encode special
+characters in the password.
+
+To move existing households from the file store, with their versions and audit trail:
+
+```sh
+node server.js import-files ./data     # households already in the database are skipped
+```
+
+Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
+keep `DATA_KEY` in a different place from the backups.
+
+To run the PostgreSQL tests, point them at an empty scratch database:
+`TEST_DATABASE_URL=postgres://... node --test test/postgres.test.js`.
+
+### 5. Optional: host the spreadsheet library yourself
 
 Excel import and export use SheetJS. By default the app loads version 0.18.5 from
 cdnjs. That version has two published vulnerabilities in file parsing
@@ -154,9 +197,9 @@ serve the patched 0.20.3 from your own server; the app uses it automatically.
 | Area | How |
 |---|---|
 | Sign-in | Named users, passwords hashed with scrypt, 10 failed attempts lock the address out for 15 minutes. Behind a proxy, set `CLIENT_IP_HEADER` to the header carrying the real client address (Fly.io: `fly-client-ip`) |
-| Storage | One folder per household under `DATA_DIR/households/<id>/` |
-| Encryption at rest | AES-256-GCM on every file, including the audit log |
-| Versions | Every save is kept in `versions/`. Two people editing at once cannot overwrite each other: the second save is refused and they reload |
+| Storage | One folder per household under `DATA_DIR/households/<id>/`, or PostgreSQL when `DATABASE_URL` is set |
+| Encryption at rest | AES-256-GCM on every file or database row, including the audit log |
+| Versions | Every save is kept in `versions/` (or `household_versions`). Two people editing at once cannot overwrite each other: the second save is refused and they reload |
 | Audit trail | The server compares each save with the previous version and logs who changed which field, when, from what and to what |
 | Retention | There is no delete endpoint. The Money Laundering Regulations require records for 5 years after the relationship ends. Handle erasure requests through an admin process |
 | Web security | Content Security Policy, no framing, same-origin check on writes, 2 MB request limit, input is filtered to known fields |

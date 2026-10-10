@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "ALLOW_PLAINTEXT=1 HSTS=0 AUTH_USERS=\"$(node server.js hash-password demo demo)\" DATA_DIR=./data-dev node server.js",
+    "dev": "node scripts/dev.js",
     "test": "node --test test/*.test.js",
     "build": "node scripts/build.js",
     "sync:supabase": "node -e \"require('fs').copyFileSync('public/core.js','supabase/functions/_shared/core.js')\"",
@@ -18,5 +18,8 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
   }
 }

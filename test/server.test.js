@@ -20,7 +20,8 @@ const J = { 'Content-Type': 'application/json' };
 let proc;
 
 test.before(async () => {
-  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY, CLIENT_IP_HEADER: 'X-Client-IP',
+  // DATABASE_URL is blanked so a developer's .env cannot point the test at a real database
+  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY, DATABASE_URL: '', CLIENT_IP_HEADER: 'X-Client-IP',
     AUTH_USERS: [user('sam', 'correct horse'), user('chris', 'battery staple')].join(';') }, stdio: 'pipe' });
   for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
   throw new Error('server did not start');
