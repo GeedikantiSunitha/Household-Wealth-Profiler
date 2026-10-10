@@ -215,6 +215,10 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       await click('[data-act="reloadHousehold"]');
       await until(`document.querySelector('#f-household-0-reference')?.value === 'HH-OTHER'`, 'their version to load');
     });
+    await step('top-bar Export JSON saves the open household (the toolbar is wired)', async () => {
+      await click('#btnJson');
+      await until(`/^Downloaded .+-profile\\.json$/.test(document.querySelector('#toast').textContent)`, 'the download message', 5000);
+    });
     await step('phone width (390 px): household, balance sheet, KYC', async () => {
       for (const id of ['household', 'bs', 'kyc']) {
         await click(`[data-nav="${id}"]`);
