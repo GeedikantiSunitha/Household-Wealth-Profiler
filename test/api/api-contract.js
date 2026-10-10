@@ -181,7 +181,7 @@ function apiContract(ctx) {
     });
 
     test('the app files are served with their types', async () => {
-      const files = { '/': /^text\/html/, '/index.html': /^text\/html/, '/app.js': /^text\/javascript/, '/core.js': /^text\/javascript/,
+      const files = { '/': /^text\/html/, '/index.html': /^text\/html/, '/js/main.js': /^text\/javascript/, '/core.js': /^text\/javascript/,
         '/cloud.js': /^text\/javascript/, '/config.js': /^text\/javascript/, '/styles.css': /^text\/css/ };
       for (const [p, type] of Object.entries(files)) {
         const r = await call('GET', p, { who: sam });

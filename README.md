@@ -282,7 +282,7 @@ The agreement date starts an annual mandate review in Reviews due.
 
 ```
 packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
-apps/web/public/app.js      the interface
+apps/web/public/js/main.js  the interface (browser modules; bundled by esbuild for npm run build)
 apps/web/public/index.html  page shell
 apps/web/public/styles.css  styles
 apps/web/public/cloud.js    sign-in and two-step verification for the Supabase edition

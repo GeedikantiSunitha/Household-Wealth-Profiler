@@ -15,7 +15,7 @@ const safe = js => js.replace(/<\/script/gi, '<\\/script');
 const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))
   .replace(/<script src="(config|cloud)\.js"><\/script>\n?/g, '') // the single file has no server or cloud sign-in
   .replace('<script src="core.js"></script>', () => `<script>\n${safe(readCore())}\n</script>`)
-  .replace('<script src="app.js"></script>', () => `<script>\n${safe(read('app.js'))}\n</script>`);
+  .replace('<script type="module" src="js/main.js"></script>', () => `<script>\n${safe(read('js/main.js'))}\n</script>`);
 const fonts = html.match(/<link rel="preconnect"[^>]*>\s*<link rel="stylesheet" href="https:\/\/fonts[^>]*>/)[0];
 fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
 const head = html.slice(0, html.indexOf('</head>')).replace('<link rel="stylesheet" href="styles.css">', `<style>\n${css}\n</style>`);
