@@ -50,6 +50,23 @@ export PAGES_PROJECT=wealth-profiler
 scripts/deploy-supabase.sh
 ```
 
+### The database on other PostgreSQL servers
+
+`supabase db push` (in the deploy script) applies `supabase/migrations`. The same migrations
+also run on self-hosted Supabase or on plain PostgreSQL 14+ with:
+
+```sh
+DATABASE_URL=postgres://... node scripts/supabase-db.js migrate    # new migrations only
+DATABASE_URL=postgres://... node scripts/supabase-db.js backfill   # recompute client-list columns
+```
+
+It records migrations in the Supabase CLI's own table, so it and `supabase db push` can be
+mixed. On plain PostgreSQL it first creates stand-ins for Supabase's `auth` schema and roles
+([supabase/plain-postgres.sql](supabase/plain-postgres.sql)); run that first time as a
+superuser. `backfill` fills columns added by later migrations (such as review due dates) for
+households saved before them. It changes only those list columns, never saved data, versions
+or the audit trail. Sign-in and the API still need Supabase Auth and Edge Functions.
+
 ### Running the service
 
 ```sh
@@ -271,8 +288,9 @@ public/styles.css   styles
 public/cloud.js     sign-in and two-step verification for the Supabase edition
 server.js           API, sign-in, encryption, versions, audit trail (self-hosted)
 db/                 migrations and migration runner for server.js with PostgreSQL
-supabase/           database migration and the `api` Edge Function (Supabase edition)
+supabase/           database migrations and the `api` Edge Function (Supabase edition)
 scripts/firms.js    create and manage customer firms (Supabase edition)
+scripts/supabase-db.js  apply Supabase migrations to any PostgreSQL 14+, backfill list columns
 scripts/build.js    builds dist/wealth-profiler.html, a single file that runs without a server
 test/               node:test suites
 ```

@@ -28,7 +28,7 @@ async function readBody(req) {
   try { return text ? JSON.parse(text) : {}; } catch (e) { throw new HttpError(400, 'Invalid JSON'); }
 }
 
-function summarise(HWP, state) {
+export function summarise(HWP, state) {
   const s = HWP.normalise(state);
   let stage = '', rating = '', nextReview = '', blockers = 0, due = '', overdue = 0;
   try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview || ''; blockers = O.blockerCount; const R = E.reviews(O); due = R.nextDue; overdue = R.overdue; } catch (e) { stage = 'Error'; }

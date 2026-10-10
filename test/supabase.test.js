@@ -1,5 +1,6 @@
-// Supabase edition: runs the real migration in PGlite (Postgres in WebAssembly) with stand-ins for
-// Supabase's auth schema and roles, and drives the real Edge Function handler against it.
+// Supabase edition: runs the real migrations in PGlite (Postgres in WebAssembly) through
+// scripts/supabase-db.js, with stand-ins for Supabase's auth schema and roles
+// (supabase/plain-postgres.sql), and drives the real Edge Function handler against it.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -8,17 +9,12 @@ const path = require('node:path');
 const H = require('../public/core.js');
 
 const ROOT = path.join(__dirname, '..');
-const MIGRATIONS = path.join(ROOT, 'supabase', 'migrations');
 const ORIGIN = 'https://app.example.co.uk';
 let pg, handle;
 
-const SUPABASE_STUB = `
-  create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;
-  create schema auth;
-  create table auth.users (id uuid primary key default gen_random_uuid(), email text unique);
-  create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
-  grant usage on schema auth, public to anon, authenticated, service_role;
-  grant references, select on auth.users to service_role;`;
+// The same path an operator uses on plain PostgreSQL: Supabase stand-ins, then every migration, tracked
+const { migrateSupabase, backfill } = require('../scripts/supabase-db.js');
+const pgl = () => ({ query: async (sql, params) => (await pg.query(sql, params)).rows, exec: sql => pg.exec(sql) });
 
 // Every API query runs as service_role, as it does on Supabase, so grants are tested too.
 async function q(sql, params = []) {
@@ -68,8 +64,7 @@ test.before(async () => {
   const { PGlite } = await import('@electric-sql/pglite');
   ({ handle } = await import('../supabase/functions/api/handler.mjs'));
   pg = new PGlite();
-  await pg.exec(SUPABASE_STUB);
-  for (const f of fs.readdirSync(MIGRATIONS).sort()) await pg.exec(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8'));
+  await migrateSupabase(pgl());
   for (const [k, name, seats, status] of [['a', 'Alder Wealth', 3, 'active'], ['b', 'Birch Partners', 5, 'active'], ['s', 'Suspended Ltd', 5, 'suspended']])
     F[k] = (await pg.query(`insert into firms (name, seats, status) values ($1, $2, $3) returning id`, [name, seats, status])).rows[0].id;
   await addUser('sam', F.a, 'Sam Adviser', 'admin');
@@ -184,4 +179,27 @@ test('only the app’s own site may call the API from a browser', async () => {
   const evil = await call('GET', '/me', { token: 'sam', origin: 'https://evil.example' });
   assert.equal(evil.headers.get('access-control-allow-origin'), null);
   assert.equal((await call('POST', '/households', { token: 'sam', body: undefined })).status, 415);
+});
+
+test('migrations are tracked: running them again changes nothing', async () => {
+  const before = (await pg.query(`select count(*)::int n from households`)).rows[0].n;
+  assert.deepEqual(await migrateSupabase(pgl()), []);
+  const t = (await pg.query(`select version, name from supabase_migrations.schema_migrations order by version`)).rows;
+  assert.deepEqual(t.map(r => r.name), ['init', 'reviews']);
+  assert.equal((await pg.query(`select count(*)::int n from households`)).rows[0].n, before);
+});
+
+test('backfill fills the list columns from saved state and touches nothing else', async () => {
+  const { body: { id } } = await call('POST', '/households', { token: 'sam', body: { state: H.sample() } });
+  const snap = async () => (await pg.query(`select h.version, h.state, h.stage, h.review_due, h.review_overdue, h.updated_at,
+    (select count(*)::int from household_versions v where v.household_id = h.id) versions,
+    (select count(*)::int from audit_log a where a.household_id = h.id) audit from households h where id = $1`, [id])).rows[0];
+  const good = await snap();
+  assert.ok(good.stage);
+  // As a row saved before the reviews migration: list columns empty
+  await pg.query(`update households set stage = '', review_due = '', review_overdue = 0 where id = $1`, [id]);
+  const r = await backfill(pgl());
+  assert.ok(r.updated >= 1);
+  assert.deepEqual(await snap(), good);
+  assert.equal((await backfill(pgl())).updated, 0, 'a second run finds nothing to do');
 });
