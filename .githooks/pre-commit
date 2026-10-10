@@ -1,0 +1,22 @@
+#!/bin/sh
+# Runs before every commit (turn on once per clone: git config core.hooksPath .githooks).
+# 1. Refuses to commit secrets files: .env and .env.* (except .env.example), and local data folders.
+# 2. Runs the test suite; the commit stops if any test fails.
+# The PostgreSQL tests also run when TEST_DATABASE_URL points at an empty scratch database.
+# Bypass only in an emergency, and say so in the pull request: git commit --no-verify
+
+blocked=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)\.env(\..+)?$|^data(-dev)?/' | grep -vE '(^|/)\.env\.example$')
+if [ -n "$blocked" ]; then
+  echo "pre-commit: refusing to commit secrets or local data:" >&2
+  echo "$blocked" | sed 's/^/  /' >&2
+  echo "Unstage them with: git restore --staged <file>" >&2
+  exit 1
+fi
+
+echo "pre-commit: running npm test" >&2
+if ! npm test --silent >/tmp/hwp-pre-commit.log 2>&1; then
+  grep -E "^(not ok|✖)|# fail|ℹ fail" /tmp/hwp-pre-commit.log | head -20 >&2
+  echo "pre-commit: tests failed, commit stopped. Full output: /tmp/hwp-pre-commit.log" >&2
+  exit 1
+fi
+grep -E "ℹ (tests|pass|fail)" /tmp/hwp-pre-commit.log | tr '\n' ' ' >&2; echo >&2
