@@ -36,33 +36,13 @@ if (cmd === 'hash-password') {
 }
 if (cmd === 'gen-key') { console.log(crypto.randomBytes(32).toString('base64')); process.exit(0); }
 
-/* ---------- configuration ---------- */
-const ENV_FILE = path.join(__dirname, '.env');
-if (fs.existsSync(ENV_FILE)) {
-  if (typeof process.loadEnvFile === 'function') process.loadEnvFile(ENV_FILE);
-  else console.warn('.env found but this Node version cannot read it (needs 20.12+). Set the variables in the environment instead.');
-}
-const PORT = +process.env.PORT || 8080;
-const HOST = process.env.HOST || '0.0.0.0';
-const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
-const DATABASE_URL = process.env.DATABASE_URL || '';
+/* ---------- configuration (apps/api/src/config) ---------- */
+let config;
+try { config = require('./apps/api/src/config').load({ command: cmd }); }
+catch (e) { console.error(e.message); process.exit(1); }
+const { port: PORT, host: HOST, dataDir: DATA_DIR, databaseUrl: DATABASE_URL, clientIpHeader: CLIENT_IP_HEADER, users: USERS, key: KEY } = config;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 2 * 1024 * 1024;
-// Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
-// to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.
-const CLIENT_IP_HEADER = (process.env.CLIENT_IP_HEADER || '').toLowerCase();
-const USERS = new Map();
-for (const entry of (process.env.AUTH_USERS || '').split(';').map(s => s.trim()).filter(Boolean)) {
-  const [name, salt, hash] = entry.split(':');
-  if (name && salt && hash) USERS.set(name, { salt, hash: Buffer.from(hash, 'hex') });
-}
-let KEY = null;
-if (process.env.DATA_KEY) {
-  KEY = Buffer.from(process.env.DATA_KEY, 'base64');
-  if (KEY.length !== 32) { console.error('DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key'); process.exit(1); }
-}
-if (!USERS.size && cmd !== 'import-files') { console.error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).'); process.exit(1); }
-if (!KEY && process.env.ALLOW_PLAINTEXT !== '1') { console.error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.'); process.exit(1); }
 
 /* ---------- encryption at rest ---------- */
 function seal(text) {
@@ -149,7 +129,7 @@ function fileStore(dir) {
 function pgStore(url) {
   let pg;
   try { pg = require('pg'); } catch (e) { console.error('DATABASE_URL is set but the "pg" package is missing. Run: npm install'); process.exit(1); }
-  const pool = new pg.Pool({ connectionString: url, max: +process.env.DATABASE_POOL_MAX || 10 });
+  const pool = new pg.Pool({ connectionString: url, max: config.databasePoolMax });
   pool.on('error', err => console.error(new Date().toISOString(), 'database connection error', err.message));
   async function tx(fn) {
     const c = await pool.connect();
@@ -267,7 +247,7 @@ const SEC_HEADERS = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
   'Cross-Origin-Opener-Policy': 'same-origin',
 };
-if (process.env.HSTS !== '0') SEC_HEADERS['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains';
+if (config.hsts) SEC_HEADERS['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains';
 function send(res, status, body, headers = {}) {
   const isJson = typeof body !== 'string' && !Buffer.isBuffer(body);
   const payload = isJson ? JSON.stringify(body) : body;

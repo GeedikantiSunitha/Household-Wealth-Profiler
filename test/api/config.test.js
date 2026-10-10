@@ -1,0 +1,73 @@
+// apps/api/src/config: every setting, its default, and the exact start-up refusals.
+// Each test passes its own environment and an empty project folder, so a developer's .env never counts.
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { load, parseUsers } = require('../../apps/api/src/config');
+
+const root = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-config-'));
+const USER = `sam:${'ab'.repeat(16)}:${'cd'.repeat(64)}`;
+const KEY = crypto.randomBytes(32).toString('base64');
+const ok = (extra = {}, opts = {}) => load({ env: { AUTH_USERS: USER, DATA_KEY: KEY, ...extra }, root: root(), ...opts });
+
+test('defaults when only users and key are set', () => {
+  const r = root();
+  const c = load({ env: { AUTH_USERS: USER, DATA_KEY: KEY }, root: r });
+  assert.equal(c.port, 8080);
+  assert.equal(c.host, '0.0.0.0');
+  assert.equal(c.dataDir, path.join(r, 'data'));
+  assert.equal(c.databaseUrl, '');
+  assert.equal(c.databasePoolMax, 10);
+  assert.equal(c.clientIpHeader, '');
+  assert.equal(c.hsts, true);
+  assert.equal(c.key.length, 32);
+  assert.equal(c.root, r);
+});
+
+test('settings from the environment', () => {
+  const c = ok({ PORT: '9001', HOST: '127.0.0.1', DATA_DIR: 'some/dir', DATABASE_URL: 'postgres://x', DATABASE_POOL_MAX: '3', CLIENT_IP_HEADER: 'Fly-Client-IP', HSTS: '0' });
+  assert.equal(c.port, 9001);
+  assert.equal(c.host, '127.0.0.1');
+  assert.equal(c.dataDir, path.resolve('some/dir'));
+  assert.equal(c.databaseUrl, 'postgres://x');
+  assert.equal(c.databasePoolMax, 3);
+  assert.equal(c.clientIpHeader, 'fly-client-ip');
+  assert.equal(c.hsts, false);
+});
+
+test('AUTH_USERS: entries split on ";", incomplete ones ignored, hash kept as bytes', () => {
+  const users = parseUsers(` ${USER} ; chris:${'ef'.repeat(16)}:${'01'.repeat(64)};broken:onlysalt;;`);
+  assert.deepEqual([...users.keys()], ['sam', 'chris']);
+  assert.equal(users.get('sam').salt, 'ab'.repeat(16));
+  assert.ok(Buffer.isBuffer(users.get('sam').hash));
+  assert.equal(users.get('sam').hash.length, 64);
+});
+
+test('start-up refusals keep their exact messages', () => {
+  assert.throws(() => load({ env: { AUTH_USERS: USER, DATA_KEY: 'c2hvcnQ=' }, root: root() }),
+    { message: 'DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key' });
+  assert.throws(() => load({ env: { DATA_KEY: KEY }, root: root() }),
+    { message: 'No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).' });
+  assert.throws(() => load({ env: { AUTH_USERS: USER }, root: root() }),
+    { message: 'DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.' });
+});
+
+test('ALLOW_PLAINTEXT=1 runs without a key; import-files runs without users', () => {
+  assert.equal(load({ env: { AUTH_USERS: USER, ALLOW_PLAINTEXT: '1' }, root: root() }).key, null);
+  assert.equal(load({ env: { DATA_KEY: KEY }, root: root(), command: 'import-files' }).users.size, 0);
+});
+
+test('.env in the project folder fills gaps but never replaces what is already set', () => {
+  const r = root();
+  fs.writeFileSync(path.join(r, '.env'), `AUTH_USERS=${USER}\nDATA_KEY=${KEY}\nPORT=7000\nHOST=10.0.0.1\nHSTS=0\n`);
+  const env = { HOST: '127.0.0.1', HSTS: '' };
+  const c = load({ env, root: r });
+  assert.equal(c.port, 7000, 'PORT comes from .env');
+  assert.equal(c.host, '127.0.0.1', 'HOST already set: .env does not win');
+  assert.equal(c.hsts, true, 'HSTS already set, even to empty: .env does not win');
+  assert.equal(env.PORT, '7000', '.env values are added to the environment, as process.loadEnvFile does');
+});

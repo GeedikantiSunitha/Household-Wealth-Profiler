@@ -8,6 +8,7 @@ COPY packages/core/package.json ./packages/core/
 # Only "pg" (for DATABASE_URL); dev packages are left out
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server.js ./
+COPY apps/api ./apps/api
 COPY db ./db
 COPY packages ./packages
 COPY public ./public
