@@ -11,6 +11,11 @@ import { gbp, gbpK, pct, fmtDate, fmtTs } from './lib/format.js';
 import { Store, saveStatus, logChange, LS_USER, setRenderer } from './api/store.js';
 import { FIELD_HELP, GROUP_HELP, NAV_HELP } from './content/help.js';
 import { HOW } from './content/how.js';
+import { memberName, isAdult } from './lib/people.js';
+import { VALIDATE, fieldsBlock, summary } from './components/form.js';
+import { bannerHTML } from './components/banner.js';
+import { howHTML } from './components/how.js';
+import { RECORD_ONLY, IMPACT, impactHTML, refreshImpact } from './components/impact.js';
 
 (function(){
 'use strict';
@@ -22,8 +27,6 @@ const {SCHEMA,COLS,SINGLES,YN,ROLES,WGROUP,EXP_CATS,ASSET_CLASSES,ROLLUP,fieldsO
 
 /* ---------- helpers ---------- */
 // $, esc, toast: lib/dom.js · gbp, gbpK, pct, fmtDate, fmtTs: lib/format.js
-const memberName=r=>state.E.memberName(r);
-const isAdult=m=>state.E.isAdult(m);
 
 /* ---------- storage: api/store.js (Store, saveStatus, logChange, LS_USER) ---------- */
 
@@ -51,97 +54,12 @@ function renderNav(){
 }
 
 /* ---------- help text: content/help.js (FIELD_HELP, GROUP_HELP, NAV_HELP) ---------- */
-const tipBtn=(label,text,cls='')=>text?`<button type="button" class="tip ${cls}" aria-label="About ${esc(label)}" data-tip="${esc(text)}">i</button>`:'';
 
 /* ---------- form rendering ---------- */
-function ownerOptions(withJoint){let o=withJoint?[['JOINT','Joint (adults equally)']]:[];return o.concat(state.S.members.map(m=>[m.ref,`${m.ref} · ${m.firstName||''} ${m.lastName||''}`.trim()]))}
-const VALIDATE={niNumber:v=>!v||H.validNino(v)?'':'Not a valid NI number',postcode:v=>!v||H.validPostcode(v)?'':'Check the postcode format',email:v=>!v||H.validEmail(v)?'':'Check the email address'};
-function fieldHTML(col,idx,f,val){
-  const id=`f-${col}-${idx}-${f.k}`;const data=`data-col="${col}" data-idx="${idx}" data-k="${f.k}"`;
-  const vmsg=VALIDATE[f.k]?VALIDATE[f.k](val):'';
-  const hint=vmsg?`<span class="hint err" id="${id}-h">${esc(vmsg)}</span>`:f.h?`<span class="hint" id="${id}-h">${esc(f.h)}</span>`:'';
-  const aria=(vmsg||f.h?` aria-describedby="${id}-h"`:'')+(vmsg?' aria-invalid="true"':'');
-  const tip=tipBtn(f.l,FIELD_HELP[`${col}.${f.k}`]||f.h);
-  if(f.t===YN)return `<div class="f chk"><input type="checkbox" id="${id}" ${data} ${yes(val)?'checked':''}><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span></div>`;
-  let ctl;
-  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?state.S.models.map(m=>[m.name,m.name]):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
-    ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':f.t==='model'?'Select model…':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
-  else if(f.t==='area')ctl=`<textarea id="${id}" ${data}${aria}>${esc(val)}</textarea>`;
-  else if(f.t==='date')ctl=`<input type="date" id="${id}" ${data}${aria} value="${esc(val)}">`;
-  else if(f.t==='num'||f.t==='pct'||f.t==='int')ctl=`<input type="number" inputmode="decimal" step="${f.t==='int'?1:'any'}" id="${id}" ${data}${aria} value="${esc(val)}">`;
-  else ctl=`<input type="text" id="${id}" ${data}${aria} value="${esc(val)}" autocomplete="off">`;
-  return `<div class="f${f.w?' wide':''}"><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span>${ctl}${hint}</div>`;
-}
-function fieldsBlock(key,idx,rec){const s=SCHEMA[key];
-  if(s.groups)return s.groups.filter(g=>!(g.adultOnly&&key==='members'&&!isAdult(rec))).map(g=>`<div class="grp"><h4>${esc(g.t)}${tipBtn(g.t,GROUP_HELP[g.t])}</h4><div class="fields">${g.fields.map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div></div>`).join('');
-  return `<div class="fields">${s.fields.map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div>`}
-function summary(key,r){
-  const who=r.owner?memberName(r.owner):'';
-  switch(key){
-    case 'members':{const a=state.E.ageOf(r);return [`${r.ref||'?'} · ${r.firstName||'Unnamed'} ${r.lastName||''}`,`${(ROLES.find(x=>x[0]===r.role)||[0,''])[1]} · ${a!=null?'age '+Math.floor(a):'no date of birth'}${r.employment&&isAdult(r)?' · '+r.employment:''}`,''];}
-    case 'income':return [r.type,`${who}${r.label?' · '+r.label:''}`,gbp(N(r.amount))+' p.a.'];
-    case 'expenses':return [r.label||'Spending',(EXP_CATS.find(x=>x[0]===r.cat)||[0,''])[1]+(has(r.duration)?` · ${r.duration} yrs`:''),gbp(N(r.amount))+' p.a.'];
-    case 'goals':return [r.label||'Goal',`in ${N(r.inYears)} years · ${r.priority||''}`,gbp(N(r.amount))];
-    case 'accounts':return [r.wrapper,`${who}${r.provider?' · '+r.provider:''}`,gbp(N(r.value))];
-    case 'db':return [r.scheme||'DB scheme',`${who} · ${r.status} · NRA ${r.nra}`,gbp(N(r.accrued))+' p.a.'];
-    case 'property':case 'other':return [r.type,`${who}${r.label?' · '+r.label:''}`,gbp(N(r.value))];
-    case 'liabilities':return [r.type,`${who}${r.lender?' · '+r.lender:''}${has(r.rate)?' · '+r.rate+'%':''}`,gbp(N(r.balance))];
-    case 'protection':return [r.type,`${who}${yes(r.inTrust)?' · in trust':''}`,gbp(N(r.sum))];
-    case 'models':{const eq=N(r.ukEq)+N(r.glEq)+N(r.emEq);return [r.name||'Model',`risk ${r.riskMin||'?'}–${r.riskMax||'?'}${r.benchmark?' · '+r.benchmark:''}`,`${eq}% equity`]}
-    case 'contacts':return [r.type||'Contact',`${fmtDate(r.date)}${r.with?' · '+r.with:''}`,''];
-    case 'actions':return [r.description||'Action',`${r.owner||''}${r.due?' · due '+fmtDate(r.due):''}`,r.status||''];
-    case 'complaints':return [(r.summary||'Complaint').slice(0,70),`received ${fmtDate(r.received)} · ${r.stage||''}`,r.outcome||''];
-  }return ['','',''];
-}
-function bannerHTML(household=true){let h='';
-  if(household&&state.S&&state.S.isSample)h+=`<div class="banner sample"><div><b>Sample household.</b> These are made-up figures to show how the model works. Replace them with client data, import a file, or start blank.</div></div>`;
-  if(state.banner)h+=`<div class="banner ${state.banner.cls||''}"><div>${state.banner.html}</div>${state.banner.sticky?'':'<button class="btn ghost x" type="button" data-act="closeBanner" aria-label="Dismiss">✕</button>'}</div>`;
-  return h}
 /* ---------- explaining impact ----------
    Each input section shows (1) which outputs it feeds and what its fields change, and (2) a live
    read-out of the headline figures compared with when the section was opened, updated as you type. */
-const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models']);
-function howHTML(key){const w=HOW[key];if(!w)return '';let open=true;try{open=localStorage.getItem(HOW_LS)!=='0'}catch(e){}
-  return `<div class="how"><div class="how-h"><b>How this section is used</b><span class="feeds">${w.feeds.map(f=>`<span class="feed">${esc(f)}</span>`).join('')}</span></div><details id="howDetails"${open?' open':''}><summary>What the inputs change</summary><ul>${w.pts.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></details></div>`}
-document.addEventListener('toggle',e=>{if(e.target.id==='howDetails')try{localStorage.setItem(HOW_LS,e.target.open?'1':'0')}catch(x){}},true);
-
-const sgn=n=>n>0?'+':'−';
-const DELTA={
-  money:(a,b)=>{const d=b-a;return !isFinite(d)||Math.abs(d)<0.5?null:[sgn(d)+gbpK(Math.abs(d)),Math.sign(d)]},
-  ratio:(a,b)=>{if(!isFinite(a)||!isFinite(b))return a===b?null:['changed',0];const d=b-a;return Math.abs(d)<0.005?null:[sgn(d)+Math.abs(d).toFixed(2)+'×',Math.sign(d)]},
-  pct:(a,b)=>{const d=(b-a)*100;return !isFinite(d)||Math.abs(d)<0.05?null:[sgn(d)+Math.abs(d).toFixed(1)+' pts',0]},
-  count:(a,b)=>{const d=b-a;return d?[sgn(d)+Math.abs(d),Math.sign(d)]:null},
-  text:(a,b)=>a===b?null:['was '+a,0]};
-function metrics(){const C=state.E.compute();const k=C.kpi;const T=C.tot.HH;const O=state.E.onboarding(C);
-  const fx=x=>isFinite(x)?x.toFixed(2)+'×':'n/a';
-  const fin=[
-    {id:'nw',k:'Economic net worth',v:T.A-T.L,f:gbpK,d:DELTA.money,up:'good'},
-    {id:'fr',k:'Funded ratio',v:T.L?T.A/T.L:Infinity,f:fx,d:DELTA.ratio,up:'good'},
-    {id:'cf',k:'Core funded ratio',v:k.coreFunded,f:fx,d:DELTA.ratio,up:'good'},
-    {id:'iht',k:'IHT on second death',v:k.iht,f:gbpK,d:DELTA.money,up:'bad'},
-    {id:'eq',k:'Equity exposure',v:k.totalEqPct,f:x=>pct(x),d:DELTA.pct,up:null}];
-  const kyc=[
-    {id:'st',k:'Onboarding status',v:O.stage,f:String,d:DELTA.text,up:null},
-    {id:'aml',k:'AML rating',v:`${O.rating} (score ${O.score})`,f:String,d:DELTA.text,up:null},
-    {id:'bl',k:'Blockers',v:O.blockerCount,f:String,d:DELTA.count,up:'bad'},
-    {id:'rv',k:'Items to review',v:O.warnCount,f:String,d:DELTA.count,up:'bad'}];
-  if(state.VIEW==='compliance')return kyc;
-  if(state.VIEW==='members')return [fin[0],fin[1],kyc[1],kyc[2],kyc[3]];
-  return [...fin,kyc[2]];
-}
-let IMPACT={view:null,base:{},why:''},impT;
-function imCell(m){const base=IMPACT.base[m.id];const d=base===undefined?null:m.d(base,m.v);let cls='';
-  if(d&&d[1]&&m.up)cls=(d[1]>0)===(m.up==='good')?'up':'down';
-  return `<div class="im" data-m="${m.id}"><div class="k">${esc(m.k)}</div><div class="v">${esc(m.f(m.v))}</div><div class="d ${cls}">${d?esc(d[0]):''}</div></div>`}
-function impactHTML(){const ms=metrics();
-  if(IMPACT.view!==state.VIEW)IMPACT={view:state.VIEW,base:Object.fromEntries(ms.map(m=>[m.id,m.v])),why:''};
-  return `<div class="impact" id="impact"><div class="impact-h"><b>Live effect of this section</b><span>Changes are compared with when you opened this section</span></div><div class="impact-grid">${ms.map(imCell).join('')}</div><div class="impact-why" id="impactWhy">${IMPACT.why||'Edit a field below and these figures update as you type.'}</div></div>`}
-function refreshImpact(label,f){const el=$('#impact');if(!el)return;const moved=[];
-  for(const m of metrics()){const cell=el.querySelector(`.im[data-m="${m.id}"]`);if(!cell)continue;const tmp=document.createElement('div');tmp.innerHTML=imCell(m);const nc=tmp.firstChild;
-    if(nc.querySelector('.v').textContent!==cell.querySelector('.v').textContent){moved.push(`${m.k} ${nc.querySelector('.v').textContent}`);nc.classList.add('flash');setTimeout(()=>nc.classList.remove('flash'),800)}
-    cell.replaceWith(nc)}
-  IMPACT.why=moved.length?`<b>${esc(label)}</b> changed: ${esc(moved.join(' · '))}.`:`<b>${esc(label)}</b> recorded. No change to the figures above${f&&f.h?': '+esc(f.h):'.'}`;
-  const w=$('#impactWhy');if(w)w.innerHTML=IMPACT.why}
+let impT;
 
 function renderInput(key){
   const s=SCHEMA[key];let h=`<div class="sec-head"><div><h2>${esc(s.title)}</h2><p>${esc(s.desc||'')}</p></div>`;
