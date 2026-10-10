@@ -1,0 +1,58 @@
+/* The API server: every request goes through the same steps, in this order.
+     1. GET /healthz answers without signing in (for the host's health checks)
+     2. sign-in: 429 while the address is locked out, 401 with a Basic challenge when not signed in
+     3. anything outside /api/ is one of the app's files (GET only, else 405)
+     4. any API call that changes something: same-site check (403), then JSON check (415)
+     5. the API routes; anything else is 404
+   An error a step raises with a status (413, 400) is sent with its message; any other error is
+   logged and answered "Server error" (500) without detail. */
+'use strict';
+const http = require('http');
+const path = require('path');
+const { securityHeaders, createSend, readBody } = require('./http/respond.js');
+const { createStatic } = require('./http/static.js');
+const { checkWrite } = require('./http/guards.js');
+const { createMeRoute } = require('./routes/me.js');
+const { createHouseholdRoutes } = require('./routes/households.js');
+const { ID_RE } = require('./repositories/ids.js');
+
+const CHALLENGE = { 'WWW-Authenticate': 'Basic realm="Household Wealth Profiler", charset="UTF-8"' };
+
+function createApp({ config, households, authenticate }) {
+  const send = createSend(securityHeaders({ hsts: config.hsts }));
+  const serveStatic = createStatic({ publicDir: path.join(config.root, 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
+  const routes = [
+    createMeRoute({ send, encrypted: !!config.key }),
+    createHouseholdRoutes({ households, ID_RE, send, readBody }),
+  ];
+
+  async function handle(req, res) {
+    const url = new URL(req.url, 'http://localhost');
+    const p = url.pathname;
+    if (p === '/healthz') return send(res, 200, { ok: true });
+    const auth = authenticate(req);
+    if (!auth || auth.locked) {
+      return send(res, auth && auth.locked ? 429 : 401, { error: auth && auth.locked ? 'Too many failed sign-ins. Try again in 15 minutes.' : 'Sign in required' },
+        auth && auth.locked ? {} : CHALLENGE);
+    }
+    const user = auth.user;
+    if (!p.startsWith('/api/')) return req.method === 'GET' ? serveStatic(req, res, p) : send(res, 405, { error: 'Method not allowed' });
+    const refused = checkWrite(req);
+    if (refused) return send(res, ...refused);
+    for (const route of routes) if (await route(req, res, p, user)) return;
+    return send(res, 404, { error: 'Not found' });
+  }
+
+  const server = http.createServer((req, res) => {
+    handle(req, res).catch(err => {
+      const status = err.status || 500;
+      if (status === 500) console.error(new Date().toISOString(), req.method, req.url, err);
+      if (!res.headersSent) send(res, status, { error: status === 500 ? 'Server error' : err.message });
+    });
+  });
+  server.headersTimeout = 20e3;
+  server.requestTimeout = 30e3;
+  return { server, handle };
+}
+
+module.exports = { createApp };
