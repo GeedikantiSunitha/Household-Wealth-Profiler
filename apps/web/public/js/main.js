@@ -5,17 +5,14 @@
    - cloud:  the Supabase edition (config.js sets supabaseUrl); same as server mode, but signs in
              through cloud.js and calls the `api` Edge Function with a bearer token
    - local:  no server found; drafts stay in this browser only */
+import { state, setState } from './state.js';
+
 (function(){
 'use strict';
 const H=window.HWP;
 const {SCHEMA,COLS,SINGLES,YN,ROLES,WGROUP,EXP_CATS,ASSET_CLASSES,ROLLUP,fieldsOf,optList,N,has,yes}=H;
 
-/* ---------- state ---------- */
-let S,E;
-function setState(ns){S=ns;E=H.bind(S)}
-let VIEW='household',BSVIEW='HH';
-const OPEN=new Set(['members:0','income:0','accounts:0']);
-let banner=null;
+/* ---------- state (state.js: state.S, state.E, state.VIEW, state.BSVIEW, state.OPEN, state.banner, setState) ---------- */
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
@@ -26,8 +23,8 @@ const pct=(n,dp=0)=>isFinite(n)?(n*100).toFixed(dp)+'%':'–';
 const fmtDate=s=>{const d=H.parseDate(s);return d?d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):'–'};
 const fmtTs=s=>{const d=new Date(s);return isNaN(d)?s:d.toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})};
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2800)}
-const memberName=r=>E.memberName(r);
-const isAdult=m=>E.isAdult(m);
+const memberName=r=>state.E.memberName(r);
+const isAdult=m=>state.E.isAdult(m);
 
 /* ---------- storage: server or this browser ---------- */
 const LS='hwp-draft-v2',LS_USER='hwp-user';
@@ -41,7 +38,7 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     this.mode='local';try{this.user=localStorage.getItem(LS_USER)||''}catch(e){this.user=''}
   },
   loadLocal(){try{const r=localStorage.getItem(LS);return r?H.normalise(JSON.parse(r)):null}catch(e){return null}},
-  saveLocal(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}},
+  saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state.S))}catch(e){}},
   async api(method,path,body){const headers={'Accept':'application/json'};if(body)headers['Content-Type']='application/json';
     if(this.cloud){headers.Authorization='Bearer '+await this.cloud.token();headers.apikey=CFG.supabaseKey}
     const r=await fetch(this.cloud?CFG.supabaseUrl.replace(/\/+$/,'')+'/functions/v1/api/'+path:'api/'+path,{method,credentials:this.cloud?'omit':'same-origin',headers,body:body?JSON.stringify(body):undefined});
@@ -51,12 +48,12 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
   async list(){return this.api('GET','households')},
   async open(id){const j=await this.api('GET','households/'+encodeURIComponent(id));this.id=j.id;this.version=j.version;setState(H.normalise(j.state));this.dirty=false;return j},
   async create(state){const j=await this.api('POST','households',{state});this.id=j.id;this.version=j.version;return j},
-  async audit(){return this.mode==='server'&&this.id?this.api('GET','households/'+encodeURIComponent(this.id)+'/audit'):(S.audit||[]).slice().reverse()},
+  async audit(){return this.mode==='server'&&this.id?this.api('GET','households/'+encodeURIComponent(this.id)+'/audit'):(state.S.audit||[]).slice().reverse()},
   touch(){if(this.mode==='local'){clearTimeout(this.t);this.t=setTimeout(()=>this.saveLocal(),300);return}
     if(!this.id)return;this.dirty=true;saveStatus();clearTimeout(this.t);this.t=setTimeout(()=>this.flush(),1200)},
   async flush(){if(this.mode!=='server'||!this.id||!this.dirty||this.saving)return;this.saving=true;this.dirty=false;saveStatus();
-    try{const j=await this.api('PUT','households/'+encodeURIComponent(this.id),{version:this.version,state:S});this.version=j.version;this.err=null}
-    catch(e){if(e.status===409){this.err='conflict';banner={cls:'bad',sticky:true,html:'<b>Someone else saved this household since you opened it.</b> Your latest changes were not saved. <button class="btn" type="button" data-act="reloadHousehold">Reload their version</button>'};render()}
+    try{const j=await this.api('PUT','households/'+encodeURIComponent(this.id),{version:this.version,state:state.S});this.version=j.version;this.err=null}
+    catch(e){if(e.status===409){this.err='conflict';state.banner={cls:'bad',sticky:true,html:'<b>Someone else saved this household since you opened it.</b> Your latest changes were not saved. <button class="btn" type="button" data-act="reloadHousehold">Reload their version</button>'};render()}
       else{this.err='failed';this.dirty=true}}
     finally{this.saving=false;saveStatus();if(this.dirty&&!this.err)this.touch()}}
 };
@@ -68,9 +65,9 @@ function saveStatus(){const el=$('#saveState');if(!el)return;
 window.addEventListener('beforeunload',e=>{if(Store.mode==='server'&&(Store.dirty||Store.saving)){e.preventDefault();e.returnValue=''}});
 
 /* Local audit trail (server mode records it on the server instead) */
-function logChange(path,from,to){if(Store.mode!=='local')return;S.audit=S.audit||[];const now=Date.now();const last=S.audit[S.audit.length-1];
+function logChange(path,from,to){if(Store.mode!=='local')return;state.S.audit=state.S.audit||[];const now=Date.now();const last=state.S.audit[state.S.audit.length-1];
   if(last&&last.field===path&&last.user===Store.user&&now-new Date(last.ts).getTime()<15000){last.to=to;last.ts=new Date(now).toISOString();return}
-  S.audit.push({ts:new Date(now).toISOString(),user:Store.user||'Unnamed user',field:path,from:from??'',to:to??''});if(S.audit.length>2000)S.audit.shift()}
+  state.S.audit.push({ts:new Date(now).toISOString(),user:Store.user||'Unnamed user',field:path,from:from??'',to:to??''});if(state.S.audit.length>2000)state.S.audit.shift()}
 
 /* ---------- navigation ---------- */
 const NAV=[
@@ -80,19 +77,19 @@ const NAV=[
   ['Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
   ['Outputs',[['bs','Economic balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 function renderNav(){
-  if(VIEW==='clients'||VIEW==='team'||VIEW==='diary'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button><button type="button" data-act="diary" aria-current="${VIEW==='diary'}" title="Every review, expiry, action and complaint deadline across all households"><span>Reviews due</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':VIEW==='diary'?'Reviews due across the firm':'Choose a household to open';return}
-  let h='';let step=0;const O=E.onboarding();const bad=E.checks().filter(x=>x.lvl==='bad').length;
+  if(state.VIEW==='clients'||state.VIEW==='team'||state.VIEW==='diary'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${state.VIEW==='clients'}"><span>All households</span></button><button type="button" data-act="diary" aria-current="${state.VIEW==='diary'}" title="Every review, expiry, action and complaint deadline across all households"><span>Reviews due</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${state.VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=state.VIEW==='team'?'Team and access':state.VIEW==='diary'?'Reviews due across the firm':'Choose a household to open';return}
+  let h='';let step=0;const O=state.E.onboarding();const bad=state.E.checks().filter(x=>x.lvl==='bad').length;
   for(const [sec,items] of NAV){h+=`<h6>${sec}</h6>`;for(const [id,lbl] of items){const s=SCHEMA[id];const name=lbl||s.title;
-    let ct='',cls='';if(s&&!s.single)ct=S[id].length;
+    let ct='',cls='';if(s&&!s.single)ct=state.S[id].length;
     if(id==='checks'&&bad){ct=bad+' to fix';cls='bad'}
     if(id==='kyc'){ct=O.blockerCount?O.blockerCount+' open':O.stage;cls=O.blockerCount?'bad':''}
-    if(id==='reviews'){const R=E.reviews(O);ct=R.overdue?R.overdue+' overdue':R.soon?R.soon+' due soon':'';cls=R.overdue?'bad':''}
-    if(id==='actions'){const n=S.actions.filter(a=>a.status==='Open').length;ct=n?n+' open':''}
-    if(id==='drift'){const MC=E.mandateCheck();ct=MC.status;cls=MC.status==='Incomplete'?'bad':''}
+    if(id==='reviews'){const R=state.E.reviews(O);ct=R.overdue?R.overdue+' overdue':R.soon?R.soon+' due soon':'';cls=R.overdue?'bad':''}
+    if(id==='actions'){const n=state.S.actions.filter(a=>a.status==='Open').length;ct=n?n+' open':''}
+    if(id==='drift'){const MC=state.E.mandateCheck();ct=MC.status;cls=MC.status==='Incomplete'?'bad':''}
     const st=s&&sec==='Client data'?`<span class="step">${String(++step).padStart(2,'0')}</span>`:'';
-    h+=`<button type="button" data-nav="${id}" aria-current="${VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${st}${esc(name)}</span><span class="ct ${cls}">${esc(ct)}</span></button>`}}
+    h+=`<button type="button" data-nav="${id}" aria-current="${state.VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${st}${esc(name)}</span><span class="ct ${cls}">${esc(ct)}</span></button>`}}
   $('#rail').innerHTML=h;
-  $('#hhName').textContent=(S.household.name||'Unnamed household')+(S.household.reference?' · '+S.household.reference:'')+' · '+O.stage;
+  $('#hhName').textContent=(state.S.household.name||'Unnamed household')+(state.S.household.reference?' · '+state.S.household.reference:'')+' · '+O.stage;
 }
 
 /* ---------- help text ----------
@@ -304,7 +301,7 @@ const NAV_HELP={mandate:'The investment mandate agreed with the client.',models:
 const tipBtn=(label,text,cls='')=>text?`<button type="button" class="tip ${cls}" aria-label="About ${esc(label)}" data-tip="${esc(text)}">i</button>`:'';
 
 /* ---------- form rendering ---------- */
-function ownerOptions(withJoint){let o=withJoint?[['JOINT','Joint (adults equally)']]:[];return o.concat(S.members.map(m=>[m.ref,`${m.ref} · ${m.firstName||''} ${m.lastName||''}`.trim()]))}
+function ownerOptions(withJoint){let o=withJoint?[['JOINT','Joint (adults equally)']]:[];return o.concat(state.S.members.map(m=>[m.ref,`${m.ref} · ${m.firstName||''} ${m.lastName||''}`.trim()]))}
 const VALIDATE={niNumber:v=>!v||H.validNino(v)?'':'Not a valid NI number',postcode:v=>!v||H.validPostcode(v)?'':'Check the postcode format',email:v=>!v||H.validEmail(v)?'':'Check the email address'};
 function fieldHTML(col,idx,f,val){
   const id=`f-${col}-${idx}-${f.k}`;const data=`data-col="${col}" data-idx="${idx}" data-k="${f.k}"`;
@@ -314,7 +311,7 @@ function fieldHTML(col,idx,f,val){
   const tip=tipBtn(f.l,FIELD_HELP[`${col}.${f.k}`]||f.h);
   if(f.t===YN)return `<div class="f chk"><input type="checkbox" id="${id}" ${data} ${yes(val)?'checked':''}><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span></div>`;
   let ctl;
-  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?S.models.map(m=>[m.name,m.name]):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
+  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?state.S.models.map(m=>[m.name,m.name]):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
     ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':f.t==='model'?'Select model…':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
   else if(f.t==='area')ctl=`<textarea id="${id}" ${data}${aria}>${esc(val)}</textarea>`;
   else if(f.t==='date')ctl=`<input type="date" id="${id}" ${data}${aria} value="${esc(val)}">`;
@@ -328,7 +325,7 @@ function fieldsBlock(key,idx,rec){const s=SCHEMA[key];
 function summary(key,r){
   const who=r.owner?memberName(r.owner):'';
   switch(key){
-    case 'members':{const a=E.ageOf(r);return [`${r.ref||'?'} · ${r.firstName||'Unnamed'} ${r.lastName||''}`,`${(ROLES.find(x=>x[0]===r.role)||[0,''])[1]} · ${a!=null?'age '+Math.floor(a):'no date of birth'}${r.employment&&isAdult(r)?' · '+r.employment:''}`,''];}
+    case 'members':{const a=state.E.ageOf(r);return [`${r.ref||'?'} · ${r.firstName||'Unnamed'} ${r.lastName||''}`,`${(ROLES.find(x=>x[0]===r.role)||[0,''])[1]} · ${a!=null?'age '+Math.floor(a):'no date of birth'}${r.employment&&isAdult(r)?' · '+r.employment:''}`,''];}
     case 'income':return [r.type,`${who}${r.label?' · '+r.label:''}`,gbp(N(r.amount))+' p.a.'];
     case 'expenses':return [r.label||'Spending',(EXP_CATS.find(x=>x[0]===r.cat)||[0,''])[1]+(has(r.duration)?` · ${r.duration} yrs`:''),gbp(N(r.amount))+' p.a.'];
     case 'goals':return [r.label||'Goal',`in ${N(r.inYears)} years · ${r.priority||''}`,gbp(N(r.amount))];
@@ -344,8 +341,8 @@ function summary(key,r){
   }return ['','',''];
 }
 function bannerHTML(household=true){let h='';
-  if(household&&S&&S.isSample)h+=`<div class="banner sample"><div><b>Sample household.</b> These are made-up figures to show how the model works. Replace them with client data, import a file, or start blank.</div></div>`;
-  if(banner)h+=`<div class="banner ${banner.cls||''}"><div>${banner.html}</div>${banner.sticky?'':'<button class="btn ghost x" type="button" data-act="closeBanner" aria-label="Dismiss">✕</button>'}</div>`;
+  if(household&&state.S&&state.S.isSample)h+=`<div class="banner sample"><div><b>Sample household.</b> These are made-up figures to show how the model works. Replace them with client data, import a file, or start blank.</div></div>`;
+  if(state.banner)h+=`<div class="banner ${state.banner.cls||''}"><div>${state.banner.html}</div>${state.banner.sticky?'':'<button class="btn ghost x" type="button" data-act="closeBanner" aria-label="Dismiss">✕</button>'}</div>`;
   return h}
 /* ---------- explaining impact ----------
    Each input section shows (1) which outputs it feeds and what its fields change, and (2) a live
@@ -444,7 +441,7 @@ const DELTA={
   pct:(a,b)=>{const d=(b-a)*100;return !isFinite(d)||Math.abs(d)<0.05?null:[sgn(d)+Math.abs(d).toFixed(1)+' pts',0]},
   count:(a,b)=>{const d=b-a;return d?[sgn(d)+Math.abs(d),Math.sign(d)]:null},
   text:(a,b)=>a===b?null:['was '+a,0]};
-function metrics(){const C=E.compute();const k=C.kpi;const T=C.tot.HH;const O=E.onboarding(C);
+function metrics(){const C=state.E.compute();const k=C.kpi;const T=C.tot.HH;const O=state.E.onboarding(C);
   const fx=x=>isFinite(x)?x.toFixed(2)+'×':'n/a';
   const fin=[
     {id:'nw',k:'Economic net worth',v:T.A-T.L,f:gbpK,d:DELTA.money,up:'good'},
@@ -457,8 +454,8 @@ function metrics(){const C=E.compute();const k=C.kpi;const T=C.tot.HH;const O=E.
     {id:'aml',k:'AML rating',v:`${O.rating} (score ${O.score})`,f:String,d:DELTA.text,up:null},
     {id:'bl',k:'Blockers',v:O.blockerCount,f:String,d:DELTA.count,up:'bad'},
     {id:'rv',k:'Items to review',v:O.warnCount,f:String,d:DELTA.count,up:'bad'}];
-  if(VIEW==='compliance')return kyc;
-  if(VIEW==='members')return [fin[0],fin[1],kyc[1],kyc[2],kyc[3]];
+  if(state.VIEW==='compliance')return kyc;
+  if(state.VIEW==='members')return [fin[0],fin[1],kyc[1],kyc[2],kyc[3]];
   return [...fin,kyc[2]];
 }
 let IMPACT={view:null,base:{},why:''},impT;
@@ -466,7 +463,7 @@ function imCell(m){const base=IMPACT.base[m.id];const d=base===undefined?null:m.
   if(d&&d[1]&&m.up)cls=(d[1]>0)===(m.up==='good')?'up':'down';
   return `<div class="im" data-m="${m.id}"><div class="k">${esc(m.k)}</div><div class="v">${esc(m.f(m.v))}</div><div class="d ${cls}">${d?esc(d[0]):''}</div></div>`}
 function impactHTML(){const ms=metrics();
-  if(IMPACT.view!==VIEW)IMPACT={view:VIEW,base:Object.fromEntries(ms.map(m=>[m.id,m.v])),why:''};
+  if(IMPACT.view!==state.VIEW)IMPACT={view:state.VIEW,base:Object.fromEntries(ms.map(m=>[m.id,m.v])),why:''};
   return `<div class="impact" id="impact"><div class="impact-h"><b>Live effect of this section</b><span>Changes are compared with when you opened this section</span></div><div class="impact-grid">${ms.map(imCell).join('')}</div><div class="impact-why" id="impactWhy">${IMPACT.why||'Edit a field below and these figures update as you type.'}</div></div>`}
 function refreshImpact(label,f){const el=$('#impact');if(!el)return;const moved=[];
   for(const m of metrics()){const cell=el.querySelector(`.im[data-m="${m.id}"]`);if(!cell)continue;const tmp=document.createElement('div');tmp.innerHTML=imCell(m);const nc=tmp.firstChild;
@@ -479,12 +476,12 @@ function renderInput(key){
   const s=SCHEMA[key];let h=`<div class="sec-head"><div><h2>${esc(s.title)}</h2><p>${esc(s.desc||'')}</p></div>`;
   if(!s.single)h+=`<div class="addrow"><button class="btn" type="button" data-act="toggleAll" data-col="${key}">Expand all</button><button class="btn primary" type="button" data-act="add" data-col="${key}">Add ${esc(s.item)}</button></div>`;
   h+=`</div>`+bannerHTML()+(RECORD_ONLY.has(key)?'':impactHTML())+howHTML(key);
-  if(s.single){h+=`<div class="card" data-open="true"><div class="card-b" style="border-top:0">${fieldsBlock(key,0,S[key])}</div></div>`;
+  if(s.single){h+=`<div class="card" data-open="true"><div class="card-b" style="border-top:0">${fieldsBlock(key,0,state.S[key])}</div></div>`;
     if(key==='assumptions')h+=`<p class="note">Figures reflect the 2026/27 tax year as announced. From April 2027 unused pensions fall into the estate for IHT, and savings and property income rates rise by 2 points; update these inputs when they take effect.</p><div class="addrow"><button class="btn" type="button" data-act="resetAssump">Restore defaults</button></div>`;
     if(key==='compliance')h+=`<div class="addrow"><button class="btn" type="button" data-nav="kyc">See onboarding status</button></div>`;
     return h}
-  if(!S[key].length)h+=`<div class="empty">Nothing recorded yet. Use “Add ${esc(s.item)}” or import an Excel file.</div>`;
-  S[key].forEach((r,i)=>{const [t,meta,v]=summary(key,r);const open=OPEN.has(key+':'+i);
+  if(!state.S[key].length)h+=`<div class="empty">Nothing recorded yet. Use “Add ${esc(s.item)}” or import an Excel file.</div>`;
+  state.S[key].forEach((r,i)=>{const [t,meta,v]=summary(key,r);const open=state.OPEN.has(key+':'+i);
     h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span><button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
   return h;
 }
@@ -494,7 +491,7 @@ const GROUPS_A=[['fin','Financial capital'],['real','Real assets'],['hc','Human 
 const GROUPS_L=[['debt','Financial liabilities'],['cons','Consumption goals (PV)'],['goal','Capital goals and legacy (PV)'],['tax','Deferred tax']];
 const COLORS={fin:'var(--asset)',real:'var(--asset2)',hc:'var(--hc)',pen:'var(--pen)',debt:'var(--liab)',cons:'var(--liab2)',goal:'var(--liab3)',tax:'var(--muted)'};
 function renderBS(){
-  const C=E.compute();const v=BSVIEW in C.tot?BSVIEW:'HH';const T=C.tot[v];const k=C.kpi;
+  const C=state.E.compute();const v=state.BSVIEW in C.tot?state.BSVIEW:'HH';const T=C.tot[v];const k=C.kpi;
   const fr=x=>isFinite(x)?x.toFixed(2)+'×':'n/a';const pill=(x,g,w)=>x>=g?'good':x>=w?'warn':'bad';
   const fv=T.L?T.A/T.L:Infinity;
   let h=`<div class="sec-head"><div><h2>Economic balance sheet</h2><p>Present values of everything the household owns, will earn and has committed to spend, following the CFA Institute private wealth framework. Values are in pounds today.</p></div></div>`+bannerHTML();
@@ -520,16 +517,16 @@ function renderBS(){
   h+=`<div class="bs">${side('A',GROUPS_A,'side-a','Assets')}${side('L',GROUPS_L,'side-l','Liabilities')}</div>`;
   h+=`<div class="panel"><h3>Memorandum items</h3><div class="tbl-wrap"><table><tbody>
     <tr><td>Estimated IHT on second death (today)</td><td class="n">${gbp(k.iht)}</td></tr>
-    <tr><td class="muted">Estate ${gbp(k.estate)} · nil-rate bands ${gbp(k.nrb)} · residence band ${gbp(k.rnrb)}${yes(S.assumptions.pensionIHT)?' · pensions included':''}${k.coverInEstate?` · ${gbp(k.coverInEstate)} life cover not in trust`:''}</td><td></td></tr>
+    <tr><td class="muted">Estate ${gbp(k.estate)} · nil-rate bands ${gbp(k.nrb)} · residence band ${gbp(k.rnrb)}${yes(state.S.assumptions.pensionIHT)?' · pensions included':''}${k.coverInEstate?` · ${gbp(k.coverInEstate)} life cover not in trust`:''}</td><td></td></tr>
     <tr><td>Uncalled private-market commitments</td><td class="n">${gbp(k.uncalled)}</td></tr>
     <tr><td>Life and death-in-service cover in force</td><td class="n">${gbp(k.lifeCover)}</td></tr>
-    <tr><td>Planning horizon (to last survivor at age ${esc(S.assumptions.planAge)})</td><td class="n">${k.H} yrs</td></tr></tbody></table></div>
+    <tr><td>Planning horizon (to last survivor at age ${esc(state.S.assumptions.planAge)})</td><td class="n">${k.H} yrs</td></tr></tbody></table></div>
     <p class="note">Method: human capital is the survival-weighted present value of after-tax earnings to retirement, discounted at the gilt rate plus an income-stability premium. Pension rights, including a spouse's pension from defined benefit schemes, and benefits such as ESA are discounted at the gilt rate. Spending and goals grow with inflation and are discounted at the gilt rate. Rental income is excluded because the property value already captures it. Joint items are split equally between the adults.</p></div>`;
   return h;
 }
 function renderTax(){
-  const C=E.compute();const a=S.assumptions;let h=`<div class="sec-head"><div><h2>Tax and allowances</h2><p>Indicative 2026/27 position for each person, using rest-of-UK bands. Use it to spot unused allowances and cliff edges, not to file a return.</p></div></div>`+bannerHTML();
-  const ad=S.members.filter(isAdult);const kids=S.members.filter(m=>m.role==='child');
+  const C=state.E.compute();const a=state.S.assumptions;let h=`<div class="sec-head"><div><h2>Tax and allowances</h2><p>Indicative 2026/27 position for each person, using rest-of-UK bands. Use it to spot unused allowances and cliff edges, not to file a return.</p></div></div>`+bannerHTML();
+  const ad=state.S.members.filter(isAdult);const kids=state.S.members.filter(m=>m.role==='child');
   if(!ad.length)return h+`<div class="empty">Add at least one adult under People.</div>`;
   const row=(l,f,cls='n')=>`<tr><td>${l}</td>${ad.map(m=>`<td class="${cls}">${f(C.tax[m.ref],m)}</td>`).join('')}</tr>`;
   const head=`<tr><th></th>${ad.map(m=>`<th class="n">${esc(memberName(m.ref))}</th>`).join('')}</tr>`;
@@ -548,7 +545,7 @@ function renderTax(){
   const obs=[];
   for(const m of ad){const t=C.tax[m.ref];const n=esc(memberName(m.ref));
     if(t.ani>N(a.paTaper)&&t.ani<N(a.arl))obs.push(['warn',`${n} is in the personal allowance taper (adjusted net income ${gbp(t.ani)}). A further pension contribution of up to ${gbp(t.ani-N(a.paTaper))} gets an effective 60% relief.`]);
-    if(t.ani>N(a.hicbc)&&kids.some(k=>(E.ageOf(k)??99)<16))obs.push(['warn',`${n}: adjusted net income above ${gbp(N(a.hicbc))}. The High Income Child Benefit Charge applies if child benefit is claimed.`]);
+    if(t.ani>N(a.hicbc)&&kids.some(k=>(state.E.ageOf(k)??99)<16))obs.push(['warn',`${n}: adjusted net income above ${gbp(N(a.hicbc))}. The High Income Child Benefit Charge applies if child benefit is claimed.`]);
     if(t.tapered)obs.push(['warn',`${n}: pension annual allowance is tapered to ${gbp(t.aa)}.`]);
     if(t.penUsed>t.aa)obs.push(['bad',`${n}: contributions of ${gbp(t.penUsed)} exceed the available allowance. Check carry forward from the last three years.`]);
     if(t.ras+t.netpay>t.emp+t.self+t.div&&t.ras+t.netpay>3600)obs.push(['bad',`${n}: personal contributions exceed relevant UK earnings, so tax relief is restricted.`]);
@@ -561,7 +558,7 @@ function renderTax(){
   return h;
 }
 function renderRisk(){
-  const C=E.compute();const R=E.riskProfile(C);const k=C.kpi;const a=S.assumptions;
+  const C=state.E.compute();const R=state.E.riskProfile(C);const k=C.kpi;const a=state.S.assumptions;
   const cls=x=>x==='Above average'?'good':x==='Below average'?'bad':'warn';
   let h=`<div class="sec-head"><div><h2>Risk profile and IPS</h2><p>Ability to take risk comes from the balance sheet. Willingness comes from the client. The CFA approach adopts the lower of the two and treats any gap as a conversation.</p></div></div>`+bannerHTML();
   h+=`<div class="kpis">
@@ -575,10 +572,10 @@ function renderRisk(){
   if(R.will.length>1&&Math.max(...R.will)-Math.min(...R.will)>=2)h+=`<p class="note"><b>Partners differ.</b> Risk scores range from ${Math.min(...R.will)} to ${Math.max(...R.will)}. Consider separate portfolios for each person's own wrappers.</p>`;
   h+=`</div>`;
   const ad=C.adl.filter(isAdult);const ret=ad.map(m=>({n:memberName(m.ref),y:Math.max(0,(N(m.retireAge)||65)-(C.derived[m.ref].age||0))})).sort((x,y)=>x.y-y.y);
-  const near=S.goals.filter(g=>N(g.inYears)<=3).reduce((s,g)=>s+N(g.amount),0)+S.expenses.filter(e=>e.cat==='education'&&N(e.startIn)<=0).reduce((s,e)=>s+N(e.amount)*Math.min(3,has(e.duration)?N(e.duration):3),0);
-  const fin=k.finAssets||1;const emp=S.accounts.filter(x=>x.wrapper==='Employer shares / options').reduce((s,x)=>s+N(x.value),0);
-  const prot=ad.map(m=>{const hc=C.derived[m.ref].hc;const cover=S.protection.filter(p=>p.owner===m.ref&&/Life|Death|Family/.test(p.type)).reduce((s,p)=>s+N(p.sum),0);return {n:memberName(m.ref),hc,cover,gap:hc-cover}});
-  const flags=[];if(!yes(S.household.willsInPlace))flags.push('no wills');if(!yes(S.household.lpaInPlace))flags.push('no lasting powers of attorney');ad.forEach(m=>{if(yes(m.usPerson))flags.push(memberName(m.ref)+' is a US person');if(m.residence!=='uk')flags.push(memberName(m.ref)+' is not UK resident')});
+  const near=state.S.goals.filter(g=>N(g.inYears)<=3).reduce((s,g)=>s+N(g.amount),0)+state.S.expenses.filter(e=>e.cat==='education'&&N(e.startIn)<=0).reduce((s,e)=>s+N(e.amount)*Math.min(3,has(e.duration)?N(e.duration):3),0);
+  const fin=k.finAssets||1;const emp=state.S.accounts.filter(x=>x.wrapper==='Employer shares / options').reduce((s,x)=>s+N(x.value),0);
+  const prot=ad.map(m=>{const hc=C.derived[m.ref].hc;const cover=state.S.protection.filter(p=>p.owner===m.ref&&/Life|Death|Family/.test(p.type)).reduce((s,p)=>s+N(p.sum),0);return {n:memberName(m.ref),hc,cover,gap:hc-cover}});
+  const flags=[];if(!yes(state.S.household.willsInPlace))flags.push('no wills');if(!yes(state.S.household.lpaInPlace))flags.push('no lasting powers of attorney');ad.forEach(m=>{if(yes(m.usPerson))flags.push(memberName(m.ref)+' is a US person');if(m.residence!=='uk')flags.push(memberName(m.ref)+' is not UK resident')});
   const vul=ad.filter(m=>m.vulnerability&&m.vulnerability!=='None identified').map(m=>`${memberName(m.ref)} (${m.vulnerability})`);
   h+=`<div class="ips">
     <div class="panel"><h3>Return objective</h3><p>Grow assets to fund ${gbpK(C.tot.HH.cons)} of lifetime spending and ${gbpK(C.tot.HH.goal)} of goals and legacy, in present-value terms.</p><p class="muted">The funded ratio of ${isFinite(k.funded)?k.funded.toFixed(2):'n/a'}× means the plan ${k.funded>=1.2?'does not need to take extra risk to succeed; the surplus is discretionary':k.funded>=1?'is on track but has little margin for poor returns':'needs a higher return, more saving, later retirement or lower spending'}.</p></div>
@@ -591,13 +588,13 @@ function renderRisk(){
     <p class="note">Human-life-value view: the upper bound of cover needed to replace lost earnings. A needs-based review would subtract the earner's own consumption and add debts and goals.</p></div>`;
   return h;
 }
-function renderChecks(){const list=E.checks();
+function renderChecks(){const list=state.E.checks();
   let h=`<div class="sec-head"><div><h2>Data checks</h2><p>Completeness and consistency tests run on every change. Fix the items marked Action before relying on the outputs.</p></div></div>`+bannerHTML();
   h+=`<div class="panel"><ul class="list">${list.length?list.map(c=>`<li><span class="pill ${c.lvl==='bad'?'bad':'warn'}">${c.lvl==='bad'?'Action':'Review'}</span><span class="grow">${esc(c.msg)}</span><button class="btn" type="button" data-nav="${c.where}">Open</button></li>`).join(''):'<li><span class="pill good">Clear</span><span>No issues found.</span></li>'}</ul></div>`;return h}
 
 const STAGE_TEXT={done:'Complete',open:'Needs work',current:'Ready',waiting:'Not started'};
 function renderKyc(){
-  const O=E.onboarding();const c=S.compliance;
+  const O=state.E.onboarding();const c=state.S.compliance;
   const ratingCls={Low:'good',Medium:'warn',High:'bad',Prohibited:'bad'}[O.rating];
   const stageCls=/Approved$|Approved with conditions/.test(O.stage)?'good':/Declined|Prohibited|open issues/.test(O.stage)?'bad':O.stage==='Ready for review'?'good':'warn';
   let h=`<div class="sec-head"><div><h2>KYC and onboarding status</h2><p>Customer due diligence, AML risk rating, suitability, disclosures and the four-eyes sign-off, worked out from what is recorded. Screening results are entered by hand; connect a screening provider for live checks.</p></div><div class="addrow"><button class="btn" type="button" data-nav="compliance">Edit onboarding details</button></div></div>`+bannerHTML();
@@ -625,7 +622,7 @@ async function renderAudit(){
   let h=`<div class="sec-head"><div><h2>Audit trail</h2><p>${Store.mode==='server'?'Every saved change, recorded by the server with the signed-in user and time. Entries cannot be edited from this screen.':'Changes made in this browser. Run the server version for a tamper-resistant trail with named logins.'}</p></div></div>`+bannerHTML();
   $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
   let rows=[];try{rows=await Store.audit()}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>Could not load the audit trail. ${esc(e.message)}</div></div>`;return}
-  if(VIEW!=='audit')return;
+  if(state.VIEW!=='audit')return;
   const lab=p=>{const m=/^(\w+)(?:\[(\d+)\])?\.(\w+)$/.exec(p);if(!m)return p;const [,sec,i,k]=m;const s=SCHEMA[sec];if(!s)return p;if(k==='count')return `${s.title}: number of records`;const f=fieldsOf(s).find(x=>x.k===k);return `${s.title}${i!==undefined?' #'+(+i+1):''}: ${f?f.l:k}`};
   h+=`<div class="panel">${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>From</th><th>To</th></tr></thead><tbody>${rows.slice(0,1000).map(r=>`<tr><td style="white-space:nowrap">${esc(fmtTs(r.ts))}</td><td>${esc(r.user)}</td><td>${esc(r.field==='created'?'Household created':r.field==='import'?'Imported a file':lab(r.field))}</td><td class="mono">${esc(r.from)}</td><td class="mono">${esc(r.to)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No changes recorded yet.</p>'}</div>`;
   $('#main').innerHTML=h;
@@ -634,7 +631,7 @@ async function renderClients(){
   let h=`<div class="sec-head"><div><h2>Households</h2><p>Signed in as ${esc(Store.user)}. ${Store.encrypted?'Client files are encrypted at rest.':'<b>Encryption at rest is off.</b> Set DATA_KEY on the server.'}</p></div><div class="addrow"><button class="btn" type="button" data-act="newSample">New from sample</button><button class="btn primary" type="button" data-act="newBlank">New household</button></div></div>`;
   $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
   let list=[];try{list=await Store.list()}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>Could not load households. ${esc(e.message)}</div></div>`;return}
-  if(VIEW!=='clients')return;
+  if(state.VIEW!=='clients')return;
   const rc={Low:'good',Medium:'warn',High:'bad',Prohibited:'bad'};
   h+=`<div class="panel">${list.length?`<div class="tbl-wrap"><table class="clients"><thead><tr><th>Household</th><th>Status</th><th>AML</th><th>Next due</th><th>Last change</th><th></th></tr></thead><tbody>${list.map(x=>`<tr><td><b>${esc(x.name||'Unnamed')}</b><br><span class="muted">${esc(x.reference||'')}</span></td><td>${esc(x.stage)}${x.blockers?` <span class="pill bad">${x.blockers}</span>`:''}</td><td><span class="pill ${rc[x.rating]||'neu'}">${esc(x.rating)}</span></td><td>${x.due?fmtDate(x.due):'–'}${x.overdue?` <span class="pill bad">${x.overdue} overdue</span>`:''}</td><td>${esc(fmtTs(x.updatedAt))}<br><span class="muted">${esc(x.updatedBy||'')}</span></td><td><button class="btn" type="button" data-act="openHousehold" data-id="${esc(x.id)}">Open</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No households yet. Create one to start onboarding.</div>'}</div>`;
   $('#main').innerHTML=h;
@@ -644,7 +641,7 @@ async function renderTeam(){
   let h=`<div class="sec-head"><div><h2>Team</h2><p>People at ${esc(Store.firm)} who can sign in. Each person needs their own login so the audit trail shows who did what. Deactivating someone signs them out at once; their past entries stay in the audit trail.</p></div></div>`+bannerHTML(false);
   $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
   let list=[];try{list=await Store.api('GET','members')}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>${esc(e.message)}</div></div>`;return}
-  if(VIEW!=='team')return;
+  if(state.VIEW!=='team')return;
   const used=list.filter(x=>x.active).length;
   h+=`<div class="panel"><h3>Invite someone</h3><p class="muted">${used} of ${Store.seats} seats in use. They get an email link to choose a password and set up two-step verification.</p>
     <div class="fields"><div class="f"><label for="invName">Name</label><input id="invName" autocomplete="off"></div><div class="f"><label for="invEmail">Email</label><input id="invEmail" type="email" autocomplete="off"></div>
@@ -655,7 +652,7 @@ async function renderTeam(){
 }
 
 function renderGuide(){
-  const a=S.assumptions;const C=E.compute();const k=C.kpi;
+  const a=state.S.assumptions;const C=state.E.compute();const k=C.kpi;
   const sec=(id,t,body)=>`<div class="panel" id="g-${id}"><h3>${t}</h3>${body}</div>`;
   const toc=[['flow','Workflow'],['ebs','Economic balance sheet'],['hc','Human capital'],['liab','Liabilities side'],['ratios','Reading the ratios'],['tax','Tax'],['iht','Inheritance tax'],['risk','Risk profile'],['aml','KYC and AML'],['limits','Limits']];
   let h=`<div class="sec-head"><div><h2>How the model works</h2><p>The framework behind every figure and status in this file, written for analysts and compliance staff. Hover the <span class="tip" aria-hidden="true">i</span> next to any field for how that input is used.</p></div></div>`;
@@ -700,7 +697,7 @@ function renderGuide(){
 
 const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
 function renderDrift(){
-  const M=E.mandateCheck();const S_=S.mandate;const scls={'In line':'good',Drift:'warn',Incomplete:'bad'}[M.status];
+  const M=state.E.mandateCheck();const S_=state.S.mandate;const scls={'In line':'good',Drift:'warn',Incomplete:'bad'}[M.status];
   let h=`<div class="sec-head"><div><h2>Mandate check</h2><p>The agreed mandate against the risk profile and the current accounts. Targets come from the model portfolio; the current split is value-weighted across every account under Savings and investments.</p></div><div class="addrow"><button class="btn" type="button" data-nav="mandate">Edit mandate</button></div></div>`+bannerHTML(false);
   h+=`<div class="kpis">
     <div class="kpi"><div class="k">Model portfolio</div><div class="v t">${esc(M.model?M.model.name:'None chosen')}</div><div class="s">${esc(M.benchmark||'')}</div></div>
@@ -714,7 +711,7 @@ function renderDrift(){
   return h;
 }
 function renderReviews(){
-  const R=E.reviews();
+  const R=state.E.reviews();
   let h=`<div class="sec-head"><div><h2>Reviews due</h2><p>Every dated obligation for this household: the annual suitability review, the KYC refresh, document expiries, open actions, life events and complaint deadlines. Worked out from the file; nothing is entered here.</p></div></div>`+bannerHTML(false);
   h+=`<div class="kpis"><div class="kpi"><div class="k">Overdue</div><div class="v">${R.overdue}</div></div><div class="kpi"><div class="k">Due in 60 days</div><div class="v">${R.soon}</div></div><div class="kpi"><div class="k">Next due</div><div class="v t">${R.nextDue?fmtDate(R.nextDue):'Nothing scheduled'}</div></div></div>`;
   if(!R.items.length)return h+`<div class="empty">Nothing is due. Items appear once the file is approved, documents have dates, or actions, life events and complaints are recorded.</div>`;
@@ -725,7 +722,7 @@ async function renderDiary(){
   let h=`<div class="sec-head"><div><h2>Reviews due</h2><p>Households with the soonest obligation first. Open a household and go to Reviews due for the detail.</p></div></div>`;
   $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
   let list=[];try{list=await Store.list()}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>${esc(e.message)}</div></div>`;return}
-  if(VIEW!=='diary')return;
+  if(state.VIEW!=='diary')return;
   const t=H.today();const rows=list.filter(x=>x.due).sort((a,b)=>a.due.localeCompare(b.due));
   const overdue=rows.reduce((n,x)=>n+(x.overdue||0),0);
   h+=`<div class="kpis"><div class="kpi"><div class="k">Households with something overdue</div><div class="v">${rows.filter(x=>x.overdue).length}</div></div><div class="kpi"><div class="k">Overdue items</div><div class="v">${overdue}</div></div><div class="kpi"><div class="k">Due in the next 60 days</div><div class="v">${rows.filter(x=>x.due>=t&&x.due<=H.addDays(t,60)).length}</div></div></div>`;
@@ -735,14 +732,14 @@ async function renderDiary(){
 
 function render(){
   renderNav();renderTopbar();const m=$('#main');
-  if(VIEW==='clients')return renderClients();
-  if(VIEW==='team')return renderTeam();
-  if(VIEW==='diary')return renderDiary();
-  if(VIEW==='audit')return renderAudit();
-  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else m.innerHTML=renderChecks();
+  if(state.VIEW==='clients')return renderClients();
+  if(state.VIEW==='team')return renderTeam();
+  if(state.VIEW==='diary')return renderDiary();
+  if(state.VIEW==='audit')return renderAudit();
+  if(SCHEMA[state.VIEW])m.innerHTML=renderInput(state.VIEW);else if(state.VIEW==='bs')m.innerHTML=renderBS();else if(state.VIEW==='tax')m.innerHTML=renderTax();else if(state.VIEW==='risk')m.innerHTML=renderRisk();else if(state.VIEW==='kyc')m.innerHTML=renderKyc();else if(state.VIEW==='guide')m.innerHTML=renderGuide();else if(state.VIEW==='reviews')m.innerHTML=renderReviews();else if(state.VIEW==='drift')m.innerHTML=renderDrift();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
-  const server=Store.mode==='server';const inHH=!['clients','team','diary'].includes(VIEW);
+  const server=Store.mode==='server';const inHH=!['clients','team','diary'].includes(state.VIEW);
   $('#btnClients').hidden=!server||!inHH;
   for(const id of ['#btnImport','#btnExport','#btnJson'])$(id).hidden=!inHH;
   $('#resetWrap').hidden=server||!inHH;
@@ -756,7 +753,7 @@ let navT;
 function onEdit(e){const el=e.target;
   if(el.id==='whoIn'){Store.user=el.value.trim();try{localStorage.setItem(LS_USER,Store.user)}catch(x){}return}
   if(!el.dataset||!el.dataset.k)return;const {col,idx,k}=el.dataset;const s=SCHEMA[col];const f=fieldsOf(s).find(x=>x.k===k);
-  const v=parseVal(f,el.value,el.type==='checkbox'?el:null);const rec=s.single?S[col]:S[col][+idx];const old=rec[k];if(old===v)return;rec[k]=v;
+  const v=parseVal(f,el.value,el.type==='checkbox'?el:null);const rec=s.single?state.S[col]:state.S[col][+idx];const old=rec[k];if(old===v)return;rec[k]=v;
   logChange(s.single?`${col}.${k}`:`${col}[${idx}].${k}`,old,v);Store.touch();
   clearTimeout(impT);impT=setTimeout(()=>refreshImpact(`${s.title}: ${f.l}`,f),120);
   if(VALIDATE[k]){const msg=VALIDATE[k](v);const h=document.getElementById(el.id+'-h');el.setAttribute('aria-invalid',msg?'true':'false');if(h){h.textContent=msg||f.h||'';h.className='hint'+(msg?' err':'')}}
@@ -766,30 +763,30 @@ function onEdit(e){const el=e.target;
 }
 document.addEventListener('input',onEdit);document.addEventListener('change',onEdit);
 document.addEventListener('click',async e=>{
-  const nav=e.target.closest('[data-nav]');if(nav&&nav.dataset.nav){VIEW=nav.dataset.nav;if(banner&&!banner.sticky)banner=null;render();window.scrollTo({top:0});return}
+  const nav=e.target.closest('[data-nav]');if(nav&&nav.dataset.nav){state.VIEW=nav.dataset.nav;if(state.banner&&!state.banner.sticky)state.banner=null;render();window.scrollTo({top:0});return}
   const b=e.target.closest('[data-act]');if(!b)return;const act=b.dataset.act,col=b.dataset.col,idx=+b.dataset.idx;
-  if(act==='del'){e.stopPropagation();const rem=S[col].splice(idx,1)[0];logChange(`${col}.count`,S[col].length+1,S[col].length);Store.touch();
-    banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};IMPACT.why=`<b>${esc(SCHEMA[col].item)} removed.</b> The figures above compare with when you opened this section.`;render();return}
-  if(act==='undo'&&banner&&banner.undo){const u=banner.undo;S[u.col].splice(u.idx,0,u.rem);logChange(`${u.col}.count`,S[u.col].length-1,S[u.col].length);banner=null;Store.touch();render();return}
-  if(act==='closeBanner'){banner=null;render();return}
-  if(act==='goClients'||act==='team'||act==='diary'){await Store.flush();VIEW=act==='goClients'?'clients':act;banner=null;render();return}
+  if(act==='del'){e.stopPropagation();const rem=state.S[col].splice(idx,1)[0];logChange(`${col}.count`,state.S[col].length+1,state.S[col].length);Store.touch();
+    state.banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};IMPACT.why=`<b>${esc(SCHEMA[col].item)} removed.</b> The figures above compare with when you opened this section.`;render();return}
+  if(act==='undo'&&state.banner&&state.banner.undo){const u=state.banner.undo;state.S[u.col].splice(u.idx,0,u.rem);logChange(`${u.col}.count`,state.S[u.col].length-1,state.S[u.col].length);state.banner=null;Store.touch();render();return}
+  if(act==='closeBanner'){state.banner=null;render();return}
+  if(act==='goClients'||act==='team'||act==='diary'){await Store.flush();state.VIEW=act==='goClients'?'clients':act;state.banner=null;render();return}
   if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}await Store.cloud.signOut();location.reload();return}
   if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
-    try{await Store.api('POST','members',body);banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
-  if(act==='memberActive'){try{await Store.api('PATCH','members/'+encodeURIComponent(b.dataset.uid),{active:b.dataset.on==='1'});banner=null}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
-  if(act==='toggle'){if(e.target.closest('[data-act="del"]'))return;const key=col+':'+idx;OPEN.has(key)?OPEN.delete(key):OPEN.add(key);const card=b.closest('.card');card.dataset.open=OPEN.has(key);b.setAttribute('aria-expanded',OPEN.has(key));return}
-  if(act==='toggleAll'){const all=S[col].every((_,i)=>OPEN.has(col+':'+i));S[col].forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
-  if(act==='add'){const r=H.defaults(col);if(col==='members'){const ad=S.members.filter(isAdult).length;r.ref=ad<1?'P1':ad<2?'P2':'C'+(S.members.filter(m=>m.role==='child').length+1);r.role=ad<1?'primary':ad<2?'partner':'child'}
-    else if(['income','db','protection'].includes(col))r.owner=S.members[0]?.ref||'';else if(fieldsOf(SCHEMA[col]).some(f=>f.t==='owner'))r.owner=S.members.filter(isAdult).length>1?'JOINT':(S.members[0]?.ref||'');
-    S[col].push(r);logChange(`${col}.count`,S[col].length-1,S[col].length);OPEN.add(col+':'+(S[col].length-1));Store.touch();IMPACT.why=`<b>${esc(SCHEMA[col].item)} added.</b> Fill it in and the figures above update as you type.`;render();const cards=document.querySelectorAll('.card');cards[cards.length-1]?.scrollIntoView({behavior:'smooth',block:'center'});return}
-  if(act==='bsview'){BSVIEW=b.dataset.v;render();return}
-  if(act==='resetAssump'){S.assumptions=H.defaults('assumptions');logChange('assumptions','edited','defaults restored');Store.touch();render();toast('Assumptions restored to 2026/27 defaults');return}
-  if(act==='confirmReset'){setState(H.blank());S.household.name='';OPEN.clear();OPEN.add('members:0');Store.saveLocal();VIEW='household';resetUI(false);render();toast('Started a blank household');return}
+    try{await Store.api('POST','members',body);state.banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}
+  if(act==='memberActive'){try{await Store.api('PATCH','members/'+encodeURIComponent(b.dataset.uid),{active:b.dataset.on==='1'});state.banner=null}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}
+  if(act==='toggle'){if(e.target.closest('[data-act="del"]'))return;const key=col+':'+idx;state.OPEN.has(key)?state.OPEN.delete(key):state.OPEN.add(key);const card=b.closest('.card');card.dataset.open=state.OPEN.has(key);b.setAttribute('aria-expanded',state.OPEN.has(key));return}
+  if(act==='toggleAll'){const all=state.S[col].every((_,i)=>state.OPEN.has(col+':'+i));state.S[col].forEach((_,i)=>all?state.OPEN.delete(col+':'+i):state.OPEN.add(col+':'+i));render();return}
+  if(act==='add'){const r=H.defaults(col);if(col==='members'){const ad=state.S.members.filter(isAdult).length;r.ref=ad<1?'P1':ad<2?'P2':'C'+(state.S.members.filter(m=>m.role==='child').length+1);r.role=ad<1?'primary':ad<2?'partner':'child'}
+    else if(['income','db','protection'].includes(col))r.owner=state.S.members[0]?.ref||'';else if(fieldsOf(SCHEMA[col]).some(f=>f.t==='owner'))r.owner=state.S.members.filter(isAdult).length>1?'JOINT':(state.S.members[0]?.ref||'');
+    state.S[col].push(r);logChange(`${col}.count`,state.S[col].length-1,state.S[col].length);state.OPEN.add(col+':'+(state.S[col].length-1));Store.touch();IMPACT.why=`<b>${esc(SCHEMA[col].item)} added.</b> Fill it in and the figures above update as you type.`;render();const cards=document.querySelectorAll('.card');cards[cards.length-1]?.scrollIntoView({behavior:'smooth',block:'center'});return}
+  if(act==='bsview'){state.BSVIEW=b.dataset.v;render();return}
+  if(act==='resetAssump'){state.S.assumptions=H.defaults('assumptions');logChange('assumptions','edited','defaults restored');Store.touch();render();toast('Assumptions restored to 2026/27 defaults');return}
+  if(act==='confirmReset'){setState(H.blank());state.S.household.name='';state.OPEN.clear();state.OPEN.add('members:0');Store.saveLocal();state.VIEW='household';resetUI(false);render();toast('Started a blank household');return}
   if(act==='loadSample'){setState(H.sample());Store.saveLocal();resetUI(false);render();toast('Sample household loaded');return}
   if(act==='cancelReset'){resetUI(false);return}
-  if(act==='openHousehold'){try{await Store.open(b.dataset.id);banner=null;VIEW=b.dataset.view||'kyc';OPEN.clear();OPEN.add('members:0');render()}catch(err){toast('Could not open the household: '+err.message)}return}
-  if(act==='newBlank'||act==='newSample'){try{const st=act==='newSample'?H.sample():H.blank();st.isSample=act==='newSample';await Store.create(st);setState(H.normalise(st));VIEW='household';banner=null;render()}catch(err){toast('Could not create the household: '+err.message)}return}
-  if(act==='reloadHousehold'){try{await Store.open(Store.id);Store.err=null;banner=null;render();toast('Loaded the latest version')}catch(err){toast(err.message)}return}
+  if(act==='openHousehold'){try{await Store.open(b.dataset.id);state.banner=null;state.VIEW=b.dataset.view||'kyc';state.OPEN.clear();state.OPEN.add('members:0');render()}catch(err){toast('Could not open the household: '+err.message)}return}
+  if(act==='newBlank'||act==='newSample'){try{const st=act==='newSample'?H.sample():H.blank();st.isSample=act==='newSample';await Store.create(st);setState(H.normalise(st));state.VIEW='household';state.banner=null;render()}catch(err){toast('Could not create the household: '+err.message)}return}
+  if(act==='reloadHousehold'){try{await Store.open(Store.id);Store.err=null;state.banner=null;render();toast('Loaded the latest version')}catch(err){toast(err.message)}return}
 });
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.card-h')){e.preventDefault();e.target.click()}});
 function resetUI(confirming){$('#resetWrap').innerHTML=confirming?`<span class="confirm"><span class="muted" style="font-size:12.5px">Clear all data?</span><button class="btn primary" type="button" data-act="confirmReset">Clear</button><button class="btn" type="button" data-act="loadSample">Load sample</button><button class="btn ghost" type="button" data-act="cancelReset">Cancel</button></span>`:`<button class="btn ghost" id="btnReset" type="button">Start blank</button>`;
@@ -804,7 +801,7 @@ function loadXLSX(){if(window.XLSX)return Promise.resolve(window.XLSX);if(xlsxP)
 function readSheet(XLSX,ws){const rows=[];if(!ws||!ws['!ref'])return rows;const R=XLSX.utils.decode_range(ws['!ref']);
   for(let r=R.s.r;r<=Math.min(R.e.r,R.s.r+5000);r++){const row=[];for(let c=R.s.c;c<=Math.min(R.e.c,R.s.c+80);c++){const cell=ws[XLSX.utils.encode_cell({r,c})];row.push(cell?{v:cell.v,z:cell.z}:null)}rows.push(row)}return rows}
 function importWorkbook(XLSX,wb){
-  const ns=H.normalise(JSON.parse(JSON.stringify(S)));delete ns.audit;
+  const ns=H.normalise(JSON.parse(JSON.stringify(state.S)));delete ns.audit;
   const report=[];const sheets={};wb.SheetNames.forEach(n=>sheets[H.normKey(n)]=wb.Sheets[n]);let found=0;
   for(const key of SINGLES){const ws=sheets[H.normKey(SCHEMA[key].sheet)];if(!ws)continue;found++;const rows=readSheet(XLSX,ws);const fs=fieldsOf(SCHEMA[key]);let n=0;
     for(const row of rows){if(!row[0])continue;const f=fs.find(x=>H.normKey(x.k)===H.normKey(row[0].v)||H.normKey(x.l)===H.normKey(row[0].v));if(!f||!row[1])continue;ns[key][f.k]=H.coerce(f,row[1].v,row[1]);n++}
@@ -821,10 +818,10 @@ $('#fileIn').onchange=async e=>{const file=e.target.files[0];e.target.value='';i
   try{if(file.size>10*1024*1024)throw new Error('The file is larger than 10 MB.');let res;
     if(/\.json$/i.test(file.name)){res={ns:H.normalise(JSON.parse(await file.text())),report:['Full household from JSON']};res.ns.isSample=false}
     else{const XLSX=await loadXLSX();const wb=XLSX.read(await file.arrayBuffer(),{cellDates:true,cellNF:true});res=importWorkbook(XLSX,wb)}
-    const audit=S.audit;setState(res.ns);if(Store.mode==='local'){S.audit=audit||[];logChange('import',file.name,res.report.join('; '))}
-    Store.touch();OPEN.clear();OPEN.add('members:0');
-    banner={cls:'ok',html:`<b>Imported ${esc(file.name)}.</b> ${esc(res.report.join(' · '))}. Check KYC and onboarding status for gaps.`};VIEW='members';render();
-  }catch(err){banner={cls:'bad',html:`<b>Could not import ${esc(file.name)}.</b> ${esc(err.message)}`};render()}};
+    const audit=state.S.audit;setState(res.ns);if(Store.mode==='local'){state.S.audit=audit||[];logChange('import',file.name,res.report.join('; '))}
+    Store.touch();state.OPEN.clear();state.OPEN.add('members:0');
+    state.banner={cls:'ok',html:`<b>Imported ${esc(file.name)}.</b> ${esc(res.report.join(' · '))}. Check KYC and onboarding status for gaps.`};state.VIEW='members';render();
+  }catch(err){state.banner={cls:'bad',html:`<b>Could not import ${esc(file.name)}.</b> ${esc(err.message)}`};render()}};
 
 function outVal(f,v){if(f.t===YN)return yes(v)?'Yes':'No';if(f.t==='sel'){const o=optList(f.o).find(x=>String(x[0])===String(v));return o?o[1]:v}return v??''}
 async function buildWorkbook(withData){
@@ -832,14 +829,14 @@ async function buildWorkbook(withData){
   const readme=[['Household Wealth Profiler: data template'],['One sheet per data type. Keep the sheet names and the header row. Each row is one record.'],['Link records to people with the Reference code from the Members sheet (P1, P2, C1…). Use JOINT for jointly owned items.'],['Percent columns take numbers such as 2.5 for 2.5%. Yes/No columns take Yes or No. Dates use YYYY-MM-DD.'],[],['Sheet','Column','Type','Allowed values / guidance']];
   for(const key of ['household','mandate','compliance',...COLS,'assumptions'])for(const f of fieldsOf(SCHEMA[key]))readme.push([SCHEMA[key].sheet,f.l,{text:'Text',num:'Number',pct:'Percent',int:'Whole number',date:'Date',sel:'List',bool:'Yes / No',area:'Text',owner:'Person ref or JOINT',member:'Person ref'}[f.t],(f.t==='sel'?optList(f.o).map(o=>o[1]).join(' | '):'')+(f.h?(f.t==='sel'?' — ':'')+f.h:'')]);
   const rws=XLSX.utils.aoa_to_sheet(readme);rws['!cols']=[{wch:16},{wch:40},{wch:18},{wch:90}];XLSX.utils.book_append_sheet(wb,rws,'README');
-  for(const key of ['household','mandate','compliance']){const fs=fieldsOf(SCHEMA[key]);const ws=XLSX.utils.aoa_to_sheet([['Field','Value'],...fs.map(f=>[f.l,withData?outVal(f,S[key][f.k]):''])]);ws['!cols']=[{wch:44},{wch:50}];XLSX.utils.book_append_sheet(wb,ws,SCHEMA[key].sheet)}
-  for(const key of COLS){const fs=fieldsOf(SCHEMA[key]);const aoa=[fs.map(f=>f.l)];if(withData)S[key].forEach(r=>aoa.push(fs.map(f=>outVal(f,r[f.k]))));const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=fs.map(f=>({wch:Math.max(12,Math.min(30,f.l.length+2))}));XLSX.utils.book_append_sheet(wb,ws,SCHEMA[key].sheet)}
-  {const fs=fieldsOf(SCHEMA.assumptions);const src=withData?S.assumptions:H.defaults('assumptions');const ws=XLSX.utils.aoa_to_sheet([['Field','Value'],...fs.map(f=>[f.l,outVal(f,src[f.k])])]);ws['!cols']=[{wch:40},{wch:14}];XLSX.utils.book_append_sheet(wb,ws,'Assumptions')}
-  if(withData){const C=E.compute();const gl=Object.fromEntries([...GROUPS_A,...GROUPS_L]);const aoa=[['Side','Group','Line',...C.views.map(v=>v==='HH'?'Household':memberName(v))]];
+  for(const key of ['household','mandate','compliance']){const fs=fieldsOf(SCHEMA[key]);const ws=XLSX.utils.aoa_to_sheet([['Field','Value'],...fs.map(f=>[f.l,withData?outVal(f,state.S[key][f.k]):''])]);ws['!cols']=[{wch:44},{wch:50}];XLSX.utils.book_append_sheet(wb,ws,SCHEMA[key].sheet)}
+  for(const key of COLS){const fs=fieldsOf(SCHEMA[key]);const aoa=[fs.map(f=>f.l)];if(withData)state.S[key].forEach(r=>aoa.push(fs.map(f=>outVal(f,r[f.k]))));const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=fs.map(f=>({wch:Math.max(12,Math.min(30,f.l.length+2))}));XLSX.utils.book_append_sheet(wb,ws,SCHEMA[key].sheet)}
+  {const fs=fieldsOf(SCHEMA.assumptions);const src=withData?state.S.assumptions:H.defaults('assumptions');const ws=XLSX.utils.aoa_to_sheet([['Field','Value'],...fs.map(f=>[f.l,outVal(f,src[f.k])])]);ws['!cols']=[{wch:40},{wch:14}];XLSX.utils.book_append_sheet(wb,ws,'Assumptions')}
+  if(withData){const C=state.E.compute();const gl=Object.fromEntries([...GROUPS_A,...GROUPS_L]);const aoa=[['Side','Group','Line',...C.views.map(v=>v==='HH'?'Household':memberName(v))]];
     for(const l of C.lines)aoa.push([l.side==='A'?'Asset':'Liability',gl[l.group],l.label,...C.views.map(v=>Math.round(C.val(l,v)))]);
     aoa.push([]);aoa.push(['','','Economic net worth',...C.views.map(v=>Math.round(C.tot[v].A-C.tot[v].L))]);
     const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=[{wch:10},{wch:30},{wch:44},...C.views.map(()=>({wch:14}))];XLSX.utils.book_append_sheet(wb,ws,'EconomicBalanceSheet');
-    const O=E.onboarding(C);const ob=[['Status',O.stage],['AML risk rating',O.rating],['AML score',O.score],['EDD required',O.edd?'Yes':'No'],['Review every (years)',O.reviewYears],['Next review',O.nextReview||''],[],['Stage','Level','Item']];
+    const O=state.E.onboarding(C);const ob=[['Status',O.stage],['AML risk rating',O.rating],['AML score',O.score],['EDD required',O.edd?'Yes':'No'],['Review every (years)',O.reviewYears],['Next review',O.nextReview||''],[],['Stage','Level','Item']];
     for(const i of O.items)ob.push([i.stage,i.lvl==='bad'?'Blocker':'Review',i.msg]);for(const f of O.factors)ob.push(['AML factor','+'+f.pts,f.why]);
     const ows=XLSX.utils.aoa_to_sheet(ob);ows['!cols']=[{wch:20},{wch:12},{wch:90}];XLSX.utils.book_append_sheet(wb,ows,'OnboardingStatus');
     let au=[];try{au=await Store.audit()}catch(e){}
@@ -854,18 +851,18 @@ async function save(filename,data){
   if(DL){try{await DL.save({filename,data:blob});toast('Saved '+filename)}catch(err){if(err&&err.code!=='declined')toast(err&&err.code==='rate_limited'?'A save is already waiting for your confirmation':'Could not save the file')}return}
   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),4000);toast('Downloaded '+filename);
 }
-const stamp=()=>(S.household.reference||S.household.name||'household').replace(/[^\w-]+/g,'_');
+const stamp=()=>(state.S.household.reference||state.S.household.name||'household').replace(/[^\w-]+/g,'_');
 $('#btnTemplate').onclick=async()=>{try{save('household-data-template.xlsx',new Blob([await buildWorkbook(false)]))}catch(e){toast(e.message)}};
 $('#btnExport').onclick=async()=>{try{save(stamp()+'-profile.xlsx',new Blob([await buildWorkbook(true)]))}catch(e){toast(e.message)}};
-$('#btnJson').onclick=()=>save(stamp()+'-profile.json',JSON.stringify(S,null,2));
-$('#btnClients').onclick=async()=>{await Store.flush();VIEW='clients';banner=null;render()};
+$('#btnJson').onclick=()=>save(stamp()+'-profile.json',JSON.stringify(state.S,null,2));
+$('#btnClients').onclick=async()=>{await Store.flush();state.VIEW='clients';state.banner=null;render()};
 
 /* ---------- start ---------- */
 (async()=>{
   try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{DL=d},()=>{})}catch(e){DL=null}
   try{await Store.init()}catch(e){if(!CFG.supabaseUrl)throw e;document.body.classList.add('gated');
     $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p>${Store.cloud?'<div class="addrow"><button class="btn" type="button" data-act="signOut">Sign out</button></div>':''}</div>`;return}
-  if(Store.mode==='server'){setState(H.blank());VIEW='clients'}
+  if(Store.mode==='server'){setState(H.blank());state.VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}
   resetUI(false);render();
 })();

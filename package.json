@@ -21,7 +21,8 @@
     "build:web": "node scripts/build-web.js"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8"
+    "@electric-sql/pglite": "0.5.8",
+    "esbuild": "0.28.2"
   },
   "dependencies": {
     "pg": "8.23.1"

@@ -14,7 +14,7 @@ Umesh owns the repository and decides what is released. Everyone else works thro
 ## Keeping the app healthy
 
 - **Tests:** `npm test` runs the tax engine, KYC rules, server security and Supabase-edition suites. Add a test with every fix.
-- **Dependencies:** there are no runtime dependencies. The only development dependency is PGlite (tests). Keep it that way unless agreed.
+- **Dependencies:** the only runtime dependency is `pg` (used only when `DATABASE_URL` is set). Development dependencies are PGlite (tests) and esbuild (bundles the interface's modules for `npm run build`; never shipped). Keep it that way unless agreed.
 - **Tax year:** the bands and allowances in `packages/core/core.js` (`assumptions` defaults) need checking against HMRC each April.
 - **Spreadsheet library:** see the README (step 4 under Deploy) for the patched SheetJS version.
 - **Secrets:** never commit `.env`, `AUTH_USERS`, `DATA_KEY` or Supabase keys. `.gitignore` covers the usual files, but check `git status` before committing.
