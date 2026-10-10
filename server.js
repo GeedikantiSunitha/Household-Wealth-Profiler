@@ -55,34 +55,8 @@ try { store = createStore(config, sealer); } catch (e) { console.error(e.message
 /* ---------- households (apps/api/src/services) ---------- */
 const households = require('./apps/api/src/services/households.js').createHouseholdService({ store, HWP });
 
-/* ---------- authentication ---------- */
-const failures = new Map(); // ip -> {n, until}
-const authCache = new Map(); // sha256(header) -> {user, exp}
-function authenticate(req) {
-  const ip = (CLIENT_IP_HEADER && req.headers[CLIENT_IP_HEADER]) || req.socket.remoteAddress || '';
-  const f = failures.get(ip);
-  if (f && f.until > Date.now()) return { locked: true };
-  const h = req.headers.authorization || '';
-  if (!h.startsWith('Basic ')) return null;
-  const key = crypto.createHash('sha256').update(h).digest('hex');
-  const hit = authCache.get(key);
-  if (hit && hit.exp > Date.now()) return { user: hit.user };
-  let decoded = '';
-  try { decoded = Buffer.from(h.slice(6), 'base64').toString('utf8'); } catch (e) { return null; }
-  const i = decoded.indexOf(':');
-  const name = decoded.slice(0, i), pass = decoded.slice(i + 1);
-  const u = USERS.get(name);
-  const ok = !!u && i > 0 && crypto.timingSafeEqual(crypto.scryptSync(pass, u.salt, 64), u.hash);
-  if (!ok) {
-    const expired = f && f.until && f.until <= Date.now();
-    const n = (f && !expired ? f.n : 0) + 1;
-    failures.set(ip, { n, until: n >= 10 ? Date.now() + 15 * 60e3 : 0 });
-    return null;
-  }
-  failures.delete(ip);
-  authCache.set(key, { user: name, exp: Date.now() + 5 * 60e3 });
-  return { user: name };
-}
+/* ---------- authentication (apps/api/src/auth) ---------- */
+const { authenticate } = require('./apps/api/src/auth').createAuth(config);
 
 /* ---------- HTTP plumbing ---------- */
 const SEC_HEADERS = {
