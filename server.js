@@ -44,22 +44,8 @@ const { port: PORT, host: HOST, dataDir: DATA_DIR, databaseUrl: DATABASE_URL, cl
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 2 * 1024 * 1024;
 
-/* ---------- encryption at rest ---------- */
-function seal(text) {
-  if (!KEY) return text;
-  const iv = crypto.randomBytes(12);
-  const c = crypto.createCipheriv('aes-256-gcm', KEY, iv);
-  const body = Buffer.concat([c.update(text, 'utf8'), c.final()]);
-  return 'enc:v1:' + Buffer.concat([iv, c.getAuthTag(), body]).toString('base64');
-}
-function open(text) {
-  if (!text.startsWith('enc:v1:')) return text;
-  if (!KEY) throw new Error('Data is encrypted but DATA_KEY is not set');
-  const raw = Buffer.from(text.slice(7), 'base64');
-  const d = crypto.createDecipheriv('aes-256-gcm', KEY, raw.subarray(0, 12));
-  d.setAuthTag(raw.subarray(12, 28));
-  return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString('utf8');
-}
+/* ---------- encryption at rest (apps/api/src/crypto) ---------- */
+const { seal, open } = require('./apps/api/src/crypto/seal.js').createSealer(KEY);
 
 /* ---------- storage ---------- */
 // Two stores with the same shape. Records and audit entries are sealed (encrypted when DATA_KEY
