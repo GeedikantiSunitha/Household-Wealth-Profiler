@@ -6,6 +6,8 @@
              through cloud.js and calls the `api` Edge Function with a bearer token
    - local:  no server found; drafts stay in this browser only */
 import { state, setState } from './state.js';
+import { $, esc, toast } from './lib/dom.js';
+import { gbp, gbpK, pct, fmtDate, fmtTs } from './lib/format.js';
 
 (function(){
 'use strict';
@@ -15,14 +17,7 @@ const {SCHEMA,COLS,SINGLES,YN,ROLES,WGROUP,EXP_CATS,ASSET_CLASSES,ROLLUP,fieldsO
 /* ---------- state (state.js: state.S, state.E, state.VIEW, state.BSVIEW, state.OPEN, state.banner, setState) ---------- */
 
 /* ---------- helpers ---------- */
-const $=s=>document.querySelector(s);
-const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const gbp=(n,dp=0)=>{if(!isFinite(n))return '–';const s=Math.abs(n).toLocaleString('en-GB',{maximumFractionDigits:dp,minimumFractionDigits:dp});return (n<0?'−£':'£')+s};
-const gbpK=n=>{if(!isFinite(n))return '–';const a=Math.abs(n);const s=a>=1e6?(a/1e6).toFixed(2)+'m':a>=1e4?Math.round(a/1e3)+'k':Math.round(a).toLocaleString('en-GB');return (n<0?'−£':'£')+s};
-const pct=(n,dp=0)=>isFinite(n)?(n*100).toFixed(dp)+'%':'–';
-const fmtDate=s=>{const d=H.parseDate(s);return d?d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):'–'};
-const fmtTs=s=>{const d=new Date(s);return isNaN(d)?s:d.toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})};
-function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2800)}
+// $, esc, toast: lib/dom.js · gbp, gbpK, pct, fmtDate, fmtTs: lib/format.js
 const memberName=r=>state.E.memberName(r);
 const isAdult=m=>state.E.isAdult(m);
 
