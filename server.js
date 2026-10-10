@@ -52,20 +52,8 @@ const { createStore, createFileStore, ID_RE } = require('./apps/api/src/reposito
 let store;
 try { store = createStore(config, sealer); } catch (e) { console.error(e.message); process.exit(1); }
 
-// One write at a time per household
-const locks = new Map();
-function withLock(id, fn) {
-  const prev = locks.get(id) || Promise.resolve();
-  const next = prev.then(fn, fn);
-  locks.set(id, next.catch(() => {}));
-  return next;
-}
-function summarise(rec) {
-  const s = HWP.normalise(rec.state);
-  let stage = '', rating = '', nextReview = '', blockers = 0, due = '', overdue = 0;
-  try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview; blockers = O.blockerCount; const R = E.reviews(O); due = R.nextDue; overdue = R.overdue; } catch (e) { stage = 'Error'; }
-  return { id: rec.id, name: s.household.name, reference: s.household.reference, stage, rating, nextReview, blockers, due, overdue, version: rec.version, updatedAt: rec.updatedAt, updatedBy: rec.updatedBy };
-}
+/* ---------- households (apps/api/src/services) ---------- */
+const households = require('./apps/api/src/services/households.js').createHouseholdService({ store, HWP });
 
 /* ---------- authentication ---------- */
 const failures = new Map(); // ip -> {n, until}
@@ -156,46 +144,28 @@ async function handle(req, res) {
 
   if (p === '/api/me' && req.method === 'GET') return send(res, 200, { user, encrypted: !!KEY });
 
-  if (p === '/api/households' && req.method === 'GET') {
-    const list = (await store.list()).map(summarise);
-    list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-    return send(res, 200, list);
-  }
+  if (p === '/api/households' && req.method === 'GET') return send(res, 200, await households.list());
   if (p === '/api/households' && req.method === 'POST') {
     const body = await readBody(req);
-    const state = HWP.normalise(body.state);
-    delete state.audit;
-    const now = new Date().toISOString();
-    const rec = { id: crypto.randomUUID(), version: 1, state, createdAt: now, createdBy: user, updatedAt: now, updatedBy: user };
-    await withLock(rec.id, () => store.create(rec, [{ ts: now, user, field: 'created', from: '', to: state.household.name || '' }]));
-    return send(res, 201, { id: rec.id, version: rec.version });
+    return send(res, 201, await households.create(body.state, user));
   }
   const m = /^\/api\/households\/([^/]+)(\/audit)?$/.exec(p);
   if (m) {
     const id = m[1];
     if (!ID_RE.test(id)) return send(res, 404, { error: 'Not found' });
     if (m[2] && req.method === 'GET') {
-      if (!(await store.get(id))) return send(res, 404, { error: 'Not found' });
-      return send(res, 200, (await store.audit(id)).slice(0, 5000));
+      const entries = await households.audit(id);
+      return entries ? send(res, 200, entries) : send(res, 404, { error: 'Not found' });
     }
     if (!m[2] && req.method === 'GET') {
-      const rec = await store.get(id);
+      const rec = await households.get(id);
       return rec ? send(res, 200, rec) : send(res, 404, { error: 'Not found' });
     }
     if (!m[2] && req.method === 'PUT') {
-      const body = await readBody(req);
-      const [status, out] = await withLock(id, () => store.update(id, rec => {
-        if (!rec) return { result: [404, { error: 'Not found' }] };
-        if (+body.version !== rec.version) return { result: [409, { error: 'This household was changed by someone else', version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt }] };
-        const state = HWP.normalise(body.state);
-        delete state.audit;
-        const now = new Date().toISOString();
-        const changes = HWP.diff(rec.state, state).map(c => ({ ts: now, user, ...c, version: rec.version + 1 }));
-        if (!changes.length) return { result: [200, { version: rec.version, changes: 0 }] };
-        const next = { ...rec, version: rec.version + 1, state, updatedAt: now, updatedBy: user };
-        return { next, audit: changes, result: [200, { version: next.version, changes: changes.length }] };
-      }));
-      return send(res, status, out);
+      const r = await households.save(id, await readBody(req), user);
+      if (r.notFound) return send(res, 404, { error: 'Not found' });
+      if (r.conflict) return send(res, 409, { error: 'This household was changed by someone else', ...r.conflict });
+      return send(res, 200, r);
     }
   }
   return send(res, 404, { error: 'Not found' });
