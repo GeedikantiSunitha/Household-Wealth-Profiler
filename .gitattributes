@@ -1,0 +1,16 @@
+# Line endings: stored as LF in the repository on every machine, whatever the local
+# git settings. Working copies follow the platform (CRLF on Windows) except where
+# a tool needs LF. Keeps test/core-fingerprint stable and diffs free of line-ending noise.
+* text=auto
+
+# Run on Linux (Docker, CI, DCDeploy): must stay LF even on Windows checkouts
+*.sh text eol=lf
+.githooks/* text eol=lf
+Dockerfile text eol=lf
+
+# Never touched
+*.png binary
+*.jpg binary
+*.ico binary
+*.xlsx binary
+*.pdf binary
