@@ -187,7 +187,7 @@ DATABASE_URL=postgres://hwp_app:PASSWORD@localhost:5432/wealth_profiler
 ```
 
 Run `npm install` and then `npm start`. The start-up line shows where the data is kept.
-`.env` belongs on the server only, never in `public/`: everything there is sent to browsers.
+`.env` belongs on the server only, never in `apps/web/public/`: everything there is sent to browsers.
 Add `?sslmode=require` when the database is on another machine, and URL-encode special
 characters in the password.
 
@@ -282,10 +282,10 @@ The agreement date starts an annual mandate review in Reviews due.
 
 ```
 packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
-public/app.js       the interface
-public/index.html   page shell
-public/styles.css   styles
-public/cloud.js     sign-in and two-step verification for the Supabase edition
+apps/web/public/app.js      the interface
+apps/web/public/index.html  page shell
+apps/web/public/styles.css  styles
+apps/web/public/cloud.js    sign-in and two-step verification for the Supabase edition
 server.js           API, sign-in, encryption, versions, audit trail (self-hosted)
 db/                 migrations and migration runner for server.js with PostgreSQL
 supabase/           database migrations and the `api` Edge Function (Supabase edition)

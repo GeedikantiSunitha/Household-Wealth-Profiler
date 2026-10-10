@@ -2,8 +2,10 @@
 
 The screens advisers use.
 
-**Fills in step B12** (the files in `public/` move here unchanged) **and steps B13 to B20**
-(`app.js` is split into modules, one group per step, safest first).
+`public/` moved here unchanged in step B12; the server sends these files to the browser, and
+`/core.js` comes from `packages/core`. **Steps B13 to B20** split `app.js` into modules, one group
+per step, safest first. Without a server, use the single-file build: `npm run build`, then open
+`dist/wealth-profiler.html`.
 
 ## Planned layout
 

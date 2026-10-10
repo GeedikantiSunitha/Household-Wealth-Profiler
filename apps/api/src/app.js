@@ -20,7 +20,7 @@ const CHALLENGE = { 'WWW-Authenticate': 'Basic realm="Household Wealth Profiler"
 
 function createApp({ config, households, authenticate }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
-  const serveStatic = createStatic({ publicDir: path.join(config.root, 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
+  const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
     createMeRoute({ send, encrypted: !!config.key }),
     createHouseholdRoutes({ households, ID_RE, send, readBody }),

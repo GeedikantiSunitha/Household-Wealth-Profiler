@@ -53,7 +53,7 @@ Use `npm run dev` (demo / demo, data in `./data-dev`) at http://localhost:8080.
 5. **Add and remove:** in People, "Add person", then remove it; the "Removed … Undo" banner appears and Undo brings it back.
 6. **Assumptions reset:** change a figure in Assumptions, then "Restore defaults"; the toast says 2026/27 defaults.
 7. **PostgreSQL mode:** `npm start` (settings from `.env`): the start-up line says `data in PostgreSQL …`, sign in, open a household, change a field, see "All changes saved".
-8. **Browser-only mode:** open `public/index.html` straight from the disk (no server): the sample loads, the header shows "Working as", and the save state says "Saved in this browser only".
+8. **Browser-only mode:** run `npm run build` and open `dist/wealth-profiler.html` straight from the disk (no server; it has the rules built in): the sample loads, the header shows "Working as", and the save state says "Saved in this browser only".
 
 Excel needs the internet (SheetJS loads from cdnjs) unless `scripts/fetch-xlsx.sh` has been run.
 

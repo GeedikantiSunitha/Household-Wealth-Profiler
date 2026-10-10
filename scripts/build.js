@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const root = path.join(__dirname, '..');
-const read = f => fs.readFileSync(path.join(root, 'public', f), 'utf8');
+const read = f => fs.readFileSync(path.join(root, 'apps', 'web', 'public', f), 'utf8');
 const readCore = () => fs.readFileSync(path.join(root, 'packages', 'core', 'core.js'), 'utf8');
 const html = read('index.html');
 const css = read('styles.css');

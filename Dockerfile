@@ -11,7 +11,7 @@ COPY server.js ./
 COPY apps/api ./apps/api
 COPY db ./db
 COPY packages ./packages
-COPY public ./public
+COPY apps/web/public ./apps/web/public
 RUN mkdir -p /data && chown -R node:node /data
 VOLUME ["/data"]
 EXPOSE 8080
