@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const H = require('../public/core.js');
+const { apiContract } = require('./helpers/api-contract.js');
 
 const URL_ = process.env.TEST_DATABASE_URL;
 const ROOT = path.join(__dirname, '..');
@@ -103,4 +104,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       assert.equal((await db.query('select count(*)::int n from household_versions where household_id = $1', [fid])).rows[0].n, 2);
     } finally { fileServer.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
   });
+
+  // PostgreSQL storage held to the same API contract as file storage
+  apiContract(() => ({ base: BASE, sam: SAM, chris: CHRIS }));
 });

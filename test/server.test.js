@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const H = require('../public/core.js');
+const { apiContract } = require('./helpers/api-contract.js');
 
 const ROOT = path.join(__dirname, '..');
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-test-'));
@@ -95,6 +96,9 @@ test('there is no way to delete a client file', async () => {
   assert.equal(r.status, 404);
   assert.ok(fs.existsSync(path.join(DATA, 'households', id, 'current.json')));
 });
+
+// File storage held to the shared API contract (before the lockout tests below)
+apiContract(() => ({ base: BASE, sam: SAM, chris: CHRIS }));
 
 test('behind a proxy, a lockout applies only to the client address the proxy reports', async () => {
   const from = ip => ({ 'X-Client-IP': ip });
