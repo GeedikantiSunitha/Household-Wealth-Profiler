@@ -22,4 +22,4 @@ Umesh owns the repository and decides what is released. Everyone else works thro
 
 ## Releases
 
-Deployments are run by Umesh from `main`. If a change needs a new environment variable or a database migration, say so in the pull request.
+Deployments are run by Umesh from `main`. If a change needs a new environment variable or a database migration, say so in the pull request. Database changes go in a new migration file (`db/migrations/NNNN_name.sql` or `supabase/migrations/<timestamp>_name.sql`); never edit one that has been applied.

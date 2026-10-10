@@ -3,7 +3,7 @@
    - Serves the app from ./public
    - Named logins (HTTP Basic over HTTPS) with scrypt-hashed passwords
    - Client files encrypted at rest with AES-256-GCM (DATA_KEY)
-   - Stored as files under DATA_DIR, or in PostgreSQL when DATABASE_URL is set (db/schema.sql)
+   - Stored as files under DATA_DIR, or in PostgreSQL when DATABASE_URL is set (db/migrations)
    - Every save is versioned; older versions are kept
    - Server-side audit trail: who changed which field, when, from what, to what
    - No delete endpoint: AML records must be kept for 5 years after the relationship ends
@@ -168,7 +168,13 @@ function pgStore(url) {
   try { const u = new URL(url); where = `PostgreSQL ${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`; } catch (e) {}
   return {
     describe: 'data in ' + where,
-    async init() { await pool.query(fs.readFileSync(path.join(__dirname, 'db', 'schema.sql'), 'utf8')); },
+    // Applies any new db/migrations files; several processes starting at once take turns
+    async init() {
+      const { migrate, pgClient } = require('./db/migrate.js');
+      const c = await pool.connect();
+      try { await migrate(pgClient(c), { dir: path.join(__dirname, 'db', 'migrations'), log: m => console.log(new Date().toISOString(), m) }); }
+      finally { c.release(); }
+    },
     async list() { return (await pool.query('select doc from households')).rows.map(r => JSON.parse(open(r.doc))); },
     async get(id) { const r = (await pool.query('select doc from households where id = $1', [id])).rows[0]; return r ? JSON.parse(open(r.doc)) : null; },
     async create(rec, audit) {

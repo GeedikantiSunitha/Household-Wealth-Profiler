@@ -147,8 +147,9 @@ profiler.yourfirm.co.uk {
 ### 4. Optional: keep the data in PostgreSQL
 
 By default the server stores files under `DATA_DIR`. Set `DATABASE_URL` and it uses
-PostgreSQL 14 or later instead. It creates its tables on start-up from [db/schema.sql](db/schema.sql)
-(`households`, `household_versions`, `audit_log`). Database triggers refuse any delete or
+PostgreSQL 14 or later instead. On start-up it applies any new files in [db/migrations](db/migrations)
+in name order and records each one in `schema_migrations` (tables `households`,
+`household_versions`, `audit_log`). Database triggers refuse any delete or
 rewrite of households, versions and audit entries. Rows are encrypted with `DATA_KEY` just
 like the files, so the database never holds readable client data. Saves lock the household's
 row, so several server processes can share one database safely.
@@ -181,6 +182,13 @@ node server.js import-files ./data     # households already in the database are 
 
 Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
 keep `DATA_KEY` in a different place from the backups.
+
+**Changing the database.** Add a new file such as `db/migrations/0002_add_x.sql`; never edit
+one that has been applied (the server refuses to start if an applied file changes). Each file
+runs once, in a transaction with its tracking row, so a failed migration leaves nothing behind
+and is retried on the next start. Several servers starting together take turns. Migrations
+should only add (tables, columns with defaults, indexes): the retention triggers refuse
+deletes anyway. Databases created before migrations were tracked are adopted as they are.
 
 To run the PostgreSQL tests, point them at an empty scratch database:
 `TEST_DATABASE_URL=postgres://... node --test test/postgres.test.js`.
@@ -262,6 +270,7 @@ public/index.html   page shell
 public/styles.css   styles
 public/cloud.js     sign-in and two-step verification for the Supabase edition
 server.js           API, sign-in, encryption, versions, audit trail (self-hosted)
+db/                 migrations and migration runner for server.js with PostgreSQL
 supabase/           database migration and the `api` Edge Function (Supabase edition)
 scripts/firms.js    create and manage customer firms (Supabase edition)
 scripts/build.js    builds dist/wealth-profiler.html, a single file that runs without a server

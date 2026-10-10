@@ -1,5 +1,6 @@
 -- Household Wealth Profiler: PostgreSQL storage for the self-hosted server (server.js).
--- Applied automatically at start-up when DATABASE_URL is set; safe to run more than once.
+-- Applied at start-up by db/migrate.js when DATABASE_URL is set. Written with "if not exists" so it
+-- also adopts databases created before migrations were tracked, without touching their rows.
 -- Each doc / entry column holds the same text the file store writes: JSON, or "enc:v1:..."
 -- (AES-256-GCM) when DATA_KEY is set, so client data stays encrypted inside the database too.
 -- Versions and the audit log can never be changed or deleted, and households cannot be deleted
