@@ -9,12 +9,12 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=18.17"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node server.js",
     "dev": "node scripts/dev.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "screens": "node test/e2e/screens.js",
     "build": "node scripts/build.js",
     "sync:supabase": "node -e \"require('fs').copyFileSync('packages/core/core.js','supabase/functions/_shared/core.js')\"",

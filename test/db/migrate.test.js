@@ -5,9 +5,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { migrate } = require('../db/migrate.js');
+const { migrate } = require('../../db/migrate.js');
 
-const DIR = path.join(__dirname, '..', 'db', 'migrations');
+const DIR = path.join(__dirname, '..', '..', 'db', 'migrations');
 const pglite = async () => { const { PGlite } = await import('@electric-sql/pglite'); return new PGlite(); };
 const adapt = pg => ({ query: async (sql, params) => (await pg.query(sql, params)).rows, exec: sql => pg.exec(sql) });
 const ID = '11111111-1111-4111-8111-111111111111';

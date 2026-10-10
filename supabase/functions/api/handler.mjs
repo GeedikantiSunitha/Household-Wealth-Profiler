@@ -2,7 +2,7 @@
 // Platform-neutral: index.ts wires it to Supabase on Deno; the tests wire it to PGlite on Node.
 //   deps.HWP      core.js
 //   deps.verify   async (token) -> { userId, email, aal } | null
-//   deps.db       data access (see index.ts / test/supabase.test.js)
+//   deps.db       data access (see index.ts / test/supabase/supabase.test.js)
 //   deps.origins  allowed browser origins for CORS
 //   deps.requireMfa  refuse sessions that have not passed a second factor
 //   deps.inviteRedirect  where invite emails send people to choose a password

@@ -6,14 +6,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const H = require('../packages/core/core.js');
+const H = require('../../packages/core/core.js');
 
-const ROOT = path.join(__dirname, '..');
+const ROOT = path.join(__dirname, '..', '..');
 const ORIGIN = 'https://app.example.co.uk';
 let pg, handle;
 
 // The same path an operator uses on plain PostgreSQL: Supabase stand-ins, then every migration, tracked
-const { migrateSupabase, backfill } = require('../scripts/supabase-db.js');
+const { migrateSupabase, backfill } = require('../../scripts/supabase-db.js');
 const pgl = () => ({ query: async (sql, params) => (await pg.query(sql, params)).rows, exec: sql => pg.exec(sql) });
 
 // Every API query runs as service_role, as it does on Supabase, so grants are tested too.
@@ -62,7 +62,7 @@ async function addUser(key, firm, name, role, aal = 'aal2') {
 
 test.before(async () => {
   const { PGlite } = await import('@electric-sql/pglite');
-  ({ handle } = await import('../supabase/functions/api/handler.mjs'));
+  ({ handle } = await import('../../supabase/functions/api/handler.mjs'));
   pg = new PGlite();
   await migrateSupabase(pgl());
   for (const [k, name, seats, status] of [['a', 'Alder Wealth', 3, 'active'], ['b', 'Birch Partners', 5, 'active'], ['s', 'Suspended Ltd', 5, 'suspended']])

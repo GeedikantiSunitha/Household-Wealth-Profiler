@@ -5,7 +5,7 @@ clients, couples with one or two earners, children), runs KYC and AML checks, an
 produces a CFA-style economic balance sheet, a tax and allowances view, a risk
 profile with an investment policy statement, and an audit trail.
 
-You need Node.js 18.17 or later (20.12 or later to read a `.env` file). The only runtime
+You need Node.js 22 or later (Node 18 and 20 are past end-of-life). The only runtime
 package is `pg`, and it is used only when the data is kept in PostgreSQL.
 
 ## Quick start (your own machine)
@@ -208,7 +208,7 @@ should only add (tables, columns with defaults, indexes): the retention triggers
 deletes anyway. Databases created before migrations were tracked are adopted as they are.
 
 To run the PostgreSQL tests, point them at an empty scratch database:
-`TEST_DATABASE_URL=postgres://... node --test test/postgres.test.js`.
+`TEST_DATABASE_URL=postgres://... node --test test/api/postgres.test.js`.
 
 ### 5. Optional: host the spreadsheet library yourself
 

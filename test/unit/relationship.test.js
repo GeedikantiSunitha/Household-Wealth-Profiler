@@ -2,7 +2,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const H = require('../packages/core/core.js');
+const H = require('../../packages/core/core.js');
 
 const T = H.today();
 const d = n => H.addDays(T, n);

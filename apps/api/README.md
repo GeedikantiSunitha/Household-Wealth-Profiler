@@ -20,4 +20,4 @@ Dockerfile and the `node server.js …` commands keep working.
 | `src/db/` | Connection pool, transactions, running `db/migrations` |
 | `src/cli/` | `hash-password`, `gen-key`, `import-files` |
 
-The API's replies are fixed by `test/helpers/api-contract.js`; every step keeps it passing.
+The API's replies are fixed by `test/api/api-contract.js`; every step keeps it passing.

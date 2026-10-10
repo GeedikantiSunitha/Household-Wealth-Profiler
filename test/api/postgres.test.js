@@ -10,11 +10,11 @@ const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const H = require('../packages/core/core.js');
-const { apiContract } = require('./helpers/api-contract.js');
+const H = require('../../packages/core/core.js');
+const { apiContract } = require('./api-contract.js');
 
 const URL_ = process.env.TEST_DATABASE_URL;
-const ROOT = path.join(__dirname, '..');
+const ROOT = path.join(__dirname, '..', '..');
 const PORT = 19000 + Math.floor(Math.random() * 1000);
 const BASE = `http://127.0.0.1:${PORT}`;
 const node = args => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT }).toString().trim();
