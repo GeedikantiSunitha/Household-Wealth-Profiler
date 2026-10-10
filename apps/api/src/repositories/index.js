@@ -1,0 +1,22 @@
+/* Storage for households. Two stores with the same shape; DATABASE_URL picks PostgreSQL, otherwise
+   files under DATA_DIR. Records and audit entries are sealed before they are stored.
+     list()               every current record
+     get(id)              current record or null
+     create(rec, audit)   new household at version 1
+     update(id, decide)   decide(current) returns { result, next?, audit? }; when next is given it is
+                          saved as the new version together with its audit entries, atomically
+     audit(id)            audit entries, newest first
+     init()               prepare storage (create the folder, or apply db/migrations)
+     describe             where the data is, for the start-up line */
+'use strict';
+const path = require('path');
+const { ID_RE } = require('./ids.js');
+const { createFileStore } = require('./file-store.js');
+const { createPgStore } = require('./pg-store.js');
+
+function createStore(config, sealer) {
+  if (!config.databaseUrl) return createFileStore(config.dataDir, sealer);
+  return createPgStore(config.databaseUrl, { ...sealer, poolMax: config.databasePoolMax, migrationsDir: path.join(config.root, 'db', 'migrations') });
+}
+
+module.exports = { createStore, createFileStore, createPgStore, ID_RE };

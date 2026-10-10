@@ -45,140 +45,12 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY = 2 * 1024 * 1024;
 
 /* ---------- encryption at rest (apps/api/src/crypto) ---------- */
-const { seal, open } = require('./apps/api/src/crypto/seal.js').createSealer(KEY);
+const sealer = require('./apps/api/src/crypto/seal.js').createSealer(KEY);
 
-/* ---------- storage ---------- */
-// Two stores with the same shape. Records and audit entries are sealed (encrypted when DATA_KEY
-// is set) before they reach the disk or the database.
-//   list()               every current record
-//   get(id)              current record or null
-//   create(rec, audit)   new household at version 1
-//   update(id, decide)   decide(current) returns { result, next?, audit? }; when next is given it is
-//                        saved as the new version together with its audit entries, atomically
-//   audit(id)            audit entries, newest first
-const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-function fileStore(dir) {
-  const hhDir = id => path.join(dir, 'households', id);
-  async function writeAtomic(file, text) {
-    await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-    const tmp = file + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
-    await fsp.writeFile(tmp, text, { mode: 0o600 });
-    await fsp.rename(tmp, file);
-  }
-  async function readRecord(id) {
-    try { return JSON.parse(open(await fsp.readFile(path.join(hhDir(id), 'current.json'), 'utf8'))); }
-    catch (e) { if (e.code === 'ENOENT') return null; throw e; }
-  }
-  async function writeRecord(rec) {
-    const text = seal(JSON.stringify(rec));
-    await writeAtomic(path.join(hhDir(rec.id), 'versions', `${String(rec.version).padStart(6, '0')}.json`), text);
-    await writeAtomic(path.join(hhDir(rec.id), 'current.json'), text);
-  }
-  async function appendAudit(id, entries) {
-    if (!entries.length) return;
-    const lines = entries.map(e => seal(JSON.stringify(e)) + '\n').join('');
-    await fsp.mkdir(hhDir(id), { recursive: true, mode: 0o700 });
-    await fsp.appendFile(path.join(hhDir(id), 'audit.log'), lines, { mode: 0o600 });
-  }
-  async function ids() {
-    try { return (await fsp.readdir(path.join(dir, 'households'))).filter(x => ID_RE.test(x)); }
-    catch (e) { if (e.code === 'ENOENT') return []; throw e; }
-  }
-  return {
-    describe: 'data in ' + dir,
-    async init() { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); },
-    ids,
-    async list() { const out = []; for (const id of await ids()) { const rec = await readRecord(id); if (rec) out.push(rec); } return out; },
-    get: readRecord,
-    async versions(id) {
-      let names = [];
-      try { names = (await fsp.readdir(path.join(hhDir(id), 'versions'))).filter(f => /^\d+\.json$/.test(f)).sort(); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-      const out = [];
-      for (const f of names) out.push(JSON.parse(open(await fsp.readFile(path.join(hhDir(id), 'versions', f), 'utf8'))));
-      return out;
-    },
-    async create(rec, audit) { await writeRecord(rec); await appendAudit(rec.id, audit); },
-    async update(id, decide) {
-      const out = await decide(await readRecord(id));
-      if (out.next) { await writeRecord(out.next); await appendAudit(id, out.audit || []); }
-      return out.result;
-    },
-    async audit(id) {
-      let text = '';
-      try { text = await fsp.readFile(path.join(hhDir(id), 'audit.log'), 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-      return text.split('\n').filter(Boolean).map(l => JSON.parse(open(l))).reverse();
-    },
-  };
-}
-
-function pgStore(url) {
-  let pg;
-  try { pg = require('pg'); } catch (e) { console.error('DATABASE_URL is set but the "pg" package is missing. Run: npm install'); process.exit(1); }
-  const pool = new pg.Pool({ connectionString: url, max: config.databasePoolMax });
-  pool.on('error', err => console.error(new Date().toISOString(), 'database connection error', err.message));
-  async function tx(fn) {
-    const c = await pool.connect();
-    try { await c.query('begin'); const r = await fn(c); await c.query('commit'); return r; }
-    catch (e) { await c.query('rollback').catch(() => {}); throw e; }
-    finally { c.release(); }
-  }
-  const sealAll = entries => entries.map(e => seal(JSON.stringify(e)));
-  async function insertVersion(c, rec, audit) {
-    const doc = seal(JSON.stringify(rec));
-    await c.query('insert into household_versions (household_id, version, doc, saved_at) values ($1, $2, $3, $4)', [rec.id, rec.version, doc, rec.updatedAt]);
-    if (audit.length) await c.query('insert into audit_log (household_id, entry) select $1, unnest($2::text[])', [rec.id, sealAll(audit)]);
-    return doc;
-  }
-  let where = 'PostgreSQL';
-  try { const u = new URL(url); where = `PostgreSQL ${u.hostname}${u.port ? ':' + u.port : ''}${u.pathname}`; } catch (e) {}
-  return {
-    describe: 'data in ' + where,
-    // Applies any new db/migrations files; several processes starting at once take turns
-    async init() {
-      const { migrate, pgClient } = require('./db/migrate.js');
-      const c = await pool.connect();
-      try { await migrate(pgClient(c), { dir: path.join(__dirname, 'db', 'migrations'), log: m => console.log(new Date().toISOString(), m) }); }
-      finally { c.release(); }
-    },
-    async list() { return (await pool.query('select doc from households')).rows.map(r => JSON.parse(open(r.doc))); },
-    async get(id) { const r = (await pool.query('select doc from households where id = $1', [id])).rows[0]; return r ? JSON.parse(open(r.doc)) : null; },
-    async create(rec, audit) {
-      await tx(async c => {
-        const doc = seal(JSON.stringify(rec));
-        await c.query('insert into households (id, version, doc, updated_at) values ($1, $2, $3, $4)', [rec.id, rec.version, doc, rec.updatedAt]);
-        await insertVersion(c, rec, audit);
-      });
-    },
-    // The row lock (select ... for update) serialises saves across every server process
-    async update(id, decide) {
-      return tx(async c => {
-        const r = (await c.query('select doc from households where id = $1 for update', [id])).rows[0];
-        const out = await decide(r ? JSON.parse(open(r.doc)) : null);
-        if (out.next) {
-          const doc = await insertVersion(c, out.next, out.audit || []);
-          await c.query('update households set version = $2, doc = $3, updated_at = $4 where id = $1', [id, out.next.version, doc, out.next.updatedAt]);
-        }
-        return out.result;
-      });
-    },
-    async audit(id) { return (await pool.query('select entry from audit_log where household_id = $1 order by id desc', [id])).rows.map(r => JSON.parse(open(r.entry))); },
-    // import-files: copies one household's whole history; false when it is already there
-    async importHousehold(versions, audit) {
-      const last = versions[versions.length - 1];
-      return tx(async c => {
-        if ((await c.query('select 1 from households where id = $1', [last.id])).rows.length) return false;
-        await c.query('insert into households (id, version, doc, updated_at) values ($1, $2, $3, $4)', [last.id, last.version, seal(JSON.stringify(last)), last.updatedAt]);
-        for (const v of versions) await insertVersion(c, v, []);
-        if (audit.length) await c.query('insert into audit_log (household_id, entry) select $1, unnest($2::text[])', [last.id, sealAll(audit)]);
-        return true;
-      });
-    },
-    end: () => pool.end(),
-  };
-}
-
-const store = DATABASE_URL ? pgStore(DATABASE_URL) : fileStore(DATA_DIR);
+/* ---------- storage (apps/api/src/repositories) ---------- */
+const { createStore, createFileStore, ID_RE } = require('./apps/api/src/repositories');
+let store;
+try { store = createStore(config, sealer); } catch (e) { console.error(e.message); process.exit(1); }
 
 // One write at a time per household
 const locks = new Map();
@@ -341,7 +213,7 @@ server.requestTimeout = 30e3;
 // Copies households from a file store into PostgreSQL with their versions and audit trail
 async function importFiles(dir) {
   if (!DATABASE_URL) { console.error('Set DATABASE_URL to the database to copy into.'); process.exit(1); }
-  const from = fileStore(path.resolve(dir));
+  const from = createFileStore(path.resolve(dir), sealer);
   await store.init();
   let copied = 0, skipped = 0;
   for (const id of await from.ids()) {
