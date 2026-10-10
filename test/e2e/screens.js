@@ -169,10 +169,13 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
         await shot(id);
       });
     }
-    await step('typing a change autosaves ("All changes saved")', async () => {
+    await step('typing a change is picked up, then autosaved ("Unsaved changes", then "All changes saved")', async () => {
       await click('[data-nav="household"]');
       await until(`!!document.querySelector('#f-household-0-reference')`, 'the reference field');
       await type('#f-household-0-reference', 'HH-SCREEN');
+      // A freshly opened household already says "All changes saved", so first prove the typing registered
+      await until(`document.querySelector('#saveState').textContent === 'Unsaved changes'`, 'the edit to be picked up', 3000);
+      await until(`/Client reference/.test(document.querySelector('#impactWhy')?.textContent || '')`, 'the live-effect panel to note the edit', 3000);
       await until(`document.querySelector('#saveState').textContent === 'All changes saved'`, 'autosave', 10000);
     });
     await step('after a reload the change is still there', async () => {

@@ -7,13 +7,13 @@
    - local:  no server found; drafts stay in this browser only */
 import { state, setState } from './state.js';
 import { $, esc, toast } from './lib/dom.js';
-import { Store, logChange, LS_USER, setRenderer } from './api/store.js';
-import { memberName, isAdult } from './lib/people.js';
-import { VALIDATE, summary } from './components/form.js';
-import { IMPACT, refreshImpact } from './components/impact.js';
-import { renderNav } from './views/nav.js';
+import { Store, logChange, setRenderer } from './api/store.js';
+import { memberName } from './lib/people.js';
 import { GROUPS_A, GROUPS_L } from './views/balance-sheet.js';
 import { render } from './views/render.js';
+import { resetUI } from './events/actions.js';
+// Loaded for what it does, not for a name: it listens for typing in the form
+import './events/editing.js';
 
 (function(){
 'use strict';
@@ -28,55 +28,8 @@ const {SCHEMA,COLS,SINGLES,YN,ROLES,WGROUP,EXP_CATS,ASSET_CLASSES,ROLLUP,fieldsO
      content/        help text and "how this section is used" text
      components/     form fields, the banner, the how-it-is-used panel, the live-effect panel
      views/          one file per screen; views/render.js draws the screen on show
-   This file still holds editing, button handling, Excel/JSON and start-up (moved in steps B19-B20). */
-
-// Timer for refreshing the live-effect panel while the adviser types (see onEdit)
-let impT;
-
-/* ---------- editing ---------- */
-function parseVal(f,raw,el){if(f.t===YN)return el?el.checked:raw;if(f.t==='num'||f.t==='pct'||f.t==='int'){if(raw===''||raw==null)return '';const n=parseFloat(String(raw).replace(/[£,%\s]/g,''));return isFinite(n)?n:''}return raw}
-let navT;
-function onEdit(e){const el=e.target;
-  if(el.id==='whoIn'){Store.user=el.value.trim();try{localStorage.setItem(LS_USER,Store.user)}catch(x){}return}
-  if(!el.dataset||!el.dataset.k)return;const {col,idx,k}=el.dataset;const s=SCHEMA[col];const f=fieldsOf(s).find(x=>x.k===k);
-  const v=parseVal(f,el.value,el.type==='checkbox'?el:null);const rec=s.single?state.S[col]:state.S[col][+idx];const old=rec[k];if(old===v)return;rec[k]=v;
-  logChange(s.single?`${col}.${k}`:`${col}[${idx}].${k}`,old,v);Store.touch();
-  clearTimeout(impT);impT=setTimeout(()=>refreshImpact(`${s.title}: ${f.l}`,f),120);
-  if(VALIDATE[k]){const msg=VALIDATE[k](v);const h=document.getElementById(el.id+'-h');el.setAttribute('aria-invalid',msg?'true':'false');if(h){h.textContent=msg||f.h||'';h.className='hint'+(msg?' err':'')}}
-  if(!s.single){const card=document.querySelector(`[data-card="${col}:${idx}"]`);if(card){const [t,meta,val]=summary(col,rec);card.querySelector('.sum').innerHTML=`<b>${esc(t)}</b><span class="meta">${esc(meta)}</span>`;card.querySelector('.val').textContent=val}}
-  clearTimeout(navT);navT=setTimeout(renderNav,250);
-  if(col==='members'&&k==='role'&&e.type==='change')render();
-}
-document.addEventListener('input',onEdit);document.addEventListener('change',onEdit);
-document.addEventListener('click',async e=>{
-  const nav=e.target.closest('[data-nav]');if(nav&&nav.dataset.nav){state.VIEW=nav.dataset.nav;if(state.banner&&!state.banner.sticky)state.banner=null;render();window.scrollTo({top:0});return}
-  const b=e.target.closest('[data-act]');if(!b)return;const act=b.dataset.act,col=b.dataset.col,idx=+b.dataset.idx;
-  if(act==='del'){e.stopPropagation();const rem=state.S[col].splice(idx,1)[0];logChange(`${col}.count`,state.S[col].length+1,state.S[col].length);Store.touch();
-    state.banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};IMPACT.why=`<b>${esc(SCHEMA[col].item)} removed.</b> The figures above compare with when you opened this section.`;render();return}
-  if(act==='undo'&&state.banner&&state.banner.undo){const u=state.banner.undo;state.S[u.col].splice(u.idx,0,u.rem);logChange(`${u.col}.count`,state.S[u.col].length-1,state.S[u.col].length);state.banner=null;Store.touch();render();return}
-  if(act==='closeBanner'){state.banner=null;render();return}
-  if(act==='goClients'||act==='team'||act==='diary'){await Store.flush();state.VIEW=act==='goClients'?'clients':act;state.banner=null;render();return}
-  if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}await Store.cloud.signOut();location.reload();return}
-  if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
-    try{await Store.api('POST','members',body);state.banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}
-  if(act==='memberActive'){try{await Store.api('PATCH','members/'+encodeURIComponent(b.dataset.uid),{active:b.dataset.on==='1'});state.banner=null}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}
-  if(act==='toggle'){if(e.target.closest('[data-act="del"]'))return;const key=col+':'+idx;state.OPEN.has(key)?state.OPEN.delete(key):state.OPEN.add(key);const card=b.closest('.card');card.dataset.open=state.OPEN.has(key);b.setAttribute('aria-expanded',state.OPEN.has(key));return}
-  if(act==='toggleAll'){const all=state.S[col].every((_,i)=>state.OPEN.has(col+':'+i));state.S[col].forEach((_,i)=>all?state.OPEN.delete(col+':'+i):state.OPEN.add(col+':'+i));render();return}
-  if(act==='add'){const r=H.defaults(col);if(col==='members'){const ad=state.S.members.filter(isAdult).length;r.ref=ad<1?'P1':ad<2?'P2':'C'+(state.S.members.filter(m=>m.role==='child').length+1);r.role=ad<1?'primary':ad<2?'partner':'child'}
-    else if(['income','db','protection'].includes(col))r.owner=state.S.members[0]?.ref||'';else if(fieldsOf(SCHEMA[col]).some(f=>f.t==='owner'))r.owner=state.S.members.filter(isAdult).length>1?'JOINT':(state.S.members[0]?.ref||'');
-    state.S[col].push(r);logChange(`${col}.count`,state.S[col].length-1,state.S[col].length);state.OPEN.add(col+':'+(state.S[col].length-1));Store.touch();IMPACT.why=`<b>${esc(SCHEMA[col].item)} added.</b> Fill it in and the figures above update as you type.`;render();const cards=document.querySelectorAll('.card');cards[cards.length-1]?.scrollIntoView({behavior:'smooth',block:'center'});return}
-  if(act==='bsview'){state.BSVIEW=b.dataset.v;render();return}
-  if(act==='resetAssump'){state.S.assumptions=H.defaults('assumptions');logChange('assumptions','edited','defaults restored');Store.touch();render();toast('Assumptions restored to 2026/27 defaults');return}
-  if(act==='confirmReset'){setState(H.blank());state.S.household.name='';state.OPEN.clear();state.OPEN.add('members:0');Store.saveLocal();state.VIEW='household';resetUI(false);render();toast('Started a blank household');return}
-  if(act==='loadSample'){setState(H.sample());Store.saveLocal();resetUI(false);render();toast('Sample household loaded');return}
-  if(act==='cancelReset'){resetUI(false);return}
-  if(act==='openHousehold'){try{await Store.open(b.dataset.id);state.banner=null;state.VIEW=b.dataset.view||'kyc';state.OPEN.clear();state.OPEN.add('members:0');render()}catch(err){toast('Could not open the household: '+err.message)}return}
-  if(act==='newBlank'||act==='newSample'){try{const st=act==='newSample'?H.sample():H.blank();st.isSample=act==='newSample';await Store.create(st);setState(H.normalise(st));state.VIEW='household';state.banner=null;render()}catch(err){toast('Could not create the household: '+err.message)}return}
-  if(act==='reloadHousehold'){try{await Store.open(Store.id);Store.err=null;state.banner=null;render();toast('Loaded the latest version')}catch(err){toast(err.message)}return}
-});
-document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.card-h')){e.preventDefault();e.target.click()}});
-function resetUI(confirming){$('#resetWrap').innerHTML=confirming?`<span class="confirm"><span class="muted" style="font-size:12.5px">Clear all data?</span><button class="btn primary" type="button" data-act="confirmReset">Clear</button><button class="btn" type="button" data-act="loadSample">Load sample</button><button class="btn ghost" type="button" data-act="cancelReset">Cancel</button></span>`:`<button class="btn ghost" id="btnReset" type="button">Start blank</button>`;
-  if(!confirming)$('#btnReset').onclick=()=>resetUI(true)}
+     events/         typing in the form (editing.js) and every button and link (actions.js)
+   This file still holds Excel/JSON and start-up (moved in step B20). */
 
 /* ---------- Excel and JSON ---------- */
 let xlsxP=null;
