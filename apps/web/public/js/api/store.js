@@ -9,6 +9,9 @@
 import { state, setState } from '../state.js';
 import { $ } from '../lib/dom.js';
 
+// Shown instead of the app when it is served by the server but the server does not answer
+export const NO_SERVER = 'The server could not be reached, so nothing you enter would be saved. Check your connection, then reload this page.';
+
 // The screen redraw, set by main.js at start-up (this module cannot import from main.js)
 let rerender = () => {};
 export function setRenderer(fn) { rerender = fn; }
@@ -19,9 +22,15 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
   async init(){
     if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');
       Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firm:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
+    // Only the standalone single file (npm run build) keeps data in this browser: it has no server
+    if(window.HWP_STANDALONE===true){this.mode='local';try{this.user=localStorage.getItem(LS_USER)||''}catch(e){this.user=''}return}
+    // Served by the server: the server must answer. Never fall back to browser storage, or client
+    // details could be entered that are never saved, encrypted or audited on the server.
+    let j=null;
     try{const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});
-      if(r.ok&&(r.headers.get('content-type')||'').includes('json')){const j=await r.json();if(j&&j.user){this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;return}}}catch(e){}
-    this.mode='local';try{this.user=localStorage.getItem(LS_USER)||''}catch(e){this.user=''}
+      if(r.ok&&(r.headers.get('content-type')||'').includes('json'))j=await r.json()}catch(e){}
+    if(j&&j.user){this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;return}
+    throw new Error(NO_SERVER);
   },
   loadLocal(){try{const r=localStorage.getItem(LS);return r?window.HWP.normalise(JSON.parse(r)):null}catch(e){return null}},
   saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state.S))}catch(e){}},

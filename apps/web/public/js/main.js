@@ -8,7 +8,7 @@
 import { state, setState } from './state.js';
 import { $, esc, toast } from './lib/dom.js';
 import { gbp, gbpK, pct, fmtDate, fmtTs } from './lib/format.js';
-import { Store, saveStatus, logChange, LS_USER, CFG, setRenderer } from './api/store.js';
+import { Store, saveStatus, logChange, LS_USER, setRenderer } from './api/store.js';
 
 (function(){
 'use strict';
@@ -23,7 +23,7 @@ const {SCHEMA,COLS,SINGLES,YN,ROLES,WGROUP,EXP_CATS,ASSET_CLASSES,ROLLUP,fieldsO
 const memberName=r=>state.E.memberName(r);
 const isAdult=m=>state.E.isAdult(m);
 
-/* ---------- storage: api/store.js (Store, saveStatus, logChange, LS_USER, CFG) ---------- */
+/* ---------- storage: api/store.js (Store, saveStatus, logChange, LS_USER) ---------- */
 
 /* ---------- navigation ---------- */
 const NAV=[
@@ -816,7 +816,7 @@ $('#btnClients').onclick=async()=>{await Store.flush();state.VIEW='clients';stat
 /* ---------- start ---------- */
 (async()=>{
   try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{DL=d},()=>{})}catch(e){DL=null}
-  try{await Store.init()}catch(e){if(!CFG.supabaseUrl)throw e;document.body.classList.add('gated');
+  try{await Store.init()}catch(e){document.body.classList.add('gated');
     $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p>${Store.cloud?'<div class="addrow"><button class="btn" type="button" data-act="signOut">Sign out</button></div>':''}</div>`;return}
   if(Store.mode==='server'){setState(H.blank());state.VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}

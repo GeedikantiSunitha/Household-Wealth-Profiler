@@ -22,7 +22,8 @@ function bundle(entry) {
 }
 const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))
   .replace(/<script src="(config|cloud)\.js"><\/script>\n?/g, '') // the single file has no server or cloud sign-in
-  .replace('<script src="core.js"></script>', () => `<script>\n${safe(readCore())}\n</script>`)
+  // Marks the page as the standalone demo: the only version allowed to keep data in the browser
+  .replace('<script src="core.js"></script>', () => `<script>window.HWP_STANDALONE=true;</script>\n<script>\n${safe(readCore())}\n</script>`)
   .replace('<script type="module" src="js/main.js"></script>', () => `<script>\n${safe(bundle('js/main.js'))}\n</script>`);
 const fonts = html.match(/<link rel="preconnect"[^>]*>\s*<link rel="stylesheet" href="https:\/\/fonts[^>]*>/)[0];
 fs.mkdirSync(path.join(root, 'dist'), { recursive: true });

@@ -29,6 +29,7 @@ It fails if any of these goes wrong:
 | Reviews due | The firm-wide diary renders |
 | Edit conflict | A save after someone else's shows "Someone else saved this household…" and "Not saved: newer version exists"; "Reload their version" loads theirs |
 | Phone width | Household, balance sheet and KYC captured at 390 px (page width recorded in the report) |
+| Server unreachable at start-up | When the start-up call fails, or something other than the server answers, the app shows "Cannot open the profiler" and no data-entry field: it never falls back to saving in the browser |
 
 Screenshots and `report.txt` go to `docs/checklists/screens/<date-time>/`; that folder is
 git-ignored. The report ends with one of:
