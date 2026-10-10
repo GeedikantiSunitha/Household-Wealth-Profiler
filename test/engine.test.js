@@ -3,7 +3,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const H = require('../public/core.js');
+const H = require('../packages/core/core.js');
 
 const VAL = '2026-10-08';
 // A household where survival is effectively certain (modal age 200),

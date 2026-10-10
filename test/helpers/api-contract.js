@@ -10,7 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const H = require('../../public/core.js');
+const H = require('../../packages/core/core.js');
 
 const J = { 'Content-Type': 'application/json' };
 const keys = o => Object.keys(o).sort();

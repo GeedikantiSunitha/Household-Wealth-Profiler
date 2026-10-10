@@ -82,7 +82,7 @@ the same actions as `firms.js`. Before selling, you will also need a data proces
 with each customer, Supabase's DPA, a privacy notice, ICO registration, and usually Cyber
 Essentials and a penetration test. Regulated firms will ask for these in their supplier due diligence.
 
-After changing `public/core.js`, run `npm run sync:supabase`. A test fails until you do.
+After changing `packages/core/core.js`, run `npm run sync:supabase`. A test fails until you do.
 
 ## Deploy (self-hosted, one firm)
 
@@ -281,7 +281,7 @@ The agreement date starts an annual mandate review in Reviews due.
 ## Project layout
 
 ```
-public/core.js      schema, tax engine, balance sheet, KYC/AML rules (browser and Node)
+packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
 public/app.js       the interface
 public/index.html   page shell
 public/styles.css   styles
@@ -297,7 +297,7 @@ test/               node:test suites
 
 ### Adding a field
 
-Add it to `SCHEMA` in `public/core.js`. It then appears in the form, the Excel
+Add it to `SCHEMA` in `packages/core/core.js`. It then appears in the form, the Excel
 template, import, export and the audit trail. Add a rule in `onboarding()` if it
 should block onboarding.
 

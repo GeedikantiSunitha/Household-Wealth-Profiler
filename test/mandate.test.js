@@ -2,7 +2,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const H = require('../public/core.js');
+const H = require('../packages/core/core.js');
 
 const check = s => H.bind(s).mandateCheck();
 const T = H.today();

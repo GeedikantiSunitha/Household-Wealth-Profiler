@@ -35,7 +35,7 @@ const COLS = { name: 'name', reference: 'reference', stage: 'stage', rating: 'ra
 
 // Returns { checked, updated }. Rows already correct are left alone.
 async function backfill(db) {
-  const HWP = require('../public/core.js');
+  const HWP = require('../packages/core/core.js');
   const { summarise } = await import('../supabase/functions/api/handler.mjs');
   const rows = await db.query(`select id, state, ${Object.values(COLS).join(', ')} from public.households`);
   let updated = 0;

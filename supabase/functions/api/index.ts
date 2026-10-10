@@ -2,7 +2,7 @@
 // Secrets (set with `supabase secrets set`): APP_ORIGINS, optional REQUIRE_MFA=0.
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase.
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2';
-import '../_shared/core.js'; // copy of public/core.js; sets globalThis.HWP
+import '../_shared/core.js'; // copy of packages/core/core.js; sets globalThis.HWP
 import { handle } from './handler.mjs';
 
 const HWP = (globalThis as any).HWP;

@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const H = require('../public/core.js');
+const H = require('../packages/core/core.js');
 
 const ROOT = path.join(__dirname, '..');
 const ORIGIN = 'https://app.example.co.uk';
@@ -77,7 +77,7 @@ test.before(async () => {
 test.after(() => pg && pg.close());
 
 test('the function uses the same core.js as the browser', () => {
-  assert.equal(fs.readFileSync(path.join(ROOT, 'supabase/functions/_shared/core.js'), 'utf8'), fs.readFileSync(path.join(ROOT, 'public/core.js'), 'utf8'),
+  assert.equal(fs.readFileSync(path.join(ROOT, 'supabase/functions/_shared/core.js'), 'utf8'), fs.readFileSync(path.join(ROOT, 'packages/core/core.js'), 'utf8'),
     'supabase/functions/_shared/core.js is out of date: run npm run sync:supabase');
 });
 

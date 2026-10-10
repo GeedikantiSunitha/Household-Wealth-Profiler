@@ -23,7 +23,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
-const HWP = require('./public/core.js');
+const HWP = require('./packages/core/core.js');
 
 /* ---------- CLI helpers ---------- */
 const cmd = process.argv[2];
@@ -283,10 +283,12 @@ function readBody(req) {
   });
 }
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+// The page loads the business rules as /core.js; the one copy lives in packages/core
+const CORE_FILE = path.join(__dirname, 'packages', 'core', 'core.js');
 async function serveStatic(req, res, pathname) {
   const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
-  const file = path.resolve(PUBLIC_DIR, rel);
-  if (!file.startsWith(PUBLIC_DIR + path.sep)) return send(res, 404, { error: 'Not found' });
+  const file = rel === 'core.js' ? CORE_FILE : path.resolve(PUBLIC_DIR, rel);
+  if (file !== CORE_FILE && !file.startsWith(PUBLIC_DIR + path.sep)) return send(res, 404, { error: 'Not found' });
   try {
     const data = await fsp.readFile(file);
     send(res, 200, data, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });

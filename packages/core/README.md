@@ -3,7 +3,10 @@
 The one and only copy of the business rules: UK tax, inheritance tax, the CFA economic balance
 sheet, risk profile, data checks, KYC/AML onboarding, reviews, mandate checks and the audit diff.
 
-**Fills in step B2**, when `public/core.js` moves here unchanged. Until then it is empty.
+Moved here unchanged from `public/core.js` in step B2. It is the npm workspace package
+`@hwp/core`. Code loads it by relative path (`require('../packages/core/core.js')`), and the
+server sends it to the browser as `/core.js`. The Supabase Edge Function keeps a synced copy in
+`supabase/functions/_shared/core.js` (`npm run sync:supabase`; a test fails if it drifts).
 
 ## Rules
 

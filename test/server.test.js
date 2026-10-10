@@ -6,7 +6,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const H = require('../public/core.js');
+const H = require('../packages/core/core.js');
 const { apiContract } = require('./helpers/api-contract.js');
 
 const ROOT = path.join(__dirname, '..');

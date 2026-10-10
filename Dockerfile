@@ -3,10 +3,13 @@ ENV NODE_ENV=production PORT=8080 DATA_DIR=/data
 RUN apk add --no-cache su-exec
 WORKDIR /app
 COPY package.json package-lock.json ./
+# Workspace manifests must be present before npm ci
+COPY packages/core/package.json ./packages/core/
 # Only "pg" (for DATABASE_URL); dev packages are left out
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server.js ./
 COPY db ./db
+COPY packages ./packages
 COPY public ./public
 RUN mkdir -p /data && chown -R node:node /data
 VOLUME ["/data"]

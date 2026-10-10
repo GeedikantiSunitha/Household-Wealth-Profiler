@@ -7,13 +7,14 @@ const fs = require('fs');
 const path = require('path');
 const root = path.join(__dirname, '..');
 const read = f => fs.readFileSync(path.join(root, 'public', f), 'utf8');
+const readCore = () => fs.readFileSync(path.join(root, 'packages', 'core', 'core.js'), 'utf8');
 const html = read('index.html');
 const css = read('styles.css');
 // Escape closing tags so inlined code cannot end its own <script> block early
 const safe = js => js.replace(/<\/script/gi, '<\\/script');
 const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))
   .replace(/<script src="(config|cloud)\.js"><\/script>\n?/g, '') // the single file has no server or cloud sign-in
-  .replace('<script src="core.js"></script>', () => `<script>\n${safe(read('core.js'))}\n</script>`)
+  .replace('<script src="core.js"></script>', () => `<script>\n${safe(readCore())}\n</script>`)
   .replace('<script src="app.js"></script>', () => `<script>\n${safe(read('app.js'))}\n</script>`);
 const fonts = html.match(/<link rel="preconnect"[^>]*>\s*<link rel="stylesheet" href="https:\/\/fonts[^>]*>/)[0];
 fs.mkdirSync(path.join(root, 'dist'), { recursive: true });

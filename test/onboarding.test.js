@@ -2,7 +2,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const H = require('../public/core.js');
+const H = require('../packages/core/core.js');
 
 const ago = n => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
 // A sample household with every onboarding gap closed.
