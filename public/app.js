@@ -89,7 +89,7 @@ const NAV=[
   ['onboarding','Onboarding',[['compliance'],['rtq','Risk questionnaire'],['kyc','KYC status'],['audit','Audit trail']]],
   ['relationship','Relationship',[['contacts'],['actions'],['loas','Letters of authority'],['complaints'],['reviews','Reviews due']]],
   ['mandate','Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
-  ['analysis','Analysis',[['bs','Balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
+  ['analysis','Analysis',[['bs','Balance sheet'],['scenarios','Life-event scenarios'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 const NAV_OPEN=new Set();
 const FIRM_VIEWS=new Set(['clients','team','diary','tasks','firmSettings']);
 function renderNav(){
@@ -243,6 +243,9 @@ const FIELD_HELP={
   'actions.created':'When the task was raised.','actions.description':'What needs doing.','actions.owner':'Team member responsible. The list comes from Firm settings › Team members.',
   'actions.priority':'High-priority tasks sort first on the Tasks board.','actions.due':'Open tasks with a due date appear in Reviews due and on the Tasks board; overdue ones are highlighted.',
   'actions.status':'Anything other than Done or Cancelled counts as open. Waiting on client / provider shows where the task is held up.','actions.doneOn':'Date completed.','actions.notes':'Progress notes.',
+  'scen.who':'Death, illness, care, redundancy and early retirement are applied to this person; separation is shown from their side.','scen.survivorSpend':'Household spending after a death, as a share of today\u2019s.','scen.divorceSpend':'Spending for the person kept in the household after separation.','scen.divorceCosts':'One-off legal and moving costs.',
+  'scen.careStartAge':'Age care begins.','scen.careYears':'How long care lasts. UK average stays in residential care are around 2–3 years.','scen.careCost':'Annual care cost in today\u2019s money, rising 5% a year.','scen.illnessCost':'Ongoing extra costs: adaptations, treatment, help at home.','scen.longevityYears':'Years added to the modal age at death and the plan horizon.',
+  'scen.redundancyYears':'Time with no earnings.','scen.reEmployPct':'New pay as a share of current pay.','scen.redundancyPay':'Lump sum received, added to cash.','scen.earlyRetireYears':'Years earlier than the planned retirement age.','scen.marketFall':'Fall in equities and alternatives; bonds fall a fifth of this, cash is unchanged.','scen.rateRise':'Added to the gilt rate and to loan rates.','scen.inheritance':'Lump sum added to joint cash.',
   'rtq.owner':'The adult this questionnaire belongs to. Results are written to their record under People.','rtq.completedOn':'Date the client answered. Repeat at each annual review.','rtq.by':'Adviser who took the client through it.',
   'loas.provider':'From Firm settings › Providers. The provider\u2019s address or email is printed on the letter.','loas.owner':'The plan holder. Their name, date of birth, NI number and address are printed on the letter.',
   'loas.planType':'Printed on the letter.','loas.policyRef':'Printed on the letter. Blank asks the provider to identify every plan in the client\u2019s name.','loas.employer':'Helps the provider find workplace scheme records.',
@@ -338,7 +341,7 @@ const GROUP_HELP={
   'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
   'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
   'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
-const NAV_HELP={rtq:'Scored risk questionnaire: sets risk tolerance, capacity for loss and experience.',loas:'Letters asking providers to release plan information.',mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+const NAV_HELP={scenarios:'Death, separation, care, illness, redundancy, market falls and more, applied to this household.',rtq:'Scored risk questionnaire: sets risk tolerance, capacity for loss and experience.',loas:'Letters asking providers to release plan information.',mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
   expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
   other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
   compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
@@ -762,6 +765,27 @@ function renderGuide(){
 }
 
 const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
+let SCEN_SEL='';
+function renderScenarios(){
+  const R=E.scenarios();const B=R.before;const fx=x=>isFinite(x)?x.toFixed(2)+'×':'n/a';
+  const dm=(a,b,good)=>{const d=b-a;if(Math.abs(d)<500)return '<span class="muted">no change</span>';const up=d>0;return `<span class="${up===good?'up':'down'}">${up?'+':'−'}${gbpK(Math.abs(d))}</span>`};
+  const sel=R.list.find(x=>x.id===SCEN_SEL)||R.list[0];
+  let h=`<div class="sec-head"><div><h2>Life-event scenarios</h2><p>Each scenario changes a copy of this household and re-runs the full model, so the effect on the balance sheet, IHT and liquidity is worked out the same way as the base case. Choose a scenario for what changes and how to mitigate it.</p></div></div>`+bannerHTML(false);
+  h+=`<div class="kpis"><div class="kpi"><div class="k">Economic net worth today</div><div class="v">${gbpK(B.nw)}</div></div><div class="kpi"><div class="k">Funded ratio today</div><div class="v">${fx(B.funded)}</div></div><div class="kpi"><div class="k">IHT on second death today</div><div class="v">${gbpK(B.iht)}</div></div><div class="kpi"><div class="k">Cash runway today</div><div class="v">${isFinite(B.cash)?Math.round(B.cash)+' mo':'–'}</div></div></div>`;
+  h+=`<div class="panel"><div class="tbl-wrap"><table class="scen"><thead><tr><th>Scenario</th><th class="n">Net worth</th><th class="n">Funded ratio</th><th class="n">Capital needed to stay funded</th><th class="n">IHT</th><th class="n">Cash runway</th></tr></thead><tbody>
+    ${R.list.map(x=>{const A=x.after;return `<tr data-act="scenSel" data-id="${esc(x.id)}" class="${x===sel?'sel':''}" tabindex="0"><td><b>${esc(x.title)}</b></td><td class="n">${dm(B.nw,A.nw,true)}</td><td class="n">${fx(B.funded)} → <b class="${A.funded>=1?'':'neg'}">${fx(A.funded)}</b></td><td class="n">${A.gap>500?`<b class="neg">${gbpK(A.gap)}</b>`:'<span class="muted">none</span>'}</td><td class="n">${dm(B.iht,A.iht,false)}</td><td class="n">${isFinite(A.cash)?Math.round(A.cash)+' mo':'–'}</td></tr>`}).join('')}</tbody></table></div>
+    <p class="note">Capital needed to stay funded is the lump sum that would bring the funded ratio back to 1.0×: for death and illness scenarios, the extra cover to consider. All values are in today’s money.</p></div>`;
+  if(sel){const A=sel.after;
+    const row=(l,a,b,f,good)=>`<tr><td>${l}</td><td class="n">${f(a)}</td><td class="n"><b>${f(b)}</b></td><td class="n">${good===null?'':dm(a,b,good)}</td></tr>`;
+    h+=`<div class="two"><div class="panel"><h3>${esc(sel.title)}</h3><p>${esc(sel.desc)}</p>
+      <div class="tbl-wrap"><table><thead><tr><th></th><th class="n">Today</th><th class="n">After</th><th class="n">Change</th></tr></thead><tbody>
+      ${row('Economic net worth',B.nw,A.nw,gbpK,true)}${row('Funded ratio',B.funded,A.funded,fx,null)}${row('Core funded ratio',B.core,A.core,fx,null)}${row('Capital needed to stay funded',B.gap,A.gap,gbpK,false)}${row('IHT on second death',B.iht,A.iht,gbpK,false)}${row('Cash runway (months)',B.cash,A.cash,v=>isFinite(v)?Math.round(v)+'':'–',null)}</tbody></table></div>
+      ${/^death/.test(sel.id)&&A.nw>B.nw?'<p class="note">Net worth rises here because the cover paid out and the lower spending assumed for the survivor are worth more than the earnings lost. Check the survivor spending assumption below; if spending would not fall, the result changes.</p>':''}
+      ${sel.id==='rates'?'<p class="note">Rising rates can raise economic net worth: decades of future spending are longer-dated than most assets, so their present value falls further. The cost shows up in loan payments and the cash runway.</p>':''}</div>
+      <div class="panel"><h3>What the scenario changes</h3><ul class="list">${sel.notes.map(n=>`<li><span class="grow">${esc(n)}</span></li>`).join('')}</ul>
+      <h3 style="margin-top:16px">Ways to mitigate</h3><ul class="list">${sel.mitigations.map(n=>`<li><span class="pill neu">Consider</span><span class="grow">${esc(n)}</span></li>`).join('')}</ul></div></div>`}
+  h+=`<details class="panel"${OPEN.has('scen:settings')?' open':''} id="scenSettings"><summary><b>Scenario assumptions</b> <span class="muted">who the scenarios apply to, spending after a death or separation, care costs, market fall and more</span></summary><div style="margin-top:12px">${fieldsBlock('scen',0,S.scen)}</div></details>`;
+  return h}
 const LOSS_LABEL={sellall:'Sell everything (−2)',sellsome:'Sell some (−1)',hold:'Hold (0)',buy:'Invest more (+1)'};
 function rtqPanel(){const ad=S.members.filter(isAdult);if(!ad.length)return '<div class="empty">Add the adults under People first.</div>';
   let h='<div class="rtq-grid">';
@@ -875,7 +899,7 @@ function render(){
   if(VIEW==='tasks')return renderTasks();
   if(VIEW==='firmSettings'){m.innerHTML=renderFirmSettings();return}
   if(VIEW==='audit')return renderAudit();
-  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else if(VIEW==='letter')m.innerHTML=renderLetter();else m.innerHTML=renderChecks();
+  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else if(VIEW==='letter')m.innerHTML=renderLetter();else if(VIEW==='scenarios')m.innerHTML=renderScenarios();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
   const server=Store.mode==='server';const inHH=!FIRM_VIEWS.has(VIEW);
@@ -904,6 +928,7 @@ function onEdit(e){const el=e.target;
   clearTimeout(navT);navT=setTimeout(renderNav,250);
   if(col==='members'&&k==='role'&&e.type==='change')render();
   if(col==='rtq'&&e.type==='change'){applyRtq(rec);render()}
+  if(col==='scen'&&e.type==='change'){OPEN.add('scen:settings');render()}
 }
 document.addEventListener('input',onEdit);document.addEventListener('change',onEdit);
 document.addEventListener('click',async e=>{
@@ -925,6 +950,7 @@ document.addEventListener('click',async e=>{
   if(act==='toggleAll'&&FIRM_KEYS.has(col)){const L=recs(col);const all=L.every((_,i)=>OPEN.has(col+':'+i));L.forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='toggleAll'){const all=S[col].every((_,i)=>OPEN.has(col+':'+i));S[col].forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='add'&&FIRM_KEYS.has(col)){recs(col).push(H.defaults(col));OPEN.add(col+':'+(recs(col).length-1));Store.touchFirm();render();return}
+  if(act==='scenSel'){SCEN_SEL=b.dataset.id;render();return}
   if(act==='rtqStart'){const r=Object.assign(H.defaults('rtq'),{owner:b.dataset.ref,by:Store.user||''});S.rtq.push(r);logChange('rtq.count',S.rtq.length-1,S.rtq.length);OPEN.add('rtq:'+(S.rtq.length-1));Store.touch();render();return}
   if(act==='loaLetter'){e.stopPropagation();LOA_IDX=+b.dataset.idx;VIEW='letter';banner=null;render();window.scrollTo({top:0});return}
   if(act==='print'){window.print();return}

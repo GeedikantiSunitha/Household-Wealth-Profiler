@@ -342,3 +342,12 @@ tr.sub td:first-child{padding-left:22px}
 .rtq-key summary{cursor:pointer}
 .rtq-key h4{margin:14px 0 4px;font:600 13.5px/1.3 var(--f-body);color:var(--accent)}
 .rtq-key p{font-size:13px;margin:4px 0 8px}
+
+/* Scenarios */
+table.scen tbody tr{cursor:pointer}
+table.scen tbody tr.sel td{background:var(--accent-soft)}
+table.scen tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brass)}
+.scen .up,.panel .up{color:var(--good);font-weight:600}
+.scen .down,.panel .down{color:var(--bad);font-weight:600}
+.neg{color:var(--bad)}
+#scenSettings summary{cursor:pointer}

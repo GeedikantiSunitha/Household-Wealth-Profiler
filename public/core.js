@@ -341,6 +341,30 @@ const SCHEMA = {
     {t:'Capacity for loss',fields:CFL_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1}))},
     {t:'Knowledge and experience',fields:KE_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1}))},
   ]},
+  scen:{single:true,title:'Scenario assumptions',sheet:'Scenarios',desc:'Assumptions behind the life-event scenarios. Saved with the file so the results can be reproduced.',groups:[
+    {t:'Who and household',fields:[
+      {k:'who',l:'Scenarios apply to',t:'member',h:'Blank = the primary client'},
+      {k:'survivorSpend',l:'Spending after a death, % of today',t:'pct',d:75},
+      {k:'divorceSpend',l:'Spending after separation, % of today',t:'pct',d:65},
+      {k:'divorceCosts',l:'Legal and moving costs on separation £',t:'num',d:25000},
+    ]},
+    {t:'Health and care',fields:[
+      {k:'careStartAge',l:'Care starts at age',t:'int',d:85},
+      {k:'careYears',l:'Years of care',t:'int',d:3},
+      {k:'careCost',l:'Care cost £ per year (today)',t:'num',d:75000},
+      {k:'illnessCost',l:'Extra costs after serious illness £ per year',t:'num',d:10000},
+      {k:'longevityYears',l:'Living longer: extra years',t:'int',d:8},
+    ]},
+    {t:'Work and markets',fields:[
+      {k:'redundancyYears',l:'Years out of work after redundancy',t:'num',d:1},
+      {k:'reEmployPct',l:'Pay on re-employment, % of current',t:'pct',d:80},
+      {k:'redundancyPay',l:'Redundancy payment £',t:'num',d:0},
+      {k:'earlyRetireYears',l:'Retire earlier by (years)',t:'int',d:5},
+      {k:'marketFall',l:'Market fall in equities and alternatives %',t:'pct',d:25},
+      {k:'rateRise',l:'Interest rate rise (percentage points)',t:'num',d:2},
+      {k:'inheritance',l:'Inheritance received £',t:'num',d:250000},
+    ]},
+  ]},
   firm:{single:true,title:'Firm details',sheet:'Firm',desc:'Used on letters of authority and client documents.',fields:[
     {k:'name',l:'Firm name',t:'text'},
     {k:'frn',l:'FCA firm reference number',t:'text',h:'Shown on letters: providers check it against the FCA register'},
@@ -425,7 +449,7 @@ const SCHEMA = {
   ]}
 };
 const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models','loas','rtq'];
-const SINGLES = ['household','mandate','compliance','assumptions'];
+const SINGLES = ['household','mandate','compliance','assumptions','scen'];
 /* Default model portfolios: five risk-rated models benchmarked to the ARC Private Client Indices. Firms edit these. */
 const DEFAULT_MODELS=[
   {name:'Defensive',riskMin:1,riskMax:2,benchmark:'ARC Sterling Cautious PCI',ukEq:8,glEq:12,emEq:0,gilts:35,corp:25,prop:5,alt:5,cash:10,description:'Capital preservation with modest growth; short horizons or low capacity for loss'},
@@ -619,11 +643,11 @@ function incomeTax(nonSav,sav,div,ras){
 }
 function niCalc(emp,self){const a=A();const lo=N(a.pa),hi=N(a.brl);const band=x=>[Math.max(0,Math.min(x,hi)-lo),Math.max(0,x-hi)];const [e1,e2]=band(emp),[s1,s2]=band(self);return e1*N(a.ni1)/100+e2*N(a.ni2)/100+s1*N(a.c41)/100+s2*N(a.c42)/100}
 
-function memberTax(m){
+function memberTax(m,opt){
   const a=A();const inc=S.income.filter(i=>i.owner===m.ref);
   let emp=0,self=0,div=0,nonSavOther=0,sav=0;const age=ageOf(m)||0;
   for(const i of inc){const v=N(i.amount);
-    if(has(i.startAge)&&N(i.startAge)>age)continue; if(has(i.endAge)&&N(i.endAge)<=age)continue;
+    if(has(i.startAge)&&N(i.startAge)>age&&!(opt&&opt.futureEarnings&&HC_TYPES.includes(i.type)))continue; if(has(i.endAge)&&N(i.endAge)<=age)continue;
     if(i.taxable===false||i.taxable==='false')continue;
     if(i.type==='Employment salary'||i.type==='Bonus / commission')emp+=v;else if(i.type==='Self-employment profit')self+=v;else if(i.type==='Director dividends')div+=v;else nonSavOther+=v;}
   let ras=0,netpay=0,er=0,isaUsed=0,lisaUsed=0,jisaUsed=0,unreal=0;
@@ -655,6 +679,8 @@ function compute(){
   const a=A();const rf=N(a.rf)/100,cpi=N(a.cpi)/100;
   const lines=[];const add=(side,group,label,value,alloc,note)=>{if(Math.abs(value)<0.5)return;lines.push({side,group,label,value,alloc,note})};
   const tax={};S.members.forEach(m=>tax[m.ref]=memberTax(m));
+  // Earnings that start later are taxed at the rate that applies once they are being earned, not at today's rate
+  const taxF={};S.members.forEach(m=>{const age=ageOf(m);taxF[m.ref]=S.income.some(i=>i.owner===m.ref&&HC_TYPES.includes(i.type)&&has(i.startAge)&&age!=null&&N(i.startAge)>age)?memberTax(m,{futureEarnings:true}):tax[m.ref]});
   const prem={low:N(a.pLow),medium:N(a.pMed),high:N(a.pHigh),vhigh:N(a.pVhigh)};
   const adl=adults();
   const ages=adl.map(m=>ageOf(m)).filter(x=>x!=null);
@@ -676,7 +702,7 @@ function compute(){
     const startOff=has(i.startAge)?Math.max(0,N(i.startAge)-age):0;
     const n=Math.max(0,Math.round(endAge-age));
     const r=isHC?rf+(prem[m.occRisk]??2)/100:rf;const g=N(i.growth)/100;
-    const tr=(i.taxable===false||i.taxable==='false')?0:isHC?(yes(a.hcAfterTax)?tax[m.ref].hcRate:0):retRate(m);
+    const tr=(i.taxable===false||i.taxable==='false')?0:isHC?(yes(a.hcAfterTax)?(startOff>0?taxF:tax)[m.ref].hcRate:0):retRate(m);
     let pv=0;for(let t=1;t<=n;t++){if(t<=startOff)continue;pv+=N(i.amount)*Math.pow(1+g,t-1)*(1-tr)*surv(m,age,t)/Math.pow(1+r,t)}
     if(isHC){add('A','hc',`${memberName(m.ref)}: ${i.type.toLowerCase()}`,pv,{[m.ref]:1});derived[m.ref].hc+=pv;}
     else add('A','pen',isPen?`${memberName(m.ref)}: ${i.type.replace(' (in payment)','')} in payment`:`${memberName(m.ref)}: ${i.type}`,pv,{[m.ref]:1});
@@ -814,6 +840,84 @@ function mandateCheck(C){
   const status=issues.some(i=>i.lvl==='bad')?'Incomplete':breaches?'Drift':'In line';
   return {model,target8,classes,tol,breaches,suggested,risk,issues,nextReview,invested,status,benchmark:M.benchmark||(model?model.benchmark:''),profile:R.overall};
 }
+
+/* Life-event scenarios. Each applies a documented change to a copy of the household and re-runs the full model.
+   Results compare economic net worth, funded ratio, the capital needed to be fully funded, IHT and cash runway. */
+function scenarios(){
+  const P=S.scen;const ad=adults();const pick=P.who&&ad.find(m=>m.ref===P.who)||ad.find(m=>m.role==='primary')||ad[0];
+  const other=ad.find(m=>m!==pick);const age=m=>Math.floor(ageOf(m)||50);const nm=m=>memberName(m.ref);
+  const pct=(v,d)=>(has(v)?N(v):d)/100;const num=(v,d)=>has(v)?N(v):d;
+  const metrics=X=>{const C=bind(X).compute();const k=C.kpi,T=C.tot.HH;return {nw:T.A-T.L,funded:T.L?T.A/T.L:Infinity,core:k.coreFunded,gap:Math.max(0,T.L-T.A),iht:k.iht,cash:k.cashMonths}};
+  const clone=()=>JSON.parse(JSON.stringify(S));
+  const cash=(X,owner,v,label)=>X.accounts.push(Object.assign(defaults('accounts'),{owner,wrapper:'Cash savings',provider:label,value:Math.round(v),cs:100,eq:0,bd:0,al:0}));
+  const earn=i=>HC_TYPES.includes(i.type);
+  const death=(X,p,q,notes)=>{const sp=pct(P.survivorSpend,75);const married=['married','civil'].includes(X.household.relationship);
+    const lost=X.income.filter(i=>i.owner===p.ref);X.income=X.income.filter(i=>i.owner!==p.ref);
+    if(lost.length)notes.push(`${nm(p)}’s income stops: ${lost.map(i=>i.type).join(', ')}`);
+    for(const c of X.protection.filter(x=>x.owner===p.ref)){
+      if(/Life cover|Death in service/.test(c.type)&&N(c.sum)>0){cash(X,q.ref,N(c.sum),c.type+' payout');notes.push(`${c.type} pays ${gbpS(N(c.sum))} to ${nm(q)}`)}
+      if(c.type==='Family income benefit'&&N(c.sum)>0){const yrs=has(c.expiryAge)?Math.max(0,N(c.expiryAge)-age(p)):10;X.income.push(Object.assign(defaults('income'),{owner:q.ref,type:'Other income',label:'Family income benefit',amount:N(c.sum),endAge:age(q)+yrs,taxable:false}));notes.push(`Family income benefit pays ${gbpS(N(c.sum))} a year for ${yrs} years`)}}
+    X.protection=X.protection.filter(x=>x.owner!==p.ref);
+    for(const d of X.db.filter(x=>x.owner===p.ref)){if(married&&N(d.spousePct)>0){d.owner=q.ref;d.accrued=N(d.accrued)*N(d.spousePct)/100;notes.push(`${d.scheme||'DB scheme'}: ${d.spousePct}% spouse’s pension to ${nm(q)}`)}else{d.accrued=0;notes.push(`${d.scheme||'DB scheme'}: no survivor pension`)}}
+    for(const c of ['accounts','property','other','liabilities'])for(const r of X[c])if(r.owner===p.ref)r.owner=q.ref;
+    X.members=X.members.filter(m=>m.ref!==p.ref);
+    for(const e of X.expenses)e.amount=N(e.amount)*sp;notes.push(`Household spending falls to ${Math.round(sp*100)}%`);
+    notes.push(`Assets pass to ${nm(q)}; unused nil-rate band transfers for IHT`)};
+  const list=[];
+  const add=(id,title,desc,fn,mit)=>{const X=clone();const notes=[];fn(X,notes);list.push({id,title,desc,notes,mitigations:mit,after:metrics(X)})};
+  if(pick&&other){
+    for(const [p,q] of [[pick,other],[other,pick]])add('death-'+p.ref,`Death of ${nm(p)}`,`${nm(p)} dies now. Income stops, life cover and death-in-service pay out, survivor pensions start and spending falls.`,(X,n)=>death(X,p,q,n),
+      ['Size life cover to the capital needed above, written in trust so it is outside the estate and paid quickly','Check death-in-service and pension nominations are up to date','Make sure wills and lasting powers of attorney are in place']);
+    add('divorce',`Separation: ${nm(pick)}’s position`,`The couple separate. Shown from ${nm(pick)}’s side: joint assets split equally, pensions shared equally, ${nm(other)}’s income and assets leave the household.`,(X,n)=>{
+      const sp=pct(P.divorceSpend,65);const pen=a=>WGROUP[a.wrapper]==='pension';
+      const pool=X.accounts.filter(a=>pen(a)&&[pick.ref,other.ref].includes(a.owner)).reduce((t,a)=>t+N(a.value),0);const mine=X.accounts.filter(a=>pen(a)&&a.owner===pick.ref);const mineV=mine.reduce((t,a)=>t+N(a.value),0);
+      if(pool>0){if(mineV>0)for(const a of mine)a.value=N(a.value)/mineV*pool/2;else X.accounts.push(Object.assign(defaults('accounts'),{owner:pick.ref,wrapper:'SIPP',provider:'Pension sharing order',value:pool/2,eq:60,bd:30,cs:10}));n.push(`Pension sharing: ${nm(pick)} keeps half of the combined pensions, ${gbpS(pool/2)}`)}
+      X.accounts=X.accounts.filter(a=>a.owner!==other.ref||false);for(const a of X.accounts)if(a.owner==='JOINT'&&!pen(a)){a.value=N(a.value)/2;a.owner=pick.ref}
+      for(const pr of X.property){if(pr.owner===other.ref)pr.value=0;if(pr.owner==='JOINT'){pr.share=(has(pr.share)?N(pr.share):100)/2;pr.owner=pick.ref}}
+      for(const l of X.liabilities){if(l.owner===other.ref)l.balance=0;if(l.owner==='JOINT'){l.balance=N(l.balance)/2;l.payment=N(l.payment)/2;l.owner=pick.ref}}
+      X.other=X.other.filter(o=>o.owner!==other.ref);X.income=X.income.filter(i=>i.owner!==other.ref);X.protection=X.protection.filter(c=>c.owner!==other.ref);X.db=X.db.filter(d=>d.owner!==other.ref);
+      X.members=X.members.filter(m=>m.ref!==other.ref);X.household.relationship='single';
+      for(const e of X.expenses)e.amount=N(e.amount)*sp;X.expenses.push(Object.assign(defaults('expenses'),{label:'Legal and moving costs',cat:'essential',amount:num(P.divorceCosts,25000),duration:1}));
+      n.push('Joint savings, property and debts split equally',`${nm(other)}’s own income, assets, debts and cover leave the household`,`Spending ${Math.round(sp*100)}% of today, plus ${gbpS(num(P.divorceCosts,25000))} legal and moving costs`,'One nil-rate band for IHT')},
+      ['Take specialist advice on pension sharing versus offsetting, and on defined benefit pensions, which are kept whole here','Review protection: cover for maintenance and for the children','Update wills, nominations and lasting powers of attorney']);
+  }
+  if(pick){
+    add('care',`Long-term care for ${nm(pick)}`,`Care from age ${num(P.careStartAge,85)} for ${num(P.careYears,3)} years at ${gbpS(num(P.careCost,75000))} a year in today’s money, rising 5% a year.`,(X,n)=>{
+      X.expenses.push(Object.assign(defaults('expenses'),{label:'Long-term care',cat:'care',amount:num(P.careCost,75000),inflation:5,startIn:Math.max(0,num(P.careStartAge,85)-age(pick)),duration:num(P.careYears,3)}));n.push('Care costs added as a future liability')},
+      ['Earmark a care reserve or consider an immediate-needs annuity when care starts','Lasting power of attorney (health and welfare) in place','Check the home’s role: deferred payment agreements and the residence nil-rate band']);
+    add('redundancy',`Redundancy: ${nm(pick)}`,`${nm(pick)} is out of work for ${num(P.redundancyYears,1)} year(s), then earns ${Math.round(pct(P.reEmployPct,80)*100)}% of current pay.`,(X,n)=>{const yrs=num(P.redundancyYears,1),f=pct(P.reEmployPct,80);let k=0;
+      for(const i of X.income)if(i.owner===pick.ref&&earn(i)){i.startAge=Math.max(has(i.startAge)?N(i.startAge):0,age(pick)+Math.ceil(yrs));i.amount=N(i.amount)*f;k++}
+      if(num(P.redundancyPay,0)>0)cash(X,pick.ref,num(P.redundancyPay,0),'Redundancy payment');n.push(k?`${k} earnings line(s) paused for ${yrs} year(s), then at ${Math.round(f*100)}%`:'No earnings recorded for this person')},
+      ['Hold 6–12 months of essential spending in cash','Income protection and any employer redundancy cover','Plan which spending could be paused']);
+    add('illness',`Serious illness: ${nm(pick)}`,`${nm(pick)} stops working permanently. Critical illness cover pays out, income protection pays its benefit, extra costs of ${gbpS(num(P.illnessCost,10000))} a year.`,(X,n)=>{const m=X.members.find(x=>x.ref===pick.ref);m.health='Serious condition';
+      const lost=X.income.filter(i=>i.owner===pick.ref&&earn(i));X.income=X.income.filter(i=>!(i.owner===pick.ref&&earn(i)));if(lost.length)n.push(`Earnings stop: ${lost.map(i=>i.type).join(', ')}`);
+      for(const c of X.protection.filter(x=>x.owner===pick.ref)){if(c.type==='Critical illness'&&N(c.sum)>0){cash(X,pick.ref,N(c.sum),'Critical illness payout');n.push(`Critical illness pays ${gbpS(N(c.sum))}`)}
+        if(c.type==='Income protection'&&N(c.sum)>0){X.income.push(Object.assign(defaults('income'),{owner:pick.ref,type:'Other income',label:'Income protection benefit',amount:N(c.sum),endAge:has(c.expiryAge)?N(c.expiryAge):N(m.retireAge)||65,taxable:false}));n.push(`Income protection pays ${gbpS(N(c.sum))} a year`)}}
+      X.protection=X.protection.filter(c=>!(c.owner===pick.ref&&['Critical illness','Income protection'].includes(c.type)));
+      X.expenses.push(Object.assign(defaults('expenses'),{label:'Extra costs of illness',cat:'essential',amount:num(P.illnessCost,10000)}));n.push('Life expectancy reduced for serious condition')},
+      ['Income protection to cover the earnings gap until retirement','Critical illness cover sized to clear debts or adapt the home','Review whether pensions can be taken early on ill-health terms']);
+    add('early',`Early retirement: ${nm(pick)}`,`${nm(pick)} retires ${num(P.earlyRetireYears,5)} years earlier than planned.`,(X,n)=>{const m=X.members.find(x=>x.ref===pick.ref);const was=N(m.retireAge)||65;m.retireAge=was-num(P.earlyRetireYears,5);
+      for(const i of X.income)if(i.owner===pick.ref&&earn(i)&&has(i.endAge))i.endAge=N(i.endAge)-num(P.earlyRetireYears,5);n.push(`Retirement age ${was} → ${m.retireAge}`)},
+      ['Bridge to State Pension age with pension drawdown or ISAs','Check defined benefit early-retirement reductions','Use remaining working years to maximise pension contributions']);
+  }
+  add('market',`Market fall of ${Math.round(pct(P.marketFall,25)*100)}%`,'Equities and alternatives fall by this amount, bonds by a fifth of it, cash unchanged. Private business values fall by the same amount.',(X,n)=>{const f=pct(P.marketFall,25);let before=0,after=0;
+    for(const a of X.accounts){const v=N(a.value);before+=v;a.value=v*(1-f*(N(a.eq)+N(a.al))/100-f*0.2*N(a.bd)/100);after+=N(a.value)}
+    for(const o of X.other)if(/company|Partnership/i.test(o.type))o.value=N(o.value)*(1-f);n.push(`Investments ${gbpS(before)} → ${gbpS(after)}`)},
+    ['Keep the cash reserve so nothing has to be sold after a fall','Rebalance into the fall in line with the mandate','Check the agreed risk level still matches capacity for loss']);
+  add('rates',`Interest rates up ${num(P.rateRise,2)} points`,'Gilt yields and loan rates rise. Higher discount rates lower the present value of both future earnings and future spending; variable and refixing loans cost more.',(X,n)=>{const r=num(P.rateRise,2);X.assumptions.rf=N(X.assumptions.rf)+r;let extra=0;
+    for(const l of X.liabilities)if(N(l.balance)>0&&!/Student/.test(l.type)){const add=N(l.balance)*r/100/12;l.payment=N(l.payment)+add;extra+=add}n.push(`Gilt rate ${N(S.assumptions.rf)}% → ${N(X.assumptions.rf)}%`,`Loan payments up ${gbpS(extra*12)} a year`)},
+    ['Fix or overpay the largest variable-rate debts','Hold some index-linked gilts against inflation-driven rate rises']);
+  add('business',`Business failure`,'Private company shares and partnership capital lose their value, and income from the business stops.',(X,n)=>{const lost=X.other.filter(o=>/company|Partnership/i.test(o.type)).reduce((t,o)=>t+N(o.value),0);
+    for(const o of X.other)if(/company|Partnership/i.test(o.type))o.value=0;const inc=X.income.filter(i=>['Self-employment profit','Director dividends'].includes(i.type));X.income=X.income.filter(i=>!inc.includes(i));
+    if(lost)n.push(`Business assets written off: ${gbpS(lost)}`);n.push(inc.length?`Business income stops: ${inc.map(i=>i.label||i.type).join(', ')}`:'No business income recorded')},
+    ['Diversify away from the business: avoid personal guarantees and concentration','Key person and shareholder protection','Keep pension and ISA wealth outside the business']);
+  add('inheritance',`Inheritance of ${gbpS(num(P.inheritance,250000))}`,'A lump sum is received and held in cash.',(X,n)=>{cash(X,'JOINT',num(P.inheritance,250000),'Inheritance');n.push('Added to joint cash')},
+    ['Use ISA and pension allowances first','Consider gifting from surplus to reduce the IHT that this creates','Review the mandate and risk level for the larger portfolio']);
+  add('longevity',`Living ${num(P.longevityYears,8)} years longer`,'Everyone lives longer than the mortality tables assume, so spending runs for longer.',(X,n)=>{const y=num(P.longevityYears,8);X.assumptions.gM=N(X.assumptions.gM)+y;X.assumptions.gF=N(X.assumptions.gF)+y;X.assumptions.planAge=N(X.assumptions.planAge)+y;n.push(`Modal age at death +${y}; plan runs to ${X.assumptions.planAge}`)},
+    ['Secure a floor of guaranteed income (State Pension, DB, annuity) for essential spending','Keep a growth allocation for the long horizon']);
+  return {before:metrics(S),list,who:pick?pick.ref:''};
+}
+const gbpS=v=>'£'+Math.round(v).toLocaleString('en-GB');
 
 /* Review diary: every dated obligation for this household, soonest first.
    Annual suitability review (COBS 9A / Consumer Duty): 12 months after approval or the last review meeting.
@@ -1023,7 +1127,7 @@ function onboarding(C){
     blockerCount:items.filter(x=>x.lvl==='bad').length,warnCount:items.filter(x=>x.lvl==='warn').length,risk:R};
 }
 
-return {A,compute,memberTax,riskProfile,checks,onboarding,reviews,mandateCheck,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
+return {A,compute,memberTax,riskProfile,checks,onboarding,reviews,mandateCheck,scenarios,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
 }
 
 function fieldLabel(key,k){const f=fieldsOf(SCHEMA[key]).find(x=>x.k===k);return f?f.l:k}
