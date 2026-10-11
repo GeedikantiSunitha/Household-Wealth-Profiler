@@ -74,23 +74,31 @@ function logChange(path,from,to){if(Store.mode!=='local')return;S.audit=S.audit|
 
 /* ---------- navigation ---------- */
 const NAV=[
-  ['Client data',[['household'],['members'],['income'],['expenses'],['goals'],['accounts'],['db'],['property'],['other'],['liabilities'],['protection'],['assumptions']]],
-  ['Onboarding',[['compliance'],['kyc','KYC and onboarding status'],['audit','Audit trail']]],
-  ['Relationship',[['contacts'],['actions'],['complaints'],['reviews','Reviews due']]],
-  ['Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
-  ['Outputs',[['bs','Economic balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
+  ['client','Client',[['household'],['members'],['income'],['expenses'],['goals'],['assumptions']]],
+  ['wealth','Wealth',[['accounts'],['db'],['property'],['other'],['liabilities'],['protection']]],
+  ['onboarding','Onboarding',[['compliance'],['kyc','KYC status'],['audit','Audit trail']]],
+  ['relationship','Relationship',[['contacts'],['actions'],['complaints'],['reviews','Reviews due']]],
+  ['mandate','Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
+  ['analysis','Analysis',[['bs','Balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
+const NAV_OPEN=new Set();
 function renderNav(){
   if(VIEW==='clients'||VIEW==='team'||VIEW==='diary'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button><button type="button" data-act="diary" aria-current="${VIEW==='diary'}" title="Every review, expiry, action and complaint deadline across all households"><span>Reviews due</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':VIEW==='diary'?'Reviews due across the firm':'Choose a household to open';return}
-  let h='';let step=0;const O=E.onboarding();const bad=E.checks().filter(x=>x.lvl==='bad').length;
-  for(const [sec,items] of NAV){h+=`<h6>${sec}</h6>`;for(const [id,lbl] of items){const s=SCHEMA[id];const name=lbl||s.title;
-    let ct='',cls='';if(s&&!s.single)ct=S[id].length;
+  const O=E.onboarding();const bad=E.checks().filter(x=>x.lvl==='bad').length;
+  const badge=id=>{const s=SCHEMA[id];let ct='',cls='';if(s&&!s.single)ct=S[id].length||'';
     if(id==='checks'&&bad){ct=bad+' to fix';cls='bad'}
     if(id==='kyc'){ct=O.blockerCount?O.blockerCount+' open':O.stage;cls=O.blockerCount?'bad':''}
     if(id==='reviews'){const R=E.reviews(O);ct=R.overdue?R.overdue+' overdue':R.soon?R.soon+' due soon':'';cls=R.overdue?'bad':''}
     if(id==='actions'){const n=S.actions.filter(a=>a.status==='Open').length;ct=n?n+' open':''}
-    if(id==='drift'){const MC=E.mandateCheck();ct=MC.status;cls=MC.status==='Incomplete'?'bad':''}
-    const st=s&&sec==='Client data'?`<span class="step">${String(++step).padStart(2,'0')}</span>`:'';
-    h+=`<button type="button" data-nav="${id}" aria-current="${VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${st}${esc(name)}</span><span class="ct ${cls}">${esc(ct)}</span></button>`}}
+    if(id==='drift'){const MC=E.mandateCheck();ct=MC.status;cls=MC.status==='Incomplete'?'bad':MC.status==='Drift'?'warn':''}
+    return {ct,cls}};
+  let h='';
+  for(const [gid,gl,items] of NAV){const here=items.some(([id])=>id===VIEW);const open=here||NAV_OPEN.has(gid);
+    const bs=items.map(([id])=>badge(id));const alerts=bs.filter(b=>b.cls==='bad').length;const warns=bs.filter(b=>b.cls==='warn').length;
+    const gb=alerts?`<span class="ct bad">${alerts} alert${alerts>1?'s':''}</span>`:warns?`<span class="ct warn">review</span>`:'';
+    h+=`<div class="ng${open?' open':''}${here?' here':''}"><button type="button" class="ng-h" data-act="navGroup" data-g="${gid}" aria-expanded="${open}"><span class="ng-chev">▸</span><span class="ng-t">${gl}</span>${open?'':gb}</button>`;
+    if(open)h+=`<div class="ng-b">${items.map(([id,lbl],i)=>{const s=SCHEMA[id];const name=lbl||s.title;const b=bs[i];
+      return `<button type="button" data-nav="${id}" aria-current="${VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${esc(name)}</span><span class="ct ${b.cls}">${esc(b.ct)}</span></button>`}).join('')}</div>`;
+    h+=`</div>`}
   $('#rail').innerHTML=h;
   $('#hhName').textContent=(S.household.name||'Unnamed household')+(S.household.reference?' · '+S.household.reference:'')+' · '+O.stage;
 }
@@ -772,6 +780,7 @@ document.addEventListener('click',async e=>{
     banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};IMPACT.why=`<b>${esc(SCHEMA[col].item)} removed.</b> The figures above compare with when you opened this section.`;render();return}
   if(act==='undo'&&banner&&banner.undo){const u=banner.undo;S[u.col].splice(u.idx,0,u.rem);logChange(`${u.col}.count`,S[u.col].length-1,S[u.col].length);banner=null;Store.touch();render();return}
   if(act==='closeBanner'){banner=null;render();return}
+  if(act==='navGroup'){const g=b.dataset.g;const grp=NAV.find(x=>x[0]===g);if(grp.some(([id])=>id===VIEW))return;NAV_OPEN.has(g)?NAV_OPEN.delete(g):NAV_OPEN.add(g);renderNav();return}
   if(act==='goClients'||act==='team'||act==='diary'){await Store.flush();VIEW=act==='goClients'?'clients':act;banner=null;render();return}
   if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}await Store.cloud.signOut();location.reload();return}
   if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;

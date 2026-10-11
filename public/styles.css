@@ -82,6 +82,17 @@ nav.rail{position:sticky;top:calc(env(safe-area-inset-top,0px) + 78px);align-sel
 .rail button[aria-current="true"]::before{content:"";position:absolute;left:-8px;top:6px;bottom:6px;width:3px;border-radius:0 3px 3px 0;background:var(--brass)}
 .rail .ct{font:500 11.5px var(--f-num);color:var(--bar-muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .rail .ct.bad{color:#F5A397}
+.rail .ct.warn{color:#E8C27A}
+.ng{border-bottom:1px solid var(--bar-line);padding:2px 0}
+.ng:last-child{border-bottom:0}
+.rail .ng-h{font:600 12px/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--bar-muted);padding:11px 10px;justify-content:flex-start;gap:8px}
+.rail .ng-h .ng-t{flex:1}
+.rail .ng-h:hover{color:var(--bar-ink);background:transparent}
+.ng.here .ng-h,.ng.open .ng-h{color:var(--bar-ink)}
+.ng-chev{display:inline-block;font-size:11px;transition:transform .15s;opacity:.7}
+.ng.open .ng-chev{transform:rotate(90deg)}
+.ng-b{display:flex;flex-direction:column;gap:1px;padding:0 0 8px}
+.ng-b button{padding-left:26px!important}
 .rail .step{font:500 11px var(--f-num);font-variant-numeric:tabular-nums;color:var(--bar-muted);width:22px;display:inline-block}
 main{min-width:0}
 
@@ -267,6 +278,11 @@ tr.sub td:first-child{padding-left:22px}
   .shell{grid-template-columns:minmax(0,1fr);gap:14px;padding-inline:16px}
   nav.rail{position:static;flex-direction:row;overflow-x:auto;gap:4px;padding:6px;max-height:none}
   .rail h6{display:none}
+  .rail .ng-h{border:1px solid var(--bar-line);padding:7px 10px;width:auto}
+  .ng-chev{display:none}
+  .ng{border:0;display:contents}
+  .ng-b{display:contents}
+  .ng-b button{padding-left:10px!important}
   .rail button{width:auto;white-space:nowrap}
   .rail button[aria-current="true"]::before{display:none}
   .bs{grid-template-columns:minmax(0,1fr)}
