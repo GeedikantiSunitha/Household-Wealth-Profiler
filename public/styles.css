@@ -306,3 +306,31 @@ tr.sub td:first-child{padding-left:22px}
 .kpi-btn{text-align:left;cursor:pointer;font:inherit;color:inherit;transition:border-color .12s,box-shadow .12s}
 .kpi-btn:hover{border-color:var(--accent)}
 .kpi-btn.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* Letter of authority: on screen as a page, printed without the app around it */
+.letter{background:#fff;color:#111;max-width:800px;margin:0 auto 24px;padding:56px 64px;border:1px solid var(--line);box-shadow:var(--shadow-lg);font:14px/1.6 var(--f-body)}
+.letter .lh{display:flex;justify-content:space-between;gap:24px;border-bottom:2px solid #A8834A;padding-bottom:14px;margin-bottom:28px}
+.letter .lh-name{font:600 20px/1.2 var(--f-display);color:#0C1E35}
+.letter .lh-addr,.letter .lh-meta{font-size:12px;color:#444;margin-top:4px}
+.letter .lh-meta{text-align:right}
+.letter .to{margin-bottom:18px}
+.letter .date{margin:0 0 18px}
+.letter .re{background:#F4F6F9;padding:10px 14px;border-left:3px solid #163A63}
+.letter ul{padding-left:20px}
+.letter .sig{display:grid;grid-template-columns:2fr 1fr;gap:32px;margin:48px 0 28px}
+.letter .sig .line{border-bottom:1px solid #111;height:40px;margin-bottom:6px}
+.letter .cc{font-size:11.5px;color:#555;border-top:1px solid #ddd;padding-top:10px}
+@media print{
+  .top,.rail,.foot,.no-print,.toast{display:none!important}
+  body{background:#fff}
+  .shell{display:block;padding:0;max-width:none}
+  main{padding:0}
+  .letter{border:0;box-shadow:none;padding:0;margin:0;max-width:none;font-size:11.5pt;line-height:1.45}
+  .letter .lh{margin-bottom:18px}
+  .letter .to,.letter .date{margin-bottom:12px}
+  .letter p{margin:0 0 9px}
+  .letter ul{margin:0 0 9px}
+  .letter .sig{margin:30px 0 16px}
+  .letter .sig .line{height:30px}
+  @page{size:A4;margin:16mm 18mm}
+}

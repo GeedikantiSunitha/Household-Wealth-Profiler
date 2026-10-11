@@ -263,6 +263,36 @@ const SCHEMA = {
       {k:'notes',l:'Notes',t:'area',w:1},
     ]},
   ]},
+  loas:{title:'Letters of authority',sheet:'LOAs',item:'letter of authority',desc:'Letters asking a provider to release plan information to the firm. Generate the letter, have the client sign it, send it and track the reply.',groups:[
+    {t:'Plan',fields:[
+      {k:'provider',l:'Provider',t:'provider'},
+      {k:'owner',l:'Client',t:'member'},
+      {k:'planType',l:'Plan type',t:'sel',o:['Personal pension','SIPP','Workplace pension','Defined benefit pension','Stakeholder pension','Annuity','ISA','General investment account','Investment bond','Life or protection policy','Other'],d:'Personal pension'},
+      {k:'policyRef',l:'Policy or plan number',t:'text',h:'Leave blank to ask the provider to identify all plans'},
+      {k:'employer',l:'Employer (workplace schemes)',t:'text'},
+    ]},
+    {t:'Information requested',fields:[
+      {k:'reqValue',l:'Current value',t:YN,d:true},
+      {k:'reqTransfer',l:'Transfer value and any exit penalties',t:YN,d:true},
+      {k:'reqFunds',l:'Funds held and unit holdings',t:YN,d:true},
+      {k:'reqCharges',l:'All charges (product, fund, adviser)',t:YN,d:true},
+      {k:'reqContrib',l:'Contribution history',t:YN,d:true},
+      {k:'reqGuarantees',l:'Guarantees and safeguarded benefits (GAR, GMP, protected tax-free cash)',t:YN,d:true},
+      {k:'reqDeath',l:'Death benefits and nominations',t:YN,d:true},
+      {k:'reqRetire',l:'Retirement date and options',t:YN,d:false},
+      {k:'otherRequest',l:'Anything else',t:'text',w:1},
+    ]},
+    {t:'Progress',fields:[
+      {k:'status',l:'Status',t:'sel',o:['Drafted','With client to sign','Signed','Sent to provider','Information received','Cancelled'],d:'Drafted'},
+      {k:'createdOn',l:'Drafted on',t:'date',d:today},
+      {k:'signedOn',l:'Signed on',t:'date'},
+      {k:'sentOn',l:'Sent to provider on',t:'date'},
+      {k:'sentBy',l:'Sent by',t:'sel',o:['Post','Email','Adviser portal','Origo'],d:'Post'},
+      {k:'chaseDays',l:'Chase provider after (days)',t:'int',d:15,h:'Providers commonly reply within 10–15 working days'},
+      {k:'receivedOn',l:'Information received on',t:'date'},
+      {k:'notes',l:'Notes',t:'area',w:1},
+    ]},
+  ]},
   firm:{single:true,title:'Firm details',sheet:'Firm',desc:'Used on letters of authority and client documents.',fields:[
     {k:'name',l:'Firm name',t:'text'},
     {k:'frn',l:'FCA firm reference number',t:'text',h:'Shown on letters: providers check it against the FCA register'},
@@ -346,7 +376,7 @@ const SCHEMA = {
       {k:'pensionIHT',l:'Include pensions in estate (from Apr 2027)',t:YN,d:true}]}
   ]}
 };
-const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models'];
+const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models','loas'];
 const SINGLES = ['household','mandate','compliance','assumptions'];
 /* Default model portfolios: five risk-rated models benchmarked to the ARC Private Client Indices. Firms edit these. */
 const DEFAULT_MODELS=[
@@ -429,6 +459,9 @@ function sample(){
   Object.assign(s.mandate,{basis:'Advisory',model:'Balanced',agreedRisk:4,objective:'Balanced growth and income',horizon:20,restrictions:'No tobacco. Keep the LLP capital account outside the managed portfolio.',rebalance:'On drift',driftTol:5,agreedOn:addDays(today(),-9),agreedBy:'James and Priya Harrington'});
   s.contacts=[
     mk('contacts',{date:addDays(today(),-9),type:'Meeting',with:'James and Priya Harrington',by:'Sam Adviser',summary:'Discovery meeting at the office. Walked through objectives, the LLP income and the plan for the Leeds flat.'})];
+  s.loas=[
+    mk('loas',{provider:'Aviva',owner:'P1',planType:'Personal pension',policyRef:'PP4471209',status:'Sent to provider',createdOn:addDays(today(),-25),signedOn:addDays(today(),-22),sentOn:addDays(today(),-20),sentBy:'Post'}),
+    mk('loas',{provider:'Scottish Widows',owner:'P2',planType:'Workplace pension',employer:'Leeds City Council (AVC)',status:'With client to sign',createdOn:addDays(today(),-3)})];
   s.actions=[
     mk('actions',{created:addDays(today(),-9),description:'Obtain proof of address for Priya',owner:'Alex Paraplanner',priority:'High',status:'Waiting on client',due:addDays(today(),5)}),
     mk('actions',{created:addDays(today(),-9),description:'Send ex-ante costs and charges disclosure',owner:'Sam Adviser',priority:'High',due:addDays(today(),-2)}),
@@ -745,6 +778,10 @@ function reviews(O){
     if(m.idExpiry)add('Photo ID expires',m.idExpiry,nm,'members',m.idType||'');
     if(m.poaDate)add('Proof of address refresh',addMonths(m.poaDate,3),nm,'members','Must be dated within 3 months');
     if(m.screenDate)add('Screening refresh',addMonths(m.screenDate,3),nm,'members','Sanctions, PEP and adverse media within 3 months')}
+  for(const l of S.loas){const who=l.owner?memberName(l.owner):'';const what=`${l.provider||'Provider'}${l.policyRef?' '+l.policyRef:''}`;
+    if(['Drafted','With client to sign'].includes(l.status)&&l.createdOn)add('Letter of authority: get client signature',addDays(l.createdOn,14),who,'loas',what);
+    if(l.status==='Signed')add('Letter of authority: send to provider',l.signedOn||l.createdOn,who,'loas',what);
+    if(l.status==='Sent to provider'&&l.sentOn)add('Letter of authority: chase provider',addDays(l.sentOn,has(l.chaseDays)?N(l.chaseDays):15),who,'loas',what)}
   {const b=S.mandate.reviewedOn||S.mandate.agreedOn;if(b)add('Mandate review',addYears(b,1),'','mandate','Annual review of the agreed mandate')}
   for(const a of S.actions)if(taskOpen(a)&&a.due)add('Action: '+(a.description||''),a.due,a.owner,'actions','');
   for(const e of S.contacts)if(e.type==='Life event'&&e.date&&(!lastReview||e.date>lastReview))add('Reassess suitability after life event',e.date,e.with,'contacts',e.summary||'');

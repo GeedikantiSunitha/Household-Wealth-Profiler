@@ -87,7 +87,7 @@ const NAV=[
   ['client','Client',[['household'],['members'],['income'],['expenses'],['goals'],['assumptions']]],
   ['wealth','Wealth',[['accounts'],['db'],['property'],['other'],['liabilities'],['protection']]],
   ['onboarding','Onboarding',[['compliance'],['kyc','KYC status'],['audit','Audit trail']]],
-  ['relationship','Relationship',[['contacts'],['actions'],['complaints'],['reviews','Reviews due']]],
+  ['relationship','Relationship',[['contacts'],['actions'],['loas','Letters of authority'],['complaints'],['reviews','Reviews due']]],
   ['mandate','Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
   ['analysis','Analysis',[['bs','Balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 const NAV_OPEN=new Set();
@@ -242,6 +242,12 @@ const FIELD_HELP={
   'actions.created':'When the task was raised.','actions.description':'What needs doing.','actions.owner':'Team member responsible. The list comes from Firm settings › Team members.',
   'actions.priority':'High-priority tasks sort first on the Tasks board.','actions.due':'Open tasks with a due date appear in Reviews due and on the Tasks board; overdue ones are highlighted.',
   'actions.status':'Anything other than Done or Cancelled counts as open. Waiting on client / provider shows where the task is held up.','actions.doneOn':'Date completed.','actions.notes':'Progress notes.',
+  'loas.provider':'From Firm settings › Providers. The provider\u2019s address or email is printed on the letter.','loas.owner':'The plan holder. Their name, date of birth, NI number and address are printed on the letter.',
+  'loas.planType':'Printed on the letter.','loas.policyRef':'Printed on the letter. Blank asks the provider to identify every plan in the client\u2019s name.','loas.employer':'Helps the provider find workplace scheme records.',
+  'loas.reqValue':'Included in the list of information requested.','loas.reqTransfer':'Included in the list of information requested.','loas.reqFunds':'Included in the list of information requested.','loas.reqCharges':'Included in the list of information requested.',
+  'loas.reqContrib':'Included in the list of information requested.','loas.reqGuarantees':'Ask whenever a transfer might be considered: safeguarded benefits trigger extra advice requirements.','loas.reqDeath':'Included in the list of information requested.','loas.reqRetire':'Included in the list of information requested.','loas.otherRequest':'Added to the list as written.',
+  'loas.status':'Drafted or With client: a signature reminder after 14 days. Signed: a send-to-provider reminder. Sent: a chase reminder after the chase period. Information received or Cancelled clears it.',
+  'loas.createdOn':'Starts the 14-day signature reminder.','loas.signedOn':'Date the client signed.','loas.sentOn':'Starts the provider chase reminder.','loas.sentBy':'How the letter went.','loas.chaseDays':'Days after sending before Reviews due asks you to chase the provider.','loas.receivedOn':'Date the information arrived.','loas.notes':'Provider reference, call notes.',
   'firm.name':'Printed on letters and documents.','firm.frn':'Your FCA firm reference number.','firm.address':'Printed on the letterhead.','firm.phone':'Printed on letters.','firm.email':'Where providers send information requested under a letter of authority.','firm.website':'Printed on letters.','firm.signatory':'Name printed under the adviser signature.',
   'team.name':'Appears in the Assigned to list on tasks.','team.role':'Shown beside the name.','team.email':'For reference.','team.active':'Inactive members drop out of the Assigned to list; their existing tasks keep the name.',
   'providers.name':'Shown when choosing the provider on a letter of authority.','providers.kind':'Pension, platform, insurer and so on.','providers.address':'Postal address printed on the letter. Check against the provider\u2019s adviser guidance.',
@@ -321,6 +327,7 @@ const GROUP_HELP={
   'Enhanced due diligence':'Required when the rating is High: EDD findings, verified source of wealth and senior approval.',
   'Disclosures and consents':'Documents the client must receive or sign before onboarding completes.',
   'Sign-off':'Four-eyes review: the reviewer must differ from the preparer.',
+  'Plan':'Which plan the letter is about, and whose it is.','Information requested':'Each ticked item is listed in the letter.','Progress':'Where the letter is. Drives the reminders in Reviews due.',
   'Service and model':'Which model the portfolio follows and the risk level agreed. These set the target allocation.',
   'Objectives and constraints':'What the portfolio is for and what it may not hold. Recorded for the IPS; the drift tolerance drives the mandate check.',
   'Agreement':'When the mandate was agreed and last reviewed. Sets the annual mandate review date.',
@@ -328,7 +335,7 @@ const GROUP_HELP={
   'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
   'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
   'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
-const NAV_HELP={mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+const NAV_HELP={loas:'Letters asking providers to release plan information.',mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
   expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
   other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
   compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
@@ -340,6 +347,7 @@ const recs=col=>FIRM_KEYS.has(col)?Store.firm.settings[col]:S[col];
 /* ---------- form rendering ---------- */
 function teamOptions(val){const t=((Store.firm.settings||{}).team||[]).filter(m=>m.name&&(yes(m.active)||m.name===val)).map(m=>[m.name,`${m.name}${m.role?' · '+m.role:''}`]);
   if(val&&!t.some(o=>o[0]===val))t.push([val,val+' (not in team list)']);return t}
+function providerOptions(val){const t=((Store.firm.settings||{}).providers||[]).filter(p=>p.name).map(p=>[p.name,p.name]);if(val&&!t.some(o=>o[0]===val))t.push([val,val]);return t}
 function ownerOptions(withJoint){let o=withJoint?[['JOINT','Joint (adults equally)']]:[];return o.concat(S.members.map(m=>[m.ref,`${m.ref} · ${m.firstName||''} ${m.lastName||''}`.trim()]))}
 const VALIDATE={niNumber:v=>!v||H.validNino(v)?'':'Not a valid NI number',postcode:v=>!v||H.validPostcode(v)?'':'Check the postcode format',email:v=>!v||H.validEmail(v)?'':'Check the email address'};
 function fieldHTML(col,idx,f,val){
@@ -350,8 +358,8 @@ function fieldHTML(col,idx,f,val){
   const tip=tipBtn(f.l,FIELD_HELP[`${col}.${f.k}`]||f.h);
   if(f.t===YN)return `<div class="f chk"><input type="checkbox" id="${id}" ${data} ${yes(val)?'checked':''}><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span></div>`;
   let ctl;
-  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'||f.t==='team'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?S.models.map(m=>[m.name,m.name]):f.t==='team'?teamOptions(val):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
-    ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':f.t==='model'?'Select model…':f.t==='team'?'Unassigned':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
+  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'||f.t==='team'||f.t==='provider'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?S.models.map(m=>[m.name,m.name]):f.t==='team'?teamOptions(val):f.t==='provider'?providerOptions(val):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
+    ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':f.t==='model'?'Select model…':f.t==='team'?'Unassigned':f.t==='provider'?'Select provider…':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
   else if(f.t==='area')ctl=`<textarea id="${id}" ${data}${aria}>${esc(val)}</textarea>`;
   else if(f.t==='date')ctl=`<input type="date" id="${id}" ${data}${aria} value="${esc(val)}">`;
   else if(f.t==='num'||f.t==='pct'||f.t==='int')ctl=`<input type="number" inputmode="decimal" step="${f.t==='int'?1:'any'}" id="${id}" ${data}${aria} value="${esc(val)}">`;
@@ -376,6 +384,7 @@ function summary(key,r){
     case 'models':{const eq=N(r.ukEq)+N(r.glEq)+N(r.emEq);return [r.name||'Model',`risk ${r.riskMin||'?'}–${r.riskMax||'?'}${r.benchmark?' · '+r.benchmark:''}`,`${eq}% equity`]}
     case 'contacts':return [r.type||'Contact',`${fmtDate(r.date)}${r.with?' · '+r.with:''}`,''];
     case 'actions':return [r.description||'Task',`${r.owner||'Unassigned'}${r.due?' · due '+fmtDate(r.due):''}${r.priority==='High'?' · high priority':''}`,r.status||''];
+    case 'loas':return [`${r.provider||'Provider'}${r.policyRef?' · '+r.policyRef:''}`,`${r.owner?memberName(r.owner):'No client'} · ${r.planType||''}${r.sentOn?' · sent '+fmtDate(r.sentOn):''}`,r.status||''];
     case 'team':return [r.name||'Team member',`${r.role||''}${r.email?' · '+r.email:''}`,yes(r.active)?'':'Inactive'];
     case 'providers':return [r.name||'Provider',`${r.kind||''}${r.email?' · '+r.email:r.address?' · postal':''}`,r.address||r.email||r.portal?'':'Add contact details'];
     case 'complaints':return [(r.summary||'Complaint').slice(0,70),`received ${fmtDate(r.received)} · ${r.stage||''}`,r.outcome||''];
@@ -450,6 +459,10 @@ const HOW={
     'A Review meeting resets the annual suitability review: the next one falls 12 months later.',
     'A Life event (marriage, inheritance, redundancy, retirement, a health change) creates a reassess-suitability item that stays until a review meeting is recorded after it.',
     'Other entries build the contact history for the file. None of them change the figures.']},
+  loas:{feeds:['Letter','Reviews due'],pts:[
+    'Letter builds a print-ready letter from the firm\u2019s details (Firm settings), the provider\u2019s address (provider directory) and the client\u2019s identity details (People). Anything missing is listed above the letter.',
+    'Reviews due reminds you to get the client\u2019s signature after 14 days, to send a signed letter, and to chase the provider once the chase period has passed.',
+    'Record what arrives against Savings and investments or Defined benefit pensions so the balance sheet uses it.']},
   actions:{feeds:['Tasks board','Reviews due'],pts:[
     'Each task is assigned to a team member from Firm settings and appears on the firm-wide Tasks board, filterable by person.',
     'Open tasks with a due date appear in Reviews due, overdue ones first.',
@@ -471,7 +484,7 @@ const HOW={
     'CPI inflates spending and goals. The gap between inflation and the gilt rate is what matters.',
     'Mortality ages, dispersion and plan-to age set the survival weights and the horizon.',
     'Tax bands and allowances drive the Tax view and the deferred tax on pensions and gains.']}};
-const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models']);
+const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models','loas']);
 function howHTML(key){const w=HOW[key];if(!w)return '';let open=true;try{open=localStorage.getItem(HOW_LS)!=='0'}catch(e){}
   return `<div class="how"><div class="how-h"><b>How this section is used</b><span class="feeds">${w.feeds.map(f=>`<span class="feed">${esc(f)}</span>`).join('')}</span></div><details id="howDetails"${open?' open':''}><summary>What the inputs change</summary><ul>${w.pts.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></details></div>`}
 document.addEventListener('toggle',e=>{if(e.target.id==='howDetails')try{localStorage.setItem(HOW_LS,e.target.open?'1':'0')}catch(x){}},true);
@@ -523,8 +536,9 @@ function renderInput(key){
     if(key==='compliance')h+=`<div class="addrow"><button class="btn" type="button" data-nav="kyc">See onboarding status</button></div>`;
     return h}
   if(!S[key].length)h+=`<div class="empty">Nothing recorded yet. Use “Add ${esc(s.item)}” or import an Excel file.</div>`;
+  if(key==='loas'&&S.loas.length)h+=`<p class="note" style="margin:0 0 12px">Open a letter, check the details, then use <b>Letter</b> to print it or save it as PDF for the client to sign.</p>`;
   S[key].forEach((r,i)=>{const [t,meta,v]=summary(key,r);const open=OPEN.has(key+':'+i);
-    h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span><button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
+    h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span>${key==='loas'?`<button class="btn" type="button" data-act="loaLetter" data-idx="${i}">Letter</button>`:''}<button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
   return h;
 }
 
@@ -738,6 +752,28 @@ function renderGuide(){
 }
 
 const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
+let LOA_IDX=0;
+const LOA_REQ=[['reqValue','the current value of the plan'],['reqTransfer','the current transfer value and any exit charges or penalties'],['reqFunds','the funds held, with unit holdings and prices'],['reqCharges','all charges: product, fund and any adviser charges currently paid'],['reqContrib','the contribution history, including employer contributions'],['reqGuarantees','any guarantees or safeguarded benefits, such as guaranteed annuity rates, guaranteed minimum pension or protected tax-free cash'],['reqDeath','the death benefits and any nomination of beneficiaries'],['reqRetire','the selected retirement date and the options available at retirement']];
+function renderLetter(){const l=S.loas[LOA_IDX];if(!l)return '<div class="empty">Letter not found.</div>';const F=Store.firm.settings.firm;
+  const prov=(Store.firm.settings.providers||[]).find(p=>p.name===l.provider)||{};const m=S.members.find(x=>x.ref===l.owner)||{};
+  const nm=[m.title,m.firstName,m.lastName].filter(Boolean).join(' ');const nl=t=>esc(t||'').replace(/\n/g,'<br>');
+  const req=LOA_REQ.filter(([k])=>yes(l[k])).map(([,t])=>t);if(has(l.otherRequest))req.push(l.otherRequest);
+  const missing=[!F.name&&'firm name',!F.frn&&'FCA reference number',!F.address&&'firm address',!l.provider&&'provider',!prov.address&&!prov.email&&'provider address or email',!nm&&'client',!m.dob&&'client date of birth',!m.niNumber&&'client NI number',!m.address&&'client address'].filter(Boolean);
+  let h=`<div class="sec-head no-print"><div><h2>Letter of authority</h2><p>Check the letter, then print it or save it as PDF. When the client has signed, set the status to Signed and record the date.</p></div><div class="addrow"><button class="btn" type="button" data-nav="loas">Back to letters</button><button class="btn primary" type="button" data-act="print">Print or save as PDF</button></div></div>`;
+  if(missing.length)h+=`<div class="banner bad no-print"><div><b>Missing from the letter:</b> ${esc(missing.join(', '))}. Fill these in under Firm settings, the provider directory or People before sending.</div></div>`;
+  h+=`<article class="letter">
+    <header class="lh"><div><div class="lh-name">${esc(F.name||'Firm name')}</div><div class="lh-addr">${nl(F.address)}</div></div><div class="lh-meta">${F.phone?esc(F.phone)+'<br>':''}${F.email?esc(F.email)+'<br>':''}${F.website?esc(F.website)+'<br>':''}${F.frn?'FCA FRN '+esc(F.frn):''}</div></header>
+    <div class="to">${esc(l.provider||'Provider')}<br>${nl(prov.address)}${!prov.address&&prov.email?esc(prov.email):''}</div>
+    <p class="date">${fmtDate(H.today())}</p>
+    <p class="re"><b>Letter of authority</b><br>Client: ${esc(nm||'—')}${m.dob?' · Date of birth '+fmtDate(m.dob):''}${m.niNumber?' · NI number '+esc(m.niNumber):''}<br>Address: ${nl((m.address||'').replace(/\n/g,', '))}${m.postcode?' '+esc(m.postcode):''}<br>Plan: ${esc(l.planType||'')}${l.policyRef?' · Policy number '+esc(l.policyRef):' · all plans held in my name'}${l.employer?' · Employer '+esc(l.employer):''}</p>
+    <p>I authorise ${esc(F.name||'the firm named above')}${F.frn?' (FCA firm reference number '+esc(F.frn)+')':''} to request and receive information about ${l.policyRef?'the plan above':'any plans I hold with you'}, and to discuss ${l.policyRef?'it':'them'} with you on my behalf.</p>
+    ${req.length?`<p>Please send the following information to ${esc(F.name||'the firm')}${F.email?' at '+esc(F.email):''}${F.address?', or by post to the address above':''}:</p><ul>${req.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>`:''}
+    <p>This authority lets the firm receive information only. It does not allow the firm to make changes, transactions or withdrawals. Please continue to send statements and correspondence to me as usual. This authority remains in force until I withdraw it in writing. A copy of this letter is as valid as the original.</p>
+    <p>I consent to you sharing my personal data with ${esc(F.name||'the firm')} for this purpose.</p>
+    <div class="sig"><div><div class="line"></div>Signature of ${esc(nm||'client')}</div><div><div class="line"></div>Date</div></div>
+    <p class="cc">Prepared by ${esc(F.signatory||Store.user||'')}${F.name?', '+esc(F.name):''}. ${esc(F.name||'The firm')} is authorised and regulated by the Financial Conduct Authority.</p>
+  </article>`;
+  return h}
 function firmCards(key){const s=SCHEMA[key];const L=Store.firm.settings[key];
   let h=`<div class="sec-head" style="margin-top:28px"><div><h2 style="font-size:20px">${esc(s.title)}</h2><p>${esc(s.desc)}</p></div><div class="addrow"><button class="btn" type="button" data-act="toggleAll" data-col="${key}">Expand all</button><button class="btn primary" type="button" data-act="add" data-col="${key}">Add ${esc(s.item)}</button></div></div>`;
   if(!L.length)h+=`<div class="empty">None yet.</div>`;
@@ -806,7 +842,7 @@ function render(){
   if(VIEW==='tasks')return renderTasks();
   if(VIEW==='firmSettings'){m.innerHTML=renderFirmSettings();return}
   if(VIEW==='audit')return renderAudit();
-  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else m.innerHTML=renderChecks();
+  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else if(VIEW==='letter')m.innerHTML=renderLetter();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
   const server=Store.mode==='server';const inHH=!FIRM_VIEWS.has(VIEW);
@@ -853,6 +889,8 @@ document.addEventListener('click',async e=>{
   if(act==='toggleAll'&&FIRM_KEYS.has(col)){const L=recs(col);const all=L.every((_,i)=>OPEN.has(col+':'+i));L.forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='toggleAll'){const all=S[col].every((_,i)=>OPEN.has(col+':'+i));S[col].forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='add'&&FIRM_KEYS.has(col)){recs(col).push(H.defaults(col));OPEN.add(col+':'+(recs(col).length-1));Store.touchFirm();render();return}
+  if(act==='loaLetter'){e.stopPropagation();LOA_IDX=+b.dataset.idx;VIEW='letter';banner=null;render();window.scrollTo({top:0});return}
+  if(act==='print'){window.print();return}
   if(act==='reloadFirm'){banner=null;Store.firm.err=null;await Store.loadFirm();render();return}
   if(act==='taskFilter'){TASKF[b.dataset.k]=b.dataset.v;render();return}
   if(act==='add'){const r=H.defaults(col);if(col==='members'){const ad=S.members.filter(isAdult).length;r.ref=ad<1?'P1':ad<2?'P2':'C'+(S.members.filter(m=>m.role==='child').length+1);r.role=ad<1?'primary':ad<2?'partner':'child'}
