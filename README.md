@@ -201,6 +201,17 @@ and the risk profile (a level outside the profile needs a written rationale), an
 target with the value-weighted split of the accounts, flagging any class outside the tolerance.
 The agreement date starts an annual mandate review in Reviews due.
 
+## Fund performance
+
+Firm settings › **Fund library** lists the firm's funds and benchmarks. Price history is imported
+from a CSV download (FT, Trustnet, Morningstar, a provider factsheet, Yahoo): the importer finds
+the date and price columns and keeps month-end prices. For exchange-listed funds the self-hosted
+server can fetch monthly prices from Alpha Vantage if `ALPHAVANTAGE_KEY` is set (free key, 25
+requests a day). **Mandate › Fund performance** shows growth of £10,000, cumulative and annualised
+returns, the five discrete 12-month periods, volatility and worst fall, with the past-performance
+warning and data source required by COBS 4.6. Use accumulation units or total-return indices so
+income is included. The Supabase edition imports CSVs but does not yet fetch prices.
+
 ## Calculations
 
 - Income tax and NI use 2026/27 rest-of-UK bands, editable under Assumptions. Check them against HMRC before relying on them. Scottish bands and pension carry forward are not modelled.

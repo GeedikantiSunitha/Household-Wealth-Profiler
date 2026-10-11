@@ -114,6 +114,12 @@ test('firm settings are versioned, audited, encrypted on disk and kept out of th
   assert.ok(list.every(h => Array.isArray(h.tasks)));
 });
 
+test('automatic prices are off unless a data key is configured', async () => {
+  const r = await fetch(BASE + '/api/prices?symbol=VWRL.LON', { headers: SAM });
+  assert.equal(r.status, 501);
+  assert.match((await r.json()).error, /import a CSV/);
+});
+
 test('behind a proxy, a lockout applies only to the client address the proxy reports', async () => {
   const from = ip => ({ 'X-Client-IP': ip });
   for (let i = 0; i < 10; i++) await fetch(BASE + '/api/me', { headers: { ...auth('sam', 'nope' + i), ...from('203.0.113.9') } });

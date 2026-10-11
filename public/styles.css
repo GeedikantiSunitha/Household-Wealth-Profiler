@@ -351,3 +351,26 @@ table.scen tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--brass)}
 .scen .down,.panel .down{color:var(--bad);font-weight:600}
 .neg{color:var(--bad)}
 #scenSettings summary{cursor:pointer}
+
+/* Fund performance chart. Series colours validated with the data-viz palette checker (light and dark). */
+:root{--viz-1:#2a78d6;--viz-2:#eb6834;--viz-3:#1baf7a;--viz-4:#eda100;--viz-bench:#6250d6}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--viz-1:#3987e5;--viz-2:#d95926;--viz-3:#199e70;--viz-4:#c98500;--viz-bench:#9085e9}}
+:root[data-theme="dark"]{--viz-1:#3987e5;--viz-2:#d95926;--viz-3:#199e70;--viz-4:#c98500;--viz-bench:#9085e9}
+.perf-bar{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center;margin-bottom:14px}
+.perf-pick{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line-strong);background:var(--surface);border-radius:999px;padding:5px 11px;font-size:12.5px;cursor:pointer}
+.chip.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:500}
+.chip i,.perf-ends i,.perf-tip i{width:10px;height:3px;border-radius:2px;display:inline-block}
+.perf-wrap{position:relative}
+.perf-svg{width:100%;height:auto;display:block;touch-action:none}
+.perf-svg .grid{stroke:var(--line);stroke-width:1}
+.perf-svg .base{stroke:var(--muted);stroke-width:1;opacity:.6}
+.perf-svg .ax{fill:var(--muted);font:11px var(--f-num);font-variant-numeric:tabular-nums}
+.perf-svg .xh{stroke:var(--muted);stroke-width:1}
+.perf-svg .xd{stroke:var(--surface);stroke-width:2}
+.perf-tip{position:absolute;top:8px;background:var(--surface);border:1px solid var(--line-strong);border-radius:6px;box-shadow:var(--shadow-lg);padding:8px 10px;font-size:12px;pointer-events:none;min-width:200px;z-index:3}
+.perf-tip div{display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center;margin-top:3px}
+.perf-tip b{font-variant-numeric:tabular-nums}
+.perf-ends{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;margin-top:8px}
+.perf-ends span{display:inline-flex;align-items:center;gap:6px}
+.key{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:8px;vertical-align:middle}

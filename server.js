@@ -99,6 +99,22 @@ async function readAudit(id) {
   try { text = await fsp.readFile(path.join(hhDir(id), 'audit.log'), 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   return text.split('\n').filter(Boolean).map(l => JSON.parse(open(l))).reverse();
 }
+// Optional monthly price history for exchange-listed funds from Alpha Vantage (free key). Set ALPHAVANTAGE_KEY to enable.
+const AV_KEY = process.env.ALPHAVANTAGE_KEY || '';
+const priceCache = new Map(); // symbol -> {at, text}
+async function fetchPrices(symbol) {
+  const hit = priceCache.get(symbol);
+  if (hit && Date.now() - hit.at < 12 * 3600e3) return hit.text;
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_MONTHLY_ADJUSTED&symbol=${encodeURIComponent(symbol)}&datatype=csv&apikey=${encodeURIComponent(AV_KEY)}`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const text = await r.text();
+  if (!r.ok || !/^timestamp,/i.test(text)) {
+    const msg = /Invalid API call/i.test(text) ? 'The data provider does not recognise that ticker. Try the exchange suffix, e.g. VWRL.LON.' : /rate limit|frequency|premium/i.test(text) ? 'The free data allowance for today is used up. Try again tomorrow or import a CSV.' : 'The data provider did not return prices.';
+    throw Object.assign(new Error(msg), { status: 502 });
+  }
+  priceCache.set(symbol, { at: Date.now(), text });
+  return text;
+}
 // Firm settings: one record for the firm (details, team, providers), versioned and audited like a household
 const firmDir = () => hhDir('firm'); // beside the households; the list only reads UUID folders
 async function readFirm() {
@@ -213,6 +229,12 @@ async function handle(req, res) {
   if (p === '/api/me' && req.method === 'GET') return send(res, 200, { user, encrypted: !!KEY });
 
   if (p === '/api/firm' && req.method === 'GET') return send(res, 200, await readFirm());
+  if (p === '/api/prices' && req.method === 'GET') {
+    if (!AV_KEY) return send(res, 501, { error: 'Automatic prices are not set up. Ask your administrator to add an Alpha Vantage key, or import a CSV.' });
+    const symbol = String(url.searchParams.get('symbol') || '').trim().toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9.\-]{0,19}$/.test(symbol)) return send(res, 400, { error: 'Enter an exchange ticker such as VWRL.LON' });
+    return send(res, 200, { symbol, csv: await fetchPrices(symbol) });
+  }
   if (p === '/api/firm/audit' && req.method === 'GET') return send(res, 200, (await readAudit('firm')).slice(0, 5000));
   if (p === '/api/firm' && req.method === 'PUT') {
     const body = await readBody(req);

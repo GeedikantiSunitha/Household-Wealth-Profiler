@@ -24,6 +24,7 @@ const gbp=(n,dp=0)=>{if(!isFinite(n))return '–';const s=Math.abs(n).toLocaleSt
 const gbpK=n=>{if(!isFinite(n))return '–';const a=Math.abs(n);const s=a>=1e6?(a/1e6).toFixed(2)+'m':a>=1e4?Math.round(a/1e3)+'k':Math.round(a).toLocaleString('en-GB');return (n<0?'−£':'£')+s};
 const pct=(n,dp=0)=>isFinite(n)?(n*100).toFixed(dp)+'%':'–';
 const fmtDate=s=>{const d=H.parseDate(s);return d?d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):'–'};
+const fmtYM=ym=>{const [y,m]=String(ym).split('-');return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]+' '+y};
 const fmtTs=s=>{const d=new Date(s);return isNaN(d)?s:d.toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})};
 function toast(m){const t=$('#toast');t.textContent=m;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>t.hidden=true,2800)}
 const memberName=r=>E.memberName(r);
@@ -88,7 +89,7 @@ const NAV=[
   ['wealth','Wealth',[['accounts'],['db'],['property'],['other'],['liabilities'],['protection']]],
   ['onboarding','Onboarding',[['compliance'],['rtq','Risk questionnaire'],['kyc','KYC status'],['audit','Audit trail']]],
   ['relationship','Relationship',[['contacts'],['actions'],['loas','Letters of authority'],['complaints'],['reviews','Reviews due']]],
-  ['mandate','Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
+  ['mandate','Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check'],['perf','Fund performance']]],
   ['analysis','Analysis',[['bs','Balance sheet'],['scenarios','Life-event scenarios'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 const NAV_OPEN=new Set();
 const FIRM_VIEWS=new Set(['clients','team','diary','tasks','firmSettings']);
@@ -243,6 +244,8 @@ const FIELD_HELP={
   'actions.created':'When the task was raised.','actions.description':'What needs doing.','actions.owner':'Team member responsible. The list comes from Firm settings › Team members.',
   'actions.priority':'High-priority tasks sort first on the Tasks board.','actions.due':'Open tasks with a due date appear in Reviews due and on the Tasks board; overdue ones are highlighted.',
   'actions.status':'Anything other than Done or Cancelled counts as open. Waiting on client / provider shows where the task is held up.','actions.doneOn':'Date completed.','actions.notes':'Progress notes.',
+  'funds.name':'Shown on charts and tables.','funds.isin':'Identifies the share class. Use the accumulation class so performance includes income.','funds.ticker':'Exchange ticker with suffix, for the automatic fetch. Not needed for OEICs and unit trusts: import a CSV instead.',
+  'funds.assetClass':'For grouping and the mandate.','funds.ocf':'Ongoing charges figure from the KIID or factsheet. Shown in the performance table.','funds.isBenchmark':'Benchmarks are drawn alongside funds and listed separately.','funds.source':'Printed under the chart: FCA rules require the source of past performance to be stated.','funds.pricesUpdated':'Set automatically on import.',
   'scen.who':'Death, illness, care, redundancy and early retirement are applied to this person; separation is shown from their side.','scen.survivorSpend':'Household spending after a death, as a share of today\u2019s.','scen.divorceSpend':'Spending for the person kept in the household after separation.','scen.divorceCosts':'One-off legal and moving costs.',
   'scen.careStartAge':'Age care begins.','scen.careYears':'How long care lasts. UK average stays in residential care are around 2–3 years.','scen.careCost':'Annual care cost in today\u2019s money, rising 5% a year.','scen.illnessCost':'Ongoing extra costs: adaptations, treatment, help at home.','scen.longevityYears':'Years added to the modal age at death and the plan horizon.',
   'scen.redundancyYears':'Time with no earnings.','scen.reEmployPct':'New pay as a share of current pay.','scen.redundancyPay':'Lump sum received, added to cash.','scen.earlyRetireYears':'Years earlier than the planned retirement age.','scen.marketFall':'Fall in equities and alternatives; bonds fall a fifth of this, cash is unchanged.','scen.rateRise':'Added to the gilt rate and to loan rates.','scen.inheritance':'Lump sum added to joint cash.',
@@ -341,7 +344,7 @@ const GROUP_HELP={
   'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
   'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
   'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
-const NAV_HELP={scenarios:'Death, separation, care, illness, redundancy, market falls and more, applied to this household.',rtq:'Scored risk questionnaire: sets risk tolerance, capacity for loss and experience.',loas:'Letters asking providers to release plan information.',mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+const NAV_HELP={perf:'Past performance of the firm\u2019s funds against a benchmark, for showing to the client.',scenarios:'Death, separation, care, illness, redundancy, market falls and more, applied to this household.',rtq:'Scored risk questionnaire: sets risk tolerance, capacity for loss and experience.',loas:'Letters asking providers to release plan information.',mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
   expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
   other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
   compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
@@ -374,7 +377,7 @@ function fieldHTML(col,idx,f,val){
 }
 function fieldsBlock(key,idx,rec){const s=SCHEMA[key];
   if(s.groups)return s.groups.filter(g=>!(g.adultOnly&&key==='members'&&!isAdult(rec))).map(g=>`<div class="grp"><h4>${esc(g.t)}${tipBtn(g.t,GROUP_HELP[g.t])}</h4><div class="fields">${g.fields.map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div></div>`).join('');
-  return `<div class="fields">${s.fields.map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div>`}
+  return `<div class="fields">${s.fields.filter(f=>f.t!=='series').map(f=>fieldHTML(key,idx,f,rec[f.k])).join('')}</div>`}
 function summary(key,r){
   const who=r.owner?memberName(r.owner):'';
   switch(key){
@@ -392,6 +395,7 @@ function summary(key,r){
     case 'actions':return [r.description||'Task',`${r.owner||'Unassigned'}${r.due?' · due '+fmtDate(r.due):''}${r.priority==='High'?' · high priority':''}`,r.status||''];
     case 'rtq':{const sc=H.rtqScore(r);return [r.owner?memberName(r.owner):'Choose the client',`${sc.answered} of ${sc.of} answered${r.completedOn?' · '+fmtDate(r.completedOn):''}`,sc.complete?`Risk ${sc.atr.band} · capacity ${sc.cfl.level}`:'Incomplete']}
     case 'loas':return [`${r.provider||'Provider'}${r.policyRef?' · '+r.policyRef:''}`,`${r.owner?memberName(r.owner):'No client'} · ${r.planType||''}${r.sentOn?' · sent '+fmtDate(r.sentOn):''}`,r.status||''];
+    case 'funds':{const a=H.seriesDecode(r.prices);return [r.name||'Fund',`${r.isBenchmark?'Benchmark':((H.ASSET_CLASSES.find(x=>x[0]===r.assetClass)||[0,''])[1])}${r.isin?' · '+r.isin:''}${r.ticker?' · '+r.ticker:''}`,a.length?`${a.length} months to ${fmtYM(a[a.length-1].d)}`:'No prices']}
     case 'team':return [r.name||'Team member',`${r.role||''}${r.email?' · '+r.email:''}`,yes(r.active)?'':'Inactive'];
     case 'providers':return [r.name||'Provider',`${r.kind||''}${r.email?' · '+r.email:r.address?' · postal':''}`,r.address||r.email||r.portal?'':'Add contact details'];
     case 'complaints':return [(r.summary||'Complaint').slice(0,70),`received ${fmtDate(r.received)} · ${r.stage||''}`,r.outcome||''];
@@ -765,6 +769,56 @@ function renderGuide(){
 }
 
 const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
+const PERF={sel:new Set(),period:'5y',touched:false};
+const PERF_COLORS=['--viz-1','--viz-2','--viz-3','--viz-4'];
+function renderPerf(){
+  const funds=(Store.firm.settings.funds||[]).map(f=>({...f,series:H.seriesDecode(f.prices)})).filter(f=>f.name&&f.series.length>1);
+  let h=`<div class="sec-head"><div><h2>Fund performance</h2><p>Past performance of the firm’s funds and benchmarks, from the price history in the fund library. Choose up to four funds and a benchmark.</p></div>${Store.mode==='server'||true?'<div class="addrow"><button class="btn" type="button" data-act="firmSettings">Manage fund library</button></div>':''}</div>`+bannerHTML(false);
+  if(!funds.length)return h+`<div class="empty">No price history yet. Add funds under Firm settings › Fund library, then import a CSV of prices for each (from FT, Trustnet, Morningstar, the provider’s factsheet or Yahoo).</div>`;
+  if(!PERF.touched&&!PERF.sel.size){funds.filter(f=>!yes(f.isBenchmark)).slice(0,3).forEach(f=>PERF.sel.add(f.name));const b=funds.find(f=>yes(f.isBenchmark));if(b)PERF.sel.add(b.name)}
+  for(const n of [...PERF.sel])if(!funds.some(f=>f.name===n))PERF.sel.delete(n);
+  const chosenF=funds.filter(f=>PERF.sel.has(f.name)&&!yes(f.isBenchmark)).slice(0,4);const chosenB=funds.find(f=>PERF.sel.has(f.name)&&yes(f.isBenchmark));
+  const chosen=[...chosenF.map((f,i)=>({...f,color:`var(${PERF_COLORS[i]})`})),...(chosenB?[{...chosenB,color:'var(--viz-bench)'}]:[])];
+  h+=`<div class="perf-bar"><div class="perf-pick">${funds.map(f=>{const on=PERF.sel.has(f.name);const idx=chosen.findIndex(c=>c.name===f.name);return `<button type="button" class="chip${on?' on':''}" data-act="perfPick" data-name="${esc(f.name)}" aria-pressed="${on}">${on&&idx>=0?`<i style="background:${chosen[idx].color}"></i>`:''}${esc(f.name)}${yes(f.isBenchmark)?' <span class="muted">benchmark</span>':''}</button>`}).join('')}</div>
+    <div class="seg" role="group" aria-label="Period">${[['1y','1 year'],['3y','3 years'],['5y','5 years'],['10y','10 years'],['max','Max']].map(([v,l])=>`<button type="button" data-act="perfPeriod" data-v="${v}" aria-pressed="${PERF.period===v}">${l}</button>`).join('')}</div></div>`;
+  if(!chosen.length)return h+'<div class="empty">Choose at least one fund above.</div>';
+  const months={'1y':12,'3y':36,'5y':60,'10y':120,max:0}[PERF.period];
+  const G=H.growthCompare(chosen,months);
+  if(!G)return h+'<div class="empty">The chosen funds have no months of history in common.</div>';
+  h+=`<div class="panel"><h3>Growth of £10,000, ${fmtYM(G.start)} to ${fmtYM(G.end)}</h3>${perfChart(G)}</div>`;
+  const P=chosen.map(f=>({f,p:H.fundPerf(f.series)}));const pc=v=>v==null?'–':(v>=0?'+':'−')+Math.abs(v*100).toFixed(1)+'%';
+  h+=`<div class="panel"><h3>Returns</h3><div class="tbl-wrap"><table><thead><tr><th>Fund</th><th class="n">1 year</th><th class="n">3 years</th><th class="n">5 years</th><th class="n">5 yrs a year</th><th class="n">10 yrs a year</th><th class="n">Volatility</th><th class="n">Worst fall</th><th class="n">Ongoing charge</th><th class="n">Data to</th></tr></thead><tbody>
+    ${P.map(({f,p})=>`<tr><td><span class="key" style="background:${f.color}"></span>${esc(f.name)}</td><td class="n">${pc(p.cum['1y'])}</td><td class="n">${pc(p.cum['3y'])}</td><td class="n">${pc(p.cum['5y'])}</td><td class="n">${pc(p.ann['5y'])}</td><td class="n">${pc(p.ann['10y'])}</td><td class="n">${p.vol==null?'–':(p.vol*100).toFixed(1)+'%'}</td><td class="n">${pc(p.maxDD)}</td><td class="n">${has(f.ocf)?f.ocf+'%':'–'}</td><td class="n">${fmtYM(p.last)}</td></tr>`).join('')}</tbody></table></div></div>`;
+  const ref=P[0].p.discrete;
+  h+=`<div class="panel"><h3>Discrete 12-month performance</h3><div class="tbl-wrap"><table><thead><tr><th>Fund</th>${ref.map(d=>`<th class="n">${fmtYM(d.start)} – ${fmtYM(d.end)}</th>`).join('')}</tr></thead><tbody>
+    ${P.map(({f,p})=>`<tr><td><span class="key" style="background:${f.color}"></span>${esc(f.name)}</td>${p.discrete.map(d=>`<td class="n">${pc(d.r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+    <p class="note"><b>Past performance is not a reliable indicator of future results.</b> The value of investments and the income from them can fall as well as rise, and investors may get back less than they invested. Figures are in pounds sterling, based on month-end prices${chosen.some(f=>f.source)?': '+esc([...new Set(chosen.map(f=>f.source).filter(Boolean))].join('; ')):''}. They show price changes of the units or index supplied; use accumulation units or total-return indices so that reinvested income is included. They do not deduct adviser or platform charges. Volatility is the annualised standard deviation of monthly returns.</p></div>`;
+  return h}
+function perfChart(G){
+  const W=820,Hh=320,ml=58,mr=16,mt=14,mb=30;const pw=W-ml-mr,ph=Hh-mt-mb;
+  const all=G.lines.flatMap(l=>l.values);let lo=Math.min(10000,...all),hi=Math.max(10000,...all);const pad=(hi-lo)*0.06||500;lo-=pad;hi+=pad;
+  const step=[500,1000,2000,2500,5000,10000,20000,50000].find(s=>(hi-lo)/s<=6)||100000;const t0=Math.ceil(lo/step)*step;const ticks=[];for(let v=t0;v<=hi;v+=step)ticks.push(v);
+  const n=G.dates.length-1;const x=i=>ml+pw*(n?i/n:0);const y=v=>mt+ph*(1-(v-lo)/(hi-lo));
+  const jan=G.dates.map((d,i)=>[d,i]).filter(([d])=>d.endsWith('-01'));const years=(!jan.length||jan[0][1]>=6)?[[G.dates[0],0],...jan]:jan;const every=Math.max(1,Math.ceil(years.length/8));
+  let svg=`<svg class="perf-svg" viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Growth of £10,000 for the selected funds">`;
+  svg+=ticks.map(v=>`<line x1="${ml}" x2="${W-mr}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${ml-8}" y="${y(v)+4}" class="ax" text-anchor="end">£${(v/1000).toFixed(v%1000?1:0)}k</text>`).join('');
+  svg+=`<line x1="${ml}" x2="${W-mr}" y1="${y(10000)}" y2="${y(10000)}" class="base"/>`;
+  svg+=years.filter((_,k)=>k%every===0).map(([d,i])=>`<text x="${x(i)}" y="${Hh-8}" class="ax" text-anchor="middle">${i===0&&!d.endsWith('-01')?fmtYM(d):d.slice(0,4)}</text>`).join('');
+  svg+=G.lines.map(l=>`<path d="${l.values.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+','+y(v).toFixed(1)).join('')}" fill="none" stroke="${l.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join('');
+  svg+=`<line class="xh" x1="0" x2="0" y1="${mt}" y2="${mt+ph}" visibility="hidden"/>`+G.lines.map((l,k)=>`<circle class="xd" data-k="${k}" r="4" fill="${l.color}" visibility="hidden"/>`).join('');
+  svg+=`<rect class="hit" x="${ml}" y="${mt}" width="${pw}" height="${ph}" fill="transparent"/></svg>`;
+  PERF.g={G,x,y,n,ml,pw};
+  return `<div class="perf-wrap">${svg}<div class="perf-tip" hidden></div></div><div class="perf-ends">${G.lines.map(l=>`<span><i style="background:${l.color}"></i>${esc(l.name)}${yes(l.isBenchmark)?' (benchmark)':''}: <b>${gbp(l.values[l.values.length-1])}</b></span>`).join('')}</div>`}
+function bindPerfChart(){const wrap=document.querySelector('.perf-wrap');if(!wrap||!PERF.g)return;const {G,x,y,n,ml,pw}=PERF.g;const svg=wrap.querySelector('svg');const tip=wrap.querySelector('.perf-tip');
+  const xh=svg.querySelector('.xh'),dots=[...svg.querySelectorAll('.xd')];
+  const show=ev=>{const r=svg.getBoundingClientRect();const sx=(ev.clientX-r.left)*(820/r.width);const i=Math.max(0,Math.min(n,Math.round((sx-ml)/pw*n)));
+    xh.setAttribute('x1',x(i));xh.setAttribute('x2',x(i));xh.setAttribute('visibility','visible');
+    dots.forEach((d,k)=>{d.setAttribute('cx',x(i));d.setAttribute('cy',y(G.lines[k].values[i]));d.setAttribute('visibility','visible')});
+    tip.replaceChildren();const hd=document.createElement('b');hd.textContent=fmtYM(G.dates[i]);tip.append(hd);
+    G.lines.map((l,k)=>({l,v:l.values[i]})).sort((a,b)=>b.v-a.v).forEach(({l,v})=>{const row=document.createElement('div');const key=document.createElement('i');key.style.background=l.color;const nm=document.createElement('span');nm.textContent=l.name;const val=document.createElement('b');val.textContent=gbp(v);row.append(key,nm,val);tip.append(row)});
+    tip.hidden=false;const px=x(i)/820*r.width;tip.style.left=(px>r.width*0.6?px-tip.offsetWidth-12:px+12)+'px'};
+  const hide=()=>{tip.hidden=true;xh.setAttribute('visibility','hidden');dots.forEach(d=>d.setAttribute('visibility','hidden'))};
+  svg.querySelector('.hit').addEventListener('pointermove',show);svg.querySelector('.hit').addEventListener('pointerleave',hide)}
 let SCEN_SEL='';
 function renderScenarios(){
   const R=E.scenarios();const B=R.before;const fx=x=>isFinite(x)?x.toFixed(2)+'×':'n/a';
@@ -835,12 +889,13 @@ function firmCards(key){const s=SCHEMA[key];const L=Store.firm.settings[key];
   let h=`<div class="sec-head" style="margin-top:28px"><div><h2 style="font-size:20px">${esc(s.title)}</h2><p>${esc(s.desc)}</p></div><div class="addrow"><button class="btn" type="button" data-act="toggleAll" data-col="${key}">Expand all</button><button class="btn primary" type="button" data-act="add" data-col="${key}">Add ${esc(s.item)}</button></div></div>`;
   if(!L.length)h+=`<div class="empty">None yet.</div>`;
   L.forEach((r,i)=>{const [t,meta,v]=summary(key,r);const open=OPEN.has(key+':'+i);
-    h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span><button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
+    const extra=key==='funds'?`<div class="addrow" style="margin:0 0 14px"><button class="btn" type="button" data-act="fundImport" data-idx="${i}">Import prices from CSV</button>${Store.mode==='server'&&r.ticker?`<button class="btn" type="button" data-act="fundFetch" data-idx="${i}">Fetch prices for ${esc(r.ticker)}</button>`:''}<span class="muted" style="align-self:center">${esc(H.seriesLabel(r.prices)||'No prices yet')}</span></div>`:'';
+    h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span><button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${extra}${fieldsBlock(key,i,r)}</div></div>`});
   return h}
 function renderFirmSettings(){const F=Store.firm.settings;
   let h=`<div class="sec-head"><div><h2>Firm settings</h2><p>Shared by every household: the firm\u2019s details for letters, the team that tasks are assigned to, and the providers letters of authority go to.${Store.mode==='server'?' Changes are saved for everyone and recorded in the firm audit trail.':' Saved in this browser only.'}</p></div></div>`+bannerHTML(false);
   h+=`<div class="card" data-open="true"><div class="card-b" style="border-top:0">${fieldsBlock('firm',0,F.firm)}</div></div>`;
-  return h+firmCards('team')+firmCards('providers')}
+  return h+firmCards('team')+firmCards('providers')+firmCards('funds')}
 const TASKF={who:'',status:'open'};
 async function renderTasks(){
   let h=`<div class="sec-head"><div><h2>Tasks</h2><p>Every task across the firm\u2019s households. Assign and update tasks inside each household under Relationship › Tasks.</p></div></div>`;
@@ -899,7 +954,7 @@ function render(){
   if(VIEW==='tasks')return renderTasks();
   if(VIEW==='firmSettings'){m.innerHTML=renderFirmSettings();return}
   if(VIEW==='audit')return renderAudit();
-  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else if(VIEW==='letter')m.innerHTML=renderLetter();else if(VIEW==='scenarios')m.innerHTML=renderScenarios();else m.innerHTML=renderChecks();
+  if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else if(VIEW==='letter')m.innerHTML=renderLetter();else if(VIEW==='scenarios')m.innerHTML=renderScenarios();else if(VIEW==='perf'){m.innerHTML=renderPerf();bindPerfChart()}else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
   const server=Store.mode==='server';const inHH=!FIRM_VIEWS.has(VIEW);
@@ -950,6 +1005,15 @@ document.addEventListener('click',async e=>{
   if(act==='toggleAll'&&FIRM_KEYS.has(col)){const L=recs(col);const all=L.every((_,i)=>OPEN.has(col+':'+i));L.forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='toggleAll'){const all=S[col].every((_,i)=>OPEN.has(col+':'+i));S[col].forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='add'&&FIRM_KEYS.has(col)){recs(col).push(H.defaults(col));OPEN.add(col+':'+(recs(col).length-1));Store.touchFirm();render();return}
+  if(act==='fundImport'){const i=+b.dataset.idx;const inp=document.createElement('input');inp.type='file';inp.accept='.csv,.txt,text/csv';
+    inp.onchange=async()=>{const f=inp.files[0];if(!f)return;try{const r=H.parsePriceCSV(await f.text());const fund=Store.firm.settings.funds[i];fund.prices=H.seriesEncode(r.series);fund.pricesUpdated=H.today();Store.touchFirm();
+      banner={cls:'good',html:`Imported ${r.series.length} monthly prices for ${esc(fund.name||'the fund')} from the <b>${esc(r.column)}</b> column (${fmtYM(r.series[0].d)} to ${fmtYM(r.series[r.series.length-1].d)})${r.skipped?`; ${r.skipped} row(s) skipped`:''}.`}}
+      catch(err){banner={cls:'bad',html:esc(err.message)}}render()};inp.click();return}
+  if(act==='fundFetch'){const i=+b.dataset.idx;const fund=Store.firm.settings.funds[i];b.disabled=true;b.textContent='Fetching…';
+    try{const j=await Store.api('GET','prices?symbol='+encodeURIComponent(fund.ticker));const r=H.parsePriceCSV(j.csv);fund.prices=H.seriesEncode(r.series);fund.pricesUpdated=H.today();if(!fund.source)fund.source='Alpha Vantage, adjusted close';Store.touchFirm();
+      banner={cls:'good',html:`Fetched ${r.series.length} monthly prices for ${esc(fund.name||fund.ticker)}.`}}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
+  if(act==='perfPick'){const n=b.dataset.name;PERF.sel.has(n)?PERF.sel.delete(n):PERF.sel.size<5&&PERF.sel.add(n);PERF.touched=true;render();return}
+  if(act==='perfPeriod'){PERF.period=b.dataset.v;render();return}
   if(act==='scenSel'){SCEN_SEL=b.dataset.id;render();return}
   if(act==='rtqStart'){const r=Object.assign(H.defaults('rtq'),{owner:b.dataset.ref,by:Store.user||''});S.rtq.push(r);logChange('rtq.count',S.rtq.length-1,S.rtq.length);OPEN.add('rtq:'+(S.rtq.length-1));Store.touch();render();return}
   if(act==='loaLetter'){e.stopPropagation();LOA_IDX=+b.dataset.idx;VIEW='letter';banner=null;render();window.scrollTo({top:0});return}

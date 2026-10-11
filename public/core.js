@@ -388,6 +388,17 @@ const SCHEMA = {
     {k:'portal',l:'Adviser portal / Origo',t:'text',h:'Many providers accept LOAs through their adviser site or Origo Options'},
     {k:'notes',l:'Notes',t:'text',w:1},
   ]},
+  funds:{title:'Fund library',sheet:'Funds',item:'fund',desc:'Funds and benchmarks the firm uses, with monthly price history for performance charts. Import history from a CSV download (FT, Trustnet, Morningstar, the provider\u2019s factsheet, Yahoo).',fields:[
+    {k:'name',l:'Fund or benchmark name',t:'text'},
+    {k:'isin',l:'ISIN',t:'text'},
+    {k:'ticker',l:'Exchange ticker',t:'text',h:'For exchange-listed funds, e.g. VWRL.LON. Used by the optional automatic price fetch.'},
+    {k:'assetClass',l:'Main asset class',t:'sel',o:ASSET_CLASSES.map(([k,l])=>[k,l])},
+    {k:'ocf',l:'Ongoing charge %',t:'pct'},
+    {k:'isBenchmark',l:'This is a benchmark or index',t:YN},
+    {k:'source',l:'Price data source',t:'text',h:'Shown under every chart, e.g. "FT.com, accumulation units, GBP"'},
+    {k:'prices',l:'Monthly prices',t:'series'},
+    {k:'pricesUpdated',l:'Prices last updated',t:'date'},
+  ]},
   compliance:{single:true,title:'Onboarding and compliance',sheet:'Compliance',desc:'The relationship, disclosures, enhanced due diligence and the four-eyes sign-off. Identity and screening for each adult are recorded under People.',groups:[
     {t:'The relationship',fields:[
       {k:'serviceType',l:'Service',t:'sel',o:['Ongoing advice','Discretionary management','One-off financial plan'],d:'Ongoing advice'},
@@ -465,16 +476,71 @@ const fieldsOf = s => s.groups ? s.groups.flatMap(g=>g.fields) : s.fields;
    ========================================================= */
 function today(){return new Date().toISOString().slice(0,10)}
 function defaults(key){const o={};for(const f of fieldsOf(SCHEMA[key])){if(f.d!==undefined)o[f.k]=typeof f.d==='function'?f.d():f.d;else o[f.k]=f.t===YN?false:'';}return o}
-const FIRM_SINGLES=['firm'],FIRM_COLS=['team','providers'];
+const FIRM_SINGLES=['firm'],FIRM_COLS=['team','providers','funds'];
 const DEFAULT_PROVIDERS=[['Aviva','Pension'],['Scottish Widows','Pension'],['Royal London','Pension'],['Legal & General','Pension'],['Aegon','Platform'],['Standard Life','Pension'],['Prudential (M&G)','Pension'],['Phoenix Life','Pension'],['Canada Life','Insurer'],['Zurich','Pension'],['abrdn','Platform'],['Quilter','Platform'],['Transact','Platform'],['Nucleus','Platform'],['Fidelity','Platform'],['AJ Bell','Platform'],['Hargreaves Lansdown','Platform'],['NEST','Pension'],["The People's Pension",'Pension'],['NOW: Pensions','Pension']];
-function firmBlank(){const f={};f.firm=defaults('firm');f.team=[];f.providers=DEFAULT_PROVIDERS.map(([name,kind])=>Object.assign(defaults('providers'),{name,kind}));return f}
+function firmBlank(){const f={};f.firm=defaults('firm');for(const c of FIRM_COLS)f[c]=[];f.providers=DEFAULT_PROVIDERS.map(([name,kind])=>Object.assign(defaults('providers'),{name,kind}));return f}
 function firmNormalise(x){x=x&&typeof x==='object'?x:{};const out=firmBlank();out.firm=Object.assign(defaults('firm'),pick(x.firm,'firm'));
   for(const c of FIRM_COLS)if(Array.isArray(x[c]))out[c]=x[c].map(r=>Object.assign(defaults(c),pick(r,c)));return out}
-function firmDiff(a,b){const flat=x=>{const o={};for(const f of fieldsOf(SCHEMA.firm))o['firm.'+f.k]=x.firm[f.k];for(const c of FIRM_COLS)x[c].forEach((r,i)=>{for(const f of fieldsOf(SCHEMA[c]))o[`${c}[${i}].${f.k}`]=r[f.k]});return o};
+function firmDiff(a,b){const flat=x=>{const o={};for(const f of fieldsOf(SCHEMA.firm))o['firm.'+f.k]=x.firm[f.k];for(const c of FIRM_COLS)x[c].forEach((r,i)=>{for(const f of fieldsOf(SCHEMA[c]))o[`${c}[${i}].${f.k}`]=f.t==='series'?seriesLabel(r[f.k]):r[f.k]});return o};
   const A=flat(firmNormalise(a)),B=flat(firmNormalise(b));const ch=[];const e=v=>v===undefined||v===''||v===false?'':v;
   for(const k of new Set([...Object.keys(A),...Object.keys(B)]))if(String(e(A[k]))!==String(e(B[k])))ch.push({field:k,from:e(A[k]),to:e(B[k])});
   for(const c of FIRM_COLS){const n=firmNormalise(a)[c].length,m=firmNormalise(b)[c].length;if(n!==m)ch.push({field:c+'.count',from:n,to:m})}
   return ch}
+/* ---------- price history and performance ----------
+   Prices are stored as "YYYY-MM:price;YYYY-MM:price" (month-end, ascending) so a fund record stays small. */
+function seriesDecode(str){if(!str)return [];return String(str).split(';').map(x=>{const [d,p]=x.split(':');return {d,p:+p}}).filter(x=>/^\d{4}-\d{2}$/.test(x.d)&&x.p>0)}
+function seriesEncode(arr){return arr.map(x=>`${x.d}:${+x.p.toPrecision(8)}`).join(';')}
+function seriesLabel(str){const a=seriesDecode(str);return a.length?`${a.length} monthly prices ${a[0].d} to ${a[a.length-1].d}`:''}
+/* Read a price CSV. Finds a date column and a price column (Adj Close, Close, NAV, Price, Bid, Mid…) by header,
+   accepts ISO, UK (dd/mm/yyyy) and "12 Sep 2025" dates, keeps the last price in each month. */
+function parsePriceCSV(text){
+  const lines=String(text||'').replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());if(lines.length<2)throw new Error('The file has no price rows.');
+  const split=l=>{const out=[];let cur='',q=false;for(const ch of l){if(ch==='"'){q=!q;continue}if(!q&&(ch===','||ch===';'||ch==='\t')){out.push(cur.trim());cur='';continue}cur+=ch}out.push(cur.trim());return out};
+  let hi=lines.findIndex(l=>/date/i.test(l));if(hi<0)hi=0;const head=split(lines[hi]).map(h=>h.toLowerCase());
+  const di=head.findIndex(h=>/date|timestamp/.test(h));
+  const prefs=[/adj(usted)?[ _]?close/,/^close$|closing/,/nav/,/^price$|price \(|mid|bid/,/value|price/];
+  let pi=-1;for(const re of prefs){pi=head.findIndex((h,i)=>i!==di&&re.test(h));if(pi>=0)break}
+  if(di<0||pi<0)throw new Error('Could not find a date column and a price column. Expected headers like "Date" and "Close" or "Price".');
+  const MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  const pd=s=>{s=String(s).trim().replace(/^(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+/i,'');let m;
+    if((m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s)))return [+m[1],+m[2],+m[3]];
+    if((m=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/.exec(s)))return [m[3].length===2?2000+ +m[3]:+m[3],+m[2],+m[1]];
+    if((m=/^(\d{1,2})[ -]([A-Za-z]{3})[a-z]*[ -,]*(\d{4})$/.exec(s))&&MON[m[2].toLowerCase()])return [+m[3],MON[m[2].toLowerCase()],+m[1]];
+    if((m=/^([A-Za-z]{3})[a-z]* (\d{1,2}),? (\d{4})$/.exec(s))&&MON[m[1].toLowerCase()])return [+m[3],MON[m[1].toLowerCase()],+m[2]];
+    return null};
+  const byMonth=new Map();let bad=0;
+  for(const l of lines.slice(hi+1)){const c=split(l);const dt=pd(c[di]);const pr=parseFloat(String(c[pi]||'').replace(/[£$€,\s]/g,''));
+    if(!dt||!(pr>0)){bad++;continue}const key=`${dt[0]}-${String(dt[1]).padStart(2,'0')}`;const cur=byMonth.get(key);if(!cur||dt[2]>=cur.day)byMonth.set(key,{day:dt[2],p:pr})}
+  const out=[...byMonth.entries()].map(([d,v])=>({d,p:v.p})).sort((a,b)=>a.d.localeCompare(b.d));
+  if(out.length<2)throw new Error('Fewer than two months of prices were found.');
+  return {series:out,rows:lines.length-hi-1,skipped:bad,column:head[pi]};
+}
+const monthsBetween=(a,b)=>{const [y1,m1]=a.split('-').map(Number),[y2,m2]=b.split('-').map(Number);return (y2-y1)*12+(m2-m1)};
+const addMonthsYM=(ym,n)=>{let [y,m]=ym.split('-').map(Number);m+=n;y+=Math.floor((m-1)/12);m=((m-1)%12+12)%12+1;return `${y}-${String(m).padStart(2,'0')}`};
+/* Performance from monthly prices. All returns are price returns on the series supplied, so use accumulation units or
+   total-return indices. Annualised volatility = monthly standard deviation × √12. */
+function fundPerf(arr){
+  if(arr.length<2)return null;const last=arr[arr.length-1];const at=new Map(arr.map(x=>[x.d,x.p]));
+  const back=n=>at.get(addMonthsYM(last.d,-n));
+  const cum={};for(const [k,n] of [['1y',12],['3y',36],['5y',60],['10y',120]]){const p=back(n);cum[k]=p?last.p/p-1:null}
+  const ann={};for(const [k,n] of [['3y',3],['5y',5],['10y',10]]){const c=cum[k];ann[k]=c==null?null:Math.pow(1+c,1/n)-1}
+  const discrete=[];for(let i=0;i<5;i++){const end=addMonthsYM(last.d,-12*i),start=addMonthsYM(last.d,-12*(i+1));const pe=at.get(end),ps=at.get(start);discrete.push({start,end,r:pe&&ps?pe/ps-1:null})}
+  const rets=[];for(let i=1;i<arr.length;i++)if(monthsBetween(arr[i-1].d,arr[i].d)===1)rets.push(arr[i].p/arr[i-1].p-1);
+  const mean=rets.reduce((a,b)=>a+b,0)/(rets.length||1);const sd=Math.sqrt(rets.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,rets.length-1));
+  let peak=arr[0].p,mdd=0;for(const x of arr){peak=Math.max(peak,x.p);mdd=Math.min(mdd,x.p/peak-1)}
+  return {first:arr[0].d,last:last.d,cum,ann,discrete,vol:rets.length>11?sd*Math.sqrt(12):null,maxDD:mdd,since:last.p/arr[0].p-1};
+}
+/* Growth of £10,000 for several series over a common window ending at the latest shared month */
+function growthCompare(list,months){
+  const ok=list.filter(x=>x.series.length>1);if(!ok.length)return null;
+  const end=ok.map(x=>x.series[x.series.length-1].d).sort()[0];
+  let start=ok.map(x=>x.series[0].d).sort().pop();if(months){const s=addMonthsYM(end,-months);if(s>start)start=s}
+  if(start>=end)return null;const n=monthsBetween(start,end);const dates=Array.from({length:n+1},(_,i)=>addMonthsYM(start,i));
+  const lines=ok.map(x=>{const m=new Map(x.series.map(y=>[y.d,y.p]));let b=m.get(start);if(!b)return null;let lastP=b;
+    return {...x,values:dates.map(d=>{const p=m.get(d);if(p)lastP=p;return 10000*lastP/b})}}).filter(Boolean);
+  return {start,end,dates,lines};
+}
+
 /* Open tasks for the firm-wide board, carried in each household's list summary */
 function openTasks(s){return (s.actions||[]).filter(taskOpen).map(t=>({description:t.description||'',owner:t.owner||'',priority:t.priority||'Normal',due:t.due||'',status:t.status||''})).slice(0,200)}
 function blank(){const s={isSample:false};for(const k of SINGLES)s[k]=defaults(k);for(const c of COLS)s[c]=[];s.models=defaultModels();return s}
@@ -1143,7 +1209,7 @@ function diff(before,after){const a=flatten(before||blank()),b=flatten(after);co
   for(const c of COLS){const n=cnt(c);if(n.a!==n.b)ch.push({field:`${c}.count`,from:n.b,to:n.a})}
   return ch}
 
-return {SCHEMA,COLS,SINGLES,YN,ROLES,ATR_Q,ATR_BANDS,LOSS_Q,CFL_Q,KE_Q,rtqScore,rtqResult,TASK_STATUS,taskOpen,FIRM_SINGLES,FIRM_COLS,firmBlank,firmNormalise,firmDiff,openTasks,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
+return {SCHEMA,COLS,SINGLES,YN,ROLES,seriesDecode,seriesEncode,seriesLabel,parsePriceCSV,fundPerf,growthCompare,addMonthsYM,ATR_Q,ATR_BANDS,LOSS_Q,CFL_Q,KE_Q,rtqScore,rtqResult,TASK_STATUS,taskOpen,FIRM_SINGLES,FIRM_COLS,firmBlank,firmNormalise,firmDiff,openTasks,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
   fieldsOf,fieldLabel,defaults,blank,normalise,sample,bind,coerce,optList,today,N,has,yes,
   validNino,validPostcode,validEmail,parseDate,addYears,addMonths,addDays,flatten,diff,normKey};
 });
