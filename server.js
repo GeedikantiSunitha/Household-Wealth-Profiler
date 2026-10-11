@@ -99,6 +99,17 @@ async function readAudit(id) {
   try { text = await fsp.readFile(path.join(hhDir(id), 'audit.log'), 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   return text.split('\n').filter(Boolean).map(l => JSON.parse(open(l))).reverse();
 }
+// Firm settings: one record for the firm (details, team, providers), versioned and audited like a household
+const firmDir = () => hhDir('firm'); // beside the households; the list only reads UUID folders
+async function readFirm() {
+  try { return JSON.parse(open(await fsp.readFile(path.join(firmDir(), 'current.json'), 'utf8'))); }
+  catch (e) { if (e.code === 'ENOENT') return { version: 0, settings: HWP.firmBlank(), updatedAt: '', updatedBy: '' }; throw e; }
+}
+async function writeFirm(rec) {
+  const text = seal(JSON.stringify(rec));
+  await writeAtomic(path.join(firmDir(), 'versions', `${String(rec.version).padStart(6, '0')}.json`), text);
+  await writeAtomic(path.join(firmDir(), 'current.json'), text);
+}
 // One write at a time per household
 const locks = new Map();
 function withLock(id, fn) {
@@ -111,7 +122,7 @@ function summarise(rec) {
   const s = HWP.normalise(rec.state);
   let stage = '', rating = '', nextReview = '', blockers = 0, due = '', overdue = 0;
   try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview; blockers = O.blockerCount; const R = E.reviews(O); due = R.nextDue; overdue = R.overdue; } catch (e) { stage = 'Error'; }
-  return { id: rec.id, name: s.household.name, reference: s.household.reference, stage, rating, nextReview, blockers, due, overdue, version: rec.version, updatedAt: rec.updatedAt, updatedBy: rec.updatedBy };
+  return { id: rec.id, name: s.household.name, reference: s.household.reference, stage, rating, nextReview, blockers, due, overdue, tasks: HWP.openTasks(s), version: rec.version, updatedAt: rec.updatedAt, updatedBy: rec.updatedBy };
 }
 
 /* ---------- authentication ---------- */
@@ -200,6 +211,24 @@ async function handle(req, res) {
   }
 
   if (p === '/api/me' && req.method === 'GET') return send(res, 200, { user, encrypted: !!KEY });
+
+  if (p === '/api/firm' && req.method === 'GET') return send(res, 200, await readFirm());
+  if (p === '/api/firm/audit' && req.method === 'GET') return send(res, 200, (await readAudit('firm')).slice(0, 5000));
+  if (p === '/api/firm' && req.method === 'PUT') {
+    const body = await readBody(req);
+    return withLock('firm', async () => {
+      const rec = await readFirm();
+      if (+body.version !== rec.version) return send(res, 409, { error: 'Firm settings were changed by someone else', version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt });
+      const settings = HWP.firmNormalise(body.settings);
+      const now = new Date().toISOString();
+      const changes = HWP.firmDiff(rec.settings, settings).map(c => ({ ts: now, user, ...c, version: rec.version + 1 }));
+      if (!changes.length) return send(res, 200, { version: rec.version, changes: 0 });
+      const next = { version: rec.version + 1, settings, updatedAt: now, updatedBy: user };
+      await writeFirm(next);
+      await appendAudit('firm', changes);
+      return send(res, 200, { version: next.version, changes: changes.length });
+    });
+  }
 
   if (p === '/api/households' && req.method === 'GET') {
     let ids = [];

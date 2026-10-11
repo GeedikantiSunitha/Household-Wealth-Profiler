@@ -95,6 +95,25 @@ test('there is no way to delete a client file', async () => {
   assert.ok(fs.existsSync(path.join(DATA, 'households', id, 'current.json')));
 });
 
+test('firm settings are versioned, audited, encrypted on disk and kept out of the household list', async () => {
+  const r0 = await (await fetch(BASE + '/api/firm', { headers: SAM })).json();
+  assert.equal(r0.version, 0); assert.equal(r0.settings.providers.length, 20);
+  r0.settings.firm.name = 'Alder Wealth LLP'; r0.settings.team.push({ name: 'Alex Paraplanner', role: 'Paraplanner', active: true });
+  const put = await fetch(BASE + '/api/firm', { method: 'PUT', headers: { ...SAM, ...J }, body: JSON.stringify({ version: 0, settings: r0.settings }) });
+  assert.equal(put.status, 200); assert.equal((await put.json()).version, 1);
+  const stale = await fetch(BASE + '/api/firm', { method: 'PUT', headers: { ...CHRIS, ...J }, body: JSON.stringify({ version: 0, settings: r0.settings }) });
+  assert.equal(stale.status, 409);
+  const r1 = await (await fetch(BASE + '/api/firm', { headers: CHRIS })).json();
+  assert.equal(r1.settings.team[0].name, 'Alex Paraplanner'); assert.equal(r1.updatedBy, 'sam');
+  const audit = await (await fetch(BASE + '/api/firm/audit', { headers: CHRIS })).json();
+  assert.ok(audit.some(a => a.field === 'firm.name' && a.to === 'Alder Wealth LLP'));
+  const raw = fs.readFileSync(path.join(DATA, 'households', 'firm', 'current.json'), 'utf8');
+  assert.match(raw, /^enc:v1:/); assert.doesNotMatch(raw, /Alder/);
+  const list = await (await fetch(BASE + '/api/households', { headers: SAM })).json();
+  assert.ok(list.every(h => h.id !== 'firm'));
+  assert.ok(list.every(h => Array.isArray(h.tasks)));
+});
+
 test('behind a proxy, a lockout applies only to the client address the proxy reports', async () => {
   const from = ip => ({ 'X-Client-IP': ip });
   for (let i = 0; i < 10; i++) await fetch(BASE + '/api/me', { headers: { ...auth('sam', 'nope' + i), ...from('203.0.113.9') } });

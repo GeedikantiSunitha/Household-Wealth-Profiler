@@ -301,3 +301,8 @@ tr.sub td:first-child{padding-left:22px}
 .gate-err{color:var(--bad);min-height:1.3em;margin:8px 0 0;font-size:13px}
 .gate-qr{width:180px;height:180px;background:#fff;padding:8px;border-radius:6px;margin:10px 0 4px}
 .gate code{font-family:var(--f-mono);word-break:break-all}
+
+/* Tasks board: person tiles act as filters */
+.kpi-btn{text-align:left;cursor:pointer;font:inherit;color:inherit;transition:border-color .12s,box-shadow .12s}
+.kpi-btn:hover{border-color:var(--accent)}
+.kpi-btn.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}

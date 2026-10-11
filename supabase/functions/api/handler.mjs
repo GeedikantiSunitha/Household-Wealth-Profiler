@@ -32,9 +32,9 @@ function summarise(HWP, state) {
   const s = HWP.normalise(state);
   let stage = '', rating = '', nextReview = '', blockers = 0, due = '', overdue = 0;
   try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview || ''; blockers = O.blockerCount; const R = E.reviews(O); due = R.nextDue; overdue = R.overdue; } catch (e) { stage = 'Error'; }
-  return { name: s.household.name || '', reference: s.household.reference || '', stage, rating, nextReview, blockers, due, overdue };
+  return { name: s.household.name || '', reference: s.household.reference || '', stage, rating, nextReview, blockers, due, overdue, tasks: HWP.openTasks(s) };
 }
-const listRow = r => ({ id: r.id, name: r.name, reference: r.reference, stage: r.stage, rating: r.rating, nextReview: r.next_review, blockers: r.blockers, due: r.review_due, overdue: r.review_overdue, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by });
+const listRow = r => ({ id: r.id, name: r.name, reference: r.reference, stage: r.stage, rating: r.rating, nextReview: r.next_review, blockers: r.blockers, due: r.review_due, overdue: r.review_overdue, tasks: r.open_tasks || [], version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by });
 const memberRow = m => ({ userId: m.user_id, email: m.email, name: m.display_name, role: m.role, active: m.active, createdAt: m.created_at });
 
 export async function handle(req, deps) {
@@ -67,6 +67,22 @@ async function route(req, { HWP, verify, db, requireMfa, inviteRedirect }, heade
   const M = req.method;
 
   if (p === '/me' && M === 'GET') return ok({ user, email: me.email, role: me.role, firm: me.firm_name, seats: me.seats, encrypted: true });
+
+  /* ---------- firm settings: details, team and providers ---------- */
+  if (p === '/firm' && M === 'GET') { const f = await db.getFirm(firm); return ok({ version: f.settings_version, settings: HWP.firmNormalise(f.settings && f.settings.firm ? f.settings : null), updatedAt: f.settings_updated_at, updatedBy: f.settings_updated_by }); }
+  if (p === '/firm/audit' && M === 'GET') return ok((await db.firmAudit(firm, 5000)).map(a => ({ ts: a.ts, user: a.user_name, field: a.field, from: a.from_value, to: a.to_value, version: a.version })));
+  if (p === '/firm' && M === 'PUT') {
+    if (!admin) throw new HttpError(403, 'Only a firm administrator can change firm settings');
+    const body = await readBody(req);
+    const f = await db.getFirm(firm);
+    const expected = +body.version;
+    if (expected !== f.settings_version) throw new HttpError(409, 'Firm settings were changed by someone else', { version: f.settings_version, updatedBy: f.settings_updated_by, updatedAt: f.settings_updated_at });
+    const settings = HWP.firmNormalise(body.settings);
+    const changes = HWP.firmDiff(f.settings && f.settings.firm ? f.settings : HWP.firmBlank(), settings).map(c => ({ field: c.field, from: String(c.from ?? ''), to: String(c.to ?? '') }));
+    const r = await db.saveFirm({ firm, expected, settings, changes, userId: claims.userId, user });
+    if (r.status === 409) throw new HttpError(409, 'Firm settings were changed by someone else', { version: r.version, updatedBy: r.updatedBy, updatedAt: r.updatedAt });
+    return ok({ version: r.version, changes: r.changes });
+  }
 
   if (p === '/households' && M === 'GET') return ok((await db.listHouseholds(firm)).map(listRow));
   if (p === '/households' && M === 'POST') {

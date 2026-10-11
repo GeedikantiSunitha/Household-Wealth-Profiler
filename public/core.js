@@ -16,6 +16,8 @@
    the Excel template, import, export and the audit trail.
    ========================================================= */
 const YN = 'bool';
+const TASK_STATUS=['Not started','In progress','Waiting on client','Waiting on provider','Done','Cancelled'];
+const taskOpen=t=>!['Done','Cancelled'].includes(t.status);
 /* Eight UK asset classes for mandates and holdings; each rolls up to the four the balance sheet uses */
 const ASSET_CLASSES=[['ukEq','UK equity','eq'],['glEq','Global developed equity','eq'],['emEq','Emerging market equity','eq'],['gilts','Gilts and index-linked','bd'],['corp','Corporate bonds','bd'],['prop','Property','al'],['alt','Alternatives','al'],['cash','Cash','cs']];
 const ROLLUP=[['eq','Equities'],['bd','Bonds'],['al','Property and alternatives'],['cs','Cash']];
@@ -212,13 +214,15 @@ const SCHEMA = {
     {k:'by',l:'Recorded by',t:'text'},
     {k:'summary',l:'Summary',t:'area',w:1},
   ]},
-  actions:{title:'Actions',sheet:'Actions',item:'action',desc:'Things the firm has agreed to do for this household, with an owner and a due date.',fields:[
+  actions:{title:'Tasks',sheet:'Tasks',item:'task',desc:'Work for this household, assigned to a named team member with a due date and status. Every task also appears on the firm-wide Tasks board.',fields:[
     {k:'created',l:'Raised on',t:'date',d:today},
-    {k:'description',l:'Action',t:'text',w:1},
-    {k:'owner',l:'Owner',t:'text'},
+    {k:'description',l:'Task',t:'text',w:1},
+    {k:'owner',l:'Assigned to',t:'team'},
+    {k:'priority',l:'Priority',t:'sel',o:['High','Normal','Low'],d:'Normal'},
     {k:'due',l:'Due',t:'date'},
-    {k:'status',l:'Status',t:'sel',o:['Open','Done','Cancelled'],d:'Open'},
+    {k:'status',l:'Status',t:'sel',o:TASK_STATUS,d:'Not started'},
     {k:'doneOn',l:'Completed on',t:'date'},
+    {k:'notes',l:'Notes',t:'area',w:1},
   ]},
   complaints:{title:'Complaints',sheet:'Complaints',item:'complaint',desc:'Complaints from this household, handled under the FCA DISP rules: acknowledge promptly and send a final response within 8 weeks.',fields:[
     {k:'received',l:'Received on',t:'date',d:today},
@@ -258,6 +262,29 @@ const SCHEMA = {
       {k:'reviewedOn',l:'Mandate last reviewed',t:'date',h:'The mandate is reviewed at least annually'},
       {k:'notes',l:'Notes',t:'area',w:1},
     ]},
+  ]},
+  firm:{single:true,title:'Firm details',sheet:'Firm',desc:'Used on letters of authority and client documents.',fields:[
+    {k:'name',l:'Firm name',t:'text'},
+    {k:'frn',l:'FCA firm reference number',t:'text',h:'Shown on letters: providers check it against the FCA register'},
+    {k:'address',l:'Address',t:'area',w:1},
+    {k:'phone',l:'Phone',t:'text'},
+    {k:'email',l:'Email for provider correspondence',t:'text'},
+    {k:'website',l:'Website',t:'text'},
+    {k:'signatory',l:'Default signatory on letters',t:'text'},
+  ]},
+  team:{title:'Team members',sheet:'Team',item:'team member',desc:'Everyone tasks can be assigned to. This is the firm\u2019s working team, separate from sign-in accounts.',fields:[
+    {k:'name',l:'Name',t:'text'},
+    {k:'role',l:'Role',t:'sel',o:['Adviser','Paraplanner','Administrator','Compliance','Investment manager','Other'],d:'Adviser'},
+    {k:'email',l:'Email',t:'text'},
+    {k:'active',l:'Active',t:YN,d:true},
+  ]},
+  providers:{title:'Providers',sheet:'Providers',item:'provider',desc:'Pension, investment and insurance providers that letters of authority are sent to. Check each address against the provider\u2019s current adviser guidance.',fields:[
+    {k:'name',l:'Provider',t:'text'},
+    {k:'kind',l:'Type',t:'sel',o:['Pension','Platform','Insurer','Investment manager','Bank','Other'],d:'Pension'},
+    {k:'address',l:'Postal address for letters of authority',t:'area',w:1},
+    {k:'email',l:'Email for letters of authority',t:'text'},
+    {k:'portal',l:'Adviser portal / Origo',t:'text',h:'Many providers accept LOAs through their adviser site or Origo Options'},
+    {k:'notes',l:'Notes',t:'text',w:1},
   ]},
   compliance:{single:true,title:'Onboarding and compliance',sheet:'Compliance',desc:'The relationship, disclosures, enhanced due diligence and the four-eyes sign-off. Identity and screening for each adult are recorded under People.',groups:[
     {t:'The relationship',fields:[
@@ -336,12 +363,25 @@ const fieldsOf = s => s.groups ? s.groups.flatMap(g=>g.fields) : s.fields;
    ========================================================= */
 function today(){return new Date().toISOString().slice(0,10)}
 function defaults(key){const o={};for(const f of fieldsOf(SCHEMA[key])){if(f.d!==undefined)o[f.k]=typeof f.d==='function'?f.d():f.d;else o[f.k]=f.t===YN?false:'';}return o}
+const FIRM_SINGLES=['firm'],FIRM_COLS=['team','providers'];
+const DEFAULT_PROVIDERS=[['Aviva','Pension'],['Scottish Widows','Pension'],['Royal London','Pension'],['Legal & General','Pension'],['Aegon','Platform'],['Standard Life','Pension'],['Prudential (M&G)','Pension'],['Phoenix Life','Pension'],['Canada Life','Insurer'],['Zurich','Pension'],['abrdn','Platform'],['Quilter','Platform'],['Transact','Platform'],['Nucleus','Platform'],['Fidelity','Platform'],['AJ Bell','Platform'],['Hargreaves Lansdown','Platform'],['NEST','Pension'],["The People's Pension",'Pension'],['NOW: Pensions','Pension']];
+function firmBlank(){const f={};f.firm=defaults('firm');f.team=[];f.providers=DEFAULT_PROVIDERS.map(([name,kind])=>Object.assign(defaults('providers'),{name,kind}));return f}
+function firmNormalise(x){x=x&&typeof x==='object'?x:{};const out=firmBlank();out.firm=Object.assign(defaults('firm'),pick(x.firm,'firm'));
+  for(const c of FIRM_COLS)if(Array.isArray(x[c]))out[c]=x[c].map(r=>Object.assign(defaults(c),pick(r,c)));return out}
+function firmDiff(a,b){const flat=x=>{const o={};for(const f of fieldsOf(SCHEMA.firm))o['firm.'+f.k]=x.firm[f.k];for(const c of FIRM_COLS)x[c].forEach((r,i)=>{for(const f of fieldsOf(SCHEMA[c]))o[`${c}[${i}].${f.k}`]=r[f.k]});return o};
+  const A=flat(firmNormalise(a)),B=flat(firmNormalise(b));const ch=[];const e=v=>v===undefined||v===''||v===false?'':v;
+  for(const k of new Set([...Object.keys(A),...Object.keys(B)]))if(String(e(A[k]))!==String(e(B[k])))ch.push({field:k,from:e(A[k]),to:e(B[k])});
+  for(const c of FIRM_COLS){const n=firmNormalise(a)[c].length,m=firmNormalise(b)[c].length;if(n!==m)ch.push({field:c+'.count',from:n,to:m})}
+  return ch}
+/* Open tasks for the firm-wide board, carried in each household's list summary */
+function openTasks(s){return (s.actions||[]).filter(taskOpen).map(t=>({description:t.description||'',owner:t.owner||'',priority:t.priority||'Normal',due:t.due||'',status:t.status||''})).slice(0,200)}
 function blank(){const s={isSample:false};for(const k of SINGLES)s[k]=defaults(k);for(const c of COLS)s[c]=[];s.models=defaultModels();return s}
 function mk(key,o){return Object.assign(defaults(key),o)}
 function normalise(s){
   s=s&&typeof s==='object'?s:{};const out=blank();out.isSample=!!s.isSample;
   for(const k of SINGLES)out[k]=Object.assign(defaults(k),pick(s[k],k));
   for(const c of COLS)out[c]=(Array.isArray(s[c])?s[c]:[]).map(r=>Object.assign(defaults(c),pick(r,c)));
+  for(const t of out.actions)if(t.status==='Open'||!TASK_STATUS.includes(t.status))t.status=t.status==='Done'||t.status==='Cancelled'?t.status:'Not started';
   if(!Array.isArray(s.models))out.models=defaultModels(); // files saved before model portfolios existed
   if(Array.isArray(s.audit))out.audit=s.audit.slice(-2000);
   return out;
@@ -390,8 +430,9 @@ function sample(){
   s.contacts=[
     mk('contacts',{date:addDays(today(),-9),type:'Meeting',with:'James and Priya Harrington',by:'Sam Adviser',summary:'Discovery meeting at the office. Walked through objectives, the LLP income and the plan for the Leeds flat.'})];
   s.actions=[
-    mk('actions',{created:addDays(today(),-9),description:'Obtain proof of address for Priya',owner:'Sam Adviser',due:addDays(today(),5)}),
-    mk('actions',{created:addDays(today(),-9),description:'Send ex-ante costs and charges disclosure',owner:'Sam Adviser',due:addDays(today(),-2)})];
+    mk('actions',{created:addDays(today(),-9),description:'Obtain proof of address for Priya',owner:'Alex Paraplanner',priority:'High',status:'Waiting on client',due:addDays(today(),5)}),
+    mk('actions',{created:addDays(today(),-9),description:'Send ex-ante costs and charges disclosure',owner:'Sam Adviser',priority:'High',due:addDays(today(),-2)}),
+    mk('actions',{created:addDays(today(),-9),description:'Request pension values from Aviva and Scottish Widows',owner:'Jordan Administrator',status:'In progress',due:addDays(today(),14)})];
   s.accounts=[
     mk('accounts',{owner:'JOINT',wrapper:'Current account',provider:'High-street bank',value:25000,cs:100,yield:0.5}),
     mk('accounts',{owner:'P1',wrapper:'Cash savings',provider:'Easy-access saver',value:60000,cs:100,yield:4}),
@@ -705,7 +746,7 @@ function reviews(O){
     if(m.poaDate)add('Proof of address refresh',addMonths(m.poaDate,3),nm,'members','Must be dated within 3 months');
     if(m.screenDate)add('Screening refresh',addMonths(m.screenDate,3),nm,'members','Sanctions, PEP and adverse media within 3 months')}
   {const b=S.mandate.reviewedOn||S.mandate.agreedOn;if(b)add('Mandate review',addYears(b,1),'','mandate','Annual review of the agreed mandate')}
-  for(const a of S.actions)if(a.status==='Open'&&a.due)add('Action: '+(a.description||''),a.due,a.owner,'actions','');
+  for(const a of S.actions)if(taskOpen(a)&&a.due)add('Action: '+(a.description||''),a.due,a.owner,'actions','');
   for(const e of S.contacts)if(e.type==='Life event'&&e.date&&(!lastReview||e.date>lastReview))add('Reassess suitability after life event',e.date,e.with,'contacts',e.summary||'');
   for(const k of S.complaints)if(k.received&&!['Final response sent','Referred to FOS','Closed'].includes(k.stage))add('Complaint: final response due',addDays(k.received,56),'','complaints',(k.summary||'').slice(0,100));
   items.sort((a,b)=>a.due.localeCompare(b.due)||a.type.localeCompare(b.type));
@@ -906,7 +947,7 @@ function diff(before,after){const a=flatten(before||blank()),b=flatten(after);co
   for(const c of COLS){const n=cnt(c);if(n.a!==n.b)ch.push({field:`${c}.count`,from:n.b,to:n.a})}
   return ch}
 
-return {SCHEMA,COLS,SINGLES,YN,ROLES,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
+return {SCHEMA,COLS,SINGLES,YN,ROLES,TASK_STATUS,taskOpen,FIRM_SINGLES,FIRM_COLS,firmBlank,firmNormalise,firmDiff,openTasks,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
   fieldsOf,fieldLabel,defaults,blank,normalise,sample,bind,coerce,optList,today,N,has,yes,
   validNino,validPostcode,validEmail,parseDate,addYears,addMonths,addDays,flatten,diff,normKey};
 });

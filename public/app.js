@@ -35,7 +35,7 @@ const CFG=window.HWP_CONFIG||{};
 const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,cloud:null,role:'',firm:'',seats:0,
   async init(){
     if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');
-      Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firm:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
+      Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firmName:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
     try{const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});
       if(r.ok&&(r.headers.get('content-type')||'').includes('json')){const j=await r.json();if(j&&j.user){this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;return}}}catch(e){}
     this.mode='local';try{this.user=localStorage.getItem(LS_USER)||''}catch(e){this.user=''}
@@ -49,6 +49,16 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     if(this.cloud&&(r.status===401||(j&&j.code==='mfa_required'))){location.reload();return new Promise(()=>{})}
     if(!r.ok){const err=new Error((j&&j.error)||('Request failed ('+r.status+')'));err.status=r.status;err.body=j;throw err}return j},
   async list(){return this.api('GET','households')},
+  firm:{version:0,settings:null,dirty:false,saving:false,err:null},
+  async loadFirm(){if(this.mode==='server'){try{const j=await this.api('GET','firm');this.firm.version=j.version;this.firm.settings=H.firmNormalise(j.settings);return}catch(e){}}
+    let x=null;try{x=JSON.parse(localStorage.getItem('hwp-firm')||'null')}catch(e){}this.firm.settings=H.firmNormalise(x)},
+  touchFirm(){if(this.mode!=='server'){try{localStorage.setItem('hwp-firm',JSON.stringify(this.firm.settings))}catch(e){}return}
+    this.firm.dirty=true;saveStatus();clearTimeout(this.ft);this.ft=setTimeout(()=>this.flushFirm(),1000)},
+  async flushFirm(){const F=this.firm;if(this.mode!=='server'||!F.dirty||F.saving)return;F.saving=true;F.dirty=false;
+    try{const j=await this.api('PUT','firm',{version:F.version,settings:F.settings});F.version=j.version;F.err=null}
+    catch(e){F.err=e.status===409?'conflict':e.status===403?'forbidden':'failed';if(F.err==='failed')F.dirty=true;
+      banner={cls:'bad',sticky:F.err!=='failed',html:F.err==='conflict'?'<b>Someone else changed the firm settings.</b> Your latest change was not saved. <button class="btn" type="button" data-act="reloadFirm">Reload</button>':F.err==='forbidden'?'Only a firm administrator can change firm settings.':'Firm settings not saved. Retrying when you edit.'};render()}
+    finally{F.saving=false;saveStatus()}},
   async open(id){const j=await this.api('GET','households/'+encodeURIComponent(id));this.id=j.id;this.version=j.version;setState(H.normalise(j.state));this.dirty=false;return j},
   async create(state){const j=await this.api('POST','households',{state});this.id=j.id;this.version=j.version;return j},
   async audit(){return this.mode==='server'&&this.id?this.api('GET','households/'+encodeURIComponent(this.id)+'/audit'):(S.audit||[]).slice().reverse()},
@@ -81,14 +91,22 @@ const NAV=[
   ['mandate','Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
   ['analysis','Analysis',[['bs','Balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
 const NAV_OPEN=new Set();
+const FIRM_VIEWS=new Set(['clients','team','diary','tasks','firmSettings']);
 function renderNav(){
-  if(VIEW==='clients'||VIEW==='team'||VIEW==='diary'){$('#rail').innerHTML=`<h6>${esc(Store.firm||'Clients')}</h6><button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button><button type="button" data-act="diary" aria-current="${VIEW==='diary'}" title="Every review, expiry, action and complaint deadline across all households"><span>Reviews due</span></button>${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}"><span>Team</span></button>`:''}`;$('#hhName').textContent=VIEW==='team'?'Team and access':VIEW==='diary'?'Reviews due across the firm':'Choose a household to open';return}
+  if(FIRM_VIEWS.has(VIEW)){const fn=(Store.firm.settings&&Store.firm.settings.firm.name)||(typeof Store.firm==='string'?Store.firm:'')||'Firm';
+    $('#rail').innerHTML=`<div class="ng open here"><div class="ng-h" style="cursor:default"><span class="ng-t">${esc(Store.firmName||fn)}</span></div><div class="ng-b">
+      <button type="button" data-act="goClients" aria-current="${VIEW==='clients'}"><span>All households</span></button>
+      <button type="button" data-act="tasks" aria-current="${VIEW==='tasks'}" title="Every open task across all households, by person"><span>Tasks</span></button>
+      <button type="button" data-act="diary" aria-current="${VIEW==='diary'}" title="Every review, expiry, task and complaint deadline across all households"><span>Reviews due</span></button>
+      <button type="button" data-act="firmSettings" aria-current="${VIEW==='firmSettings'}" title="Firm details, team members and providers"><span>Firm settings</span></button>
+      ${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${VIEW==='team'}" title="Sign-in accounts"><span>User accounts</span></button>`:''}</div></div>`;
+    $('#hhName').textContent={team:'User accounts',diary:'Reviews due across the firm',tasks:'Tasks across the firm',firmSettings:'Firm settings'}[VIEW]||'Choose a household to open';return}
   const O=E.onboarding();const bad=E.checks().filter(x=>x.lvl==='bad').length;
   const badge=id=>{const s=SCHEMA[id];let ct='',cls='';if(s&&!s.single)ct=S[id].length||'';
     if(id==='checks'&&bad){ct=bad+' to fix';cls='bad'}
     if(id==='kyc'){ct=O.blockerCount?O.blockerCount+' open':O.stage;cls=O.blockerCount?'bad':''}
     if(id==='reviews'){const R=E.reviews(O);ct=R.overdue?R.overdue+' overdue':R.soon?R.soon+' due soon':'';cls=R.overdue?'bad':''}
-    if(id==='actions'){const n=S.actions.filter(a=>a.status==='Open').length;ct=n?n+' open':''}
+    if(id==='actions'){const n=S.actions.filter(H.taskOpen).length;ct=n?n+' open':''}
     if(id==='drift'){const MC=E.mandateCheck();ct=MC.status;cls=MC.status==='Incomplete'?'bad':MC.status==='Drift'?'warn':''}
     return {ct,cls}};
   let h='';
@@ -99,6 +117,7 @@ function renderNav(){
     if(open)h+=`<div class="ng-b">${items.map(([id,lbl],i)=>{const s=SCHEMA[id];const name=lbl||s.title;const b=bs[i];
       return `<button type="button" data-nav="${id}" aria-current="${VIEW===id}" title="${esc(NAV_HELP[id]||'')}"><span>${esc(name)}</span><span class="ct ${b.cls}">${esc(b.ct)}</span></button>`}).join('')}</div>`;
     h+=`</div>`}
+  if(Store.mode!=='server')h+=`<div class="ng"><button type="button" class="ng-h" data-act="firmSettings"><span class="ng-t">Firm settings</span></button></div>`;
   $('#rail').innerHTML=h;
   $('#hhName').textContent=(S.household.name||'Unnamed household')+(S.household.reference?' · '+S.household.reference:'')+' · '+O.stage;
 }
@@ -220,8 +239,13 @@ const FIELD_HELP={
   'mandate.agreedOn':'Until this is set, the mandate check shows the mandate as not yet agreed.','mandate.agreedBy':'Who agreed it on the client side.','mandate.notes':'Anything else agreed.',
   'contacts.date':'When the contact happened.','contacts.type':'Review meeting resets the annual suitability review to 12 months later. Life event creates a reassess-suitability item until the next review meeting.',
   'contacts.with':'Who took part: client names, adviser, paraplanner.','contacts.by':'Who wrote the note.','contacts.summary':'What was discussed and agreed. Part of the permanent file.',
-  'actions.created':'When the action was raised.','actions.description':'What will be done.','actions.owner':'Who is responsible.','actions.due':'Open actions with a due date appear in Reviews due; overdue ones are highlighted.',
-  'actions.status':'Open actions appear in Reviews due. Done and Cancelled are kept for the record.','actions.doneOn':'Date completed.',
+  'actions.created':'When the task was raised.','actions.description':'What needs doing.','actions.owner':'Team member responsible. The list comes from Firm settings › Team members.',
+  'actions.priority':'High-priority tasks sort first on the Tasks board.','actions.due':'Open tasks with a due date appear in Reviews due and on the Tasks board; overdue ones are highlighted.',
+  'actions.status':'Anything other than Done or Cancelled counts as open. Waiting on client / provider shows where the task is held up.','actions.doneOn':'Date completed.','actions.notes':'Progress notes.',
+  'firm.name':'Printed on letters and documents.','firm.frn':'Your FCA firm reference number.','firm.address':'Printed on the letterhead.','firm.phone':'Printed on letters.','firm.email':'Where providers send information requested under a letter of authority.','firm.website':'Printed on letters.','firm.signatory':'Name printed under the adviser signature.',
+  'team.name':'Appears in the Assigned to list on tasks.','team.role':'Shown beside the name.','team.email':'For reference.','team.active':'Inactive members drop out of the Assigned to list; their existing tasks keep the name.',
+  'providers.name':'Shown when choosing the provider on a letter of authority.','providers.kind':'Pension, platform, insurer and so on.','providers.address':'Postal address printed on the letter. Check against the provider\u2019s adviser guidance.',
+  'providers.email':'Email address for letters of authority, if the provider accepts them by email.','providers.portal':'Adviser portal or Origo route, if used instead of post or email.','providers.notes':'Anything the team should know, e.g. wet signature required.',
   'complaints.received':'Date the complaint was received. DISP requires a final response within 8 weeks of this date.','complaints.summary':'The complaint in the client\u2019s words.',
   'complaints.stage':'Received, Acknowledged, Investigating, Final response sent, Referred to FOS or Closed. The 8-week deadline shows in Reviews due until a final response is sent.',
   'complaints.outcome':'Upheld, partly upheld or not upheld, for the complaints register and FCA returns.','complaints.redress':'Compensation or redress paid.','complaints.closedOn':'Date the complaint was closed.','complaints.notes':'Handling notes: who investigated, evidence, root cause.',
@@ -304,26 +328,30 @@ const GROUP_HELP={
   'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
   'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
   'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
-const NAV_HELP={mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Agreed actions with owners and due dates.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+const NAV_HELP={mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
   expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
   other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
   compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
   bs:'Present value of everything owned, earned and committed.',tax:'Income tax, NI and unused allowances per person.',risk:'Ability and willingness to take risk, and the IPS.',checks:'Data gaps and inconsistencies to fix.',guide:'How the calculations and onboarding rules work.'};
 const tipBtn=(label,text,cls='')=>text?`<button type="button" class="tip ${cls}" aria-label="About ${esc(label)}" data-tip="${esc(text)}">i</button>`:'';
 
+const FIRM_KEYS=new Set(['firm','team','providers']);
+const recs=col=>FIRM_KEYS.has(col)?Store.firm.settings[col]:S[col];
 /* ---------- form rendering ---------- */
+function teamOptions(val){const t=((Store.firm.settings||{}).team||[]).filter(m=>m.name&&(yes(m.active)||m.name===val)).map(m=>[m.name,`${m.name}${m.role?' · '+m.role:''}`]);
+  if(val&&!t.some(o=>o[0]===val))t.push([val,val+' (not in team list)']);return t}
 function ownerOptions(withJoint){let o=withJoint?[['JOINT','Joint (adults equally)']]:[];return o.concat(S.members.map(m=>[m.ref,`${m.ref} · ${m.firstName||''} ${m.lastName||''}`.trim()]))}
 const VALIDATE={niNumber:v=>!v||H.validNino(v)?'':'Not a valid NI number',postcode:v=>!v||H.validPostcode(v)?'':'Check the postcode format',email:v=>!v||H.validEmail(v)?'':'Check the email address'};
 function fieldHTML(col,idx,f,val){
-  const id=`f-${col}-${idx}-${f.k}`;const data=`data-col="${col}" data-idx="${idx}" data-k="${f.k}"`;
+  const id=`f-${col}-${idx}-${f.k}`;const data=`data-col="${col}" data-idx="${idx}" data-k="${f.k}"${FIRM_KEYS.has(col)?' data-scope="firm"':''}`;
   const vmsg=VALIDATE[f.k]?VALIDATE[f.k](val):'';
   const hint=vmsg?`<span class="hint err" id="${id}-h">${esc(vmsg)}</span>`:f.h?`<span class="hint" id="${id}-h">${esc(f.h)}</span>`:'';
   const aria=(vmsg||f.h?` aria-describedby="${id}-h"`:'')+(vmsg?' aria-invalid="true"':'');
   const tip=tipBtn(f.l,FIELD_HELP[`${col}.${f.k}`]||f.h);
   if(f.t===YN)return `<div class="f chk"><input type="checkbox" id="${id}" ${data} ${yes(val)?'checked':''}><span class="lab"><label for="${id}">${esc(f.l)}</label>${tip}</span></div>`;
   let ctl;
-  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?S.models.map(m=>[m.name,m.name]):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
-    ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':f.t==='model'?'Select model…':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
+  if(f.t==='sel'||f.t==='member'||f.t==='owner'||f.t==='model'||f.t==='team'){const opts=f.t==='sel'?optList(f.o):f.t==='model'?S.models.map(m=>[m.name,m.name]):f.t==='team'?teamOptions(val):ownerOptions(f.t==='owner');const known=opts.some(o=>String(o[0])===String(val));
+    ctl=`<select id="${id}" ${data}${aria}>${(f.t!=='sel'||!known)?`<option value="">${f.t==='sel'?'Select…':f.t==='model'?'Select model…':f.t==='team'?'Unassigned':'Select person…'}</option>`:''}${opts.map(([v,l])=>`<option value="${esc(v)}" ${String(v)===String(val)?'selected':''}>${esc(l)}</option>`).join('')}</select>`}
   else if(f.t==='area')ctl=`<textarea id="${id}" ${data}${aria}>${esc(val)}</textarea>`;
   else if(f.t==='date')ctl=`<input type="date" id="${id}" ${data}${aria} value="${esc(val)}">`;
   else if(f.t==='num'||f.t==='pct'||f.t==='int')ctl=`<input type="number" inputmode="decimal" step="${f.t==='int'?1:'any'}" id="${id}" ${data}${aria} value="${esc(val)}">`;
@@ -347,7 +375,9 @@ function summary(key,r){
     case 'protection':return [r.type,`${who}${yes(r.inTrust)?' · in trust':''}`,gbp(N(r.sum))];
     case 'models':{const eq=N(r.ukEq)+N(r.glEq)+N(r.emEq);return [r.name||'Model',`risk ${r.riskMin||'?'}–${r.riskMax||'?'}${r.benchmark?' · '+r.benchmark:''}`,`${eq}% equity`]}
     case 'contacts':return [r.type||'Contact',`${fmtDate(r.date)}${r.with?' · '+r.with:''}`,''];
-    case 'actions':return [r.description||'Action',`${r.owner||''}${r.due?' · due '+fmtDate(r.due):''}`,r.status||''];
+    case 'actions':return [r.description||'Task',`${r.owner||'Unassigned'}${r.due?' · due '+fmtDate(r.due):''}${r.priority==='High'?' · high priority':''}`,r.status||''];
+    case 'team':return [r.name||'Team member',`${r.role||''}${r.email?' · '+r.email:''}`,yes(r.active)?'':'Inactive'];
+    case 'providers':return [r.name||'Provider',`${r.kind||''}${r.email?' · '+r.email:r.address?' · postal':''}`,r.address||r.email||r.portal?'':'Add contact details'];
     case 'complaints':return [(r.summary||'Complaint').slice(0,70),`received ${fmtDate(r.received)} · ${r.stage||''}`,r.outcome||''];
   }return ['','',''];
 }
@@ -420,9 +450,10 @@ const HOW={
     'A Review meeting resets the annual suitability review: the next one falls 12 months later.',
     'A Life event (marriage, inheritance, redundancy, retirement, a health change) creates a reassess-suitability item that stays until a review meeting is recorded after it.',
     'Other entries build the contact history for the file. None of them change the figures.']},
-  actions:{feeds:['Reviews due'],pts:[
-    'Open actions with a due date appear in Reviews due, overdue ones first.',
-    'Mark an action Done or Cancelled to clear it; the audit trail keeps the history.']},
+  actions:{feeds:['Tasks board','Reviews due'],pts:[
+    'Each task is assigned to a team member from Firm settings and appears on the firm-wide Tasks board, filterable by person.',
+    'Open tasks with a due date appear in Reviews due, overdue ones first.',
+    'Mark a task Done or Cancelled to clear it; the audit trail keeps the history.']},
   complaints:{feeds:['Reviews due','Compliance MI'],pts:[
     'DISP requires a final response within 8 weeks of receipt. The deadline appears in Reviews due until the stage is Final response sent, Referred to FOS or Closed.',
     'Outcome and redress are recorded for the complaints register and FCA returns.']},
@@ -649,7 +680,7 @@ async function renderClients(){
 }
 
 async function renderTeam(){
-  let h=`<div class="sec-head"><div><h2>Team</h2><p>People at ${esc(Store.firm)} who can sign in. Each person needs their own login so the audit trail shows who did what. Deactivating someone signs them out at once; their past entries stay in the audit trail.</p></div></div>`+bannerHTML(false);
+  let h=`<div class="sec-head"><div><h2>Team</h2><p>People at ${esc(Store.firmName)} who can sign in. Each person needs their own login so the audit trail shows who did what. Deactivating someone signs them out at once; their past entries stay in the audit trail.</p></div></div>`+bannerHTML(false);
   $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
   let list=[];try{list=await Store.api('GET','members')}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>${esc(e.message)}</div></div>`;return}
   if(VIEW!=='team')return;
@@ -707,6 +738,32 @@ function renderGuide(){
 }
 
 const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
+function firmCards(key){const s=SCHEMA[key];const L=Store.firm.settings[key];
+  let h=`<div class="sec-head" style="margin-top:28px"><div><h2 style="font-size:20px">${esc(s.title)}</h2><p>${esc(s.desc)}</p></div><div class="addrow"><button class="btn" type="button" data-act="toggleAll" data-col="${key}">Expand all</button><button class="btn primary" type="button" data-act="add" data-col="${key}">Add ${esc(s.item)}</button></div></div>`;
+  if(!L.length)h+=`<div class="empty">None yet.</div>`;
+  L.forEach((r,i)=>{const [t,meta,v]=summary(key,r);const open=OPEN.has(key+':'+i);
+    h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span><button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
+  return h}
+function renderFirmSettings(){const F=Store.firm.settings;
+  let h=`<div class="sec-head"><div><h2>Firm settings</h2><p>Shared by every household: the firm\u2019s details for letters, the team that tasks are assigned to, and the providers letters of authority go to.${Store.mode==='server'?' Changes are saved for everyone and recorded in the firm audit trail.':' Saved in this browser only.'}</p></div></div>`+bannerHTML(false);
+  h+=`<div class="card" data-open="true"><div class="card-b" style="border-top:0">${fieldsBlock('firm',0,F.firm)}</div></div>`;
+  return h+firmCards('team')+firmCards('providers')}
+const TASKF={who:'',status:'open'};
+async function renderTasks(){
+  let h=`<div class="sec-head"><div><h2>Tasks</h2><p>Every task across the firm\u2019s households. Assign and update tasks inside each household under Relationship › Tasks.</p></div></div>`;
+  $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
+  let rows=[];
+  try{if(Store.mode==='server'){const list=await Store.list();for(const x of list)for(const t of (x.tasks||[]))rows.push({...t,hh:x.name||'Unnamed',id:x.id})}
+    else for(const t of H.openTasks(S))rows.push({...t,hh:S.household.name||'This household',id:''})}
+  catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>${esc(e.message)}</div></div>`;return}
+  if(VIEW!=='tasks')return;
+  const t=H.today();const people=[...new Set(rows.map(r=>r.owner||'Unassigned'))].sort();
+  const shown=rows.filter(r=>!TASKF.who||(r.owner||'Unassigned')===TASKF.who).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')||({High:0,Normal:1,Low:2}[a.priority]-{High:0,Normal:1,Low:2}[b.priority]));
+  const byWho=people.map(p=>({p,n:rows.filter(r=>(r.owner||'Unassigned')===p).length,od:rows.filter(r=>(r.owner||'Unassigned')===p&&r.due&&r.due<t).length}));
+  h+=`<div class="kpis">${byWho.map(x=>`<button type="button" class="kpi kpi-btn${TASKF.who===x.p?' sel':''}" data-act="taskFilter" data-k="who" data-v="${TASKF.who===x.p?'':esc(x.p)}"><div class="k">${esc(x.p)}</div><div class="v">${x.n}</div><div class="s">${x.od?`<span class="pill bad">${x.od} overdue</span>`:'open tasks'}</div></button>`).join('')||'<div class="kpi"><div class="k">Open tasks</div><div class="v">0</div></div>'}</div>`;
+  h+=`<div class="panel">${shown.length?`<div class="tbl-wrap"><table class="clients"><thead><tr><th>Due</th><th>Task</th><th>Household</th><th>Assigned to</th><th>Priority</th><th>Status</th><th></th></tr></thead><tbody>${shown.map(r=>{const od=r.due&&r.due<t;return `<tr><td style="white-space:nowrap">${r.due?fmtDate(r.due):'–'}${od?' <span class="pill bad">overdue</span>':''}</td><td><b>${esc(r.description||'Task')}</b></td><td>${esc(r.hh)}</td><td>${esc(r.owner||'Unassigned')}</td><td>${r.priority==='High'?'<span class="pill bad">High</span>':esc(r.priority)}</td><td>${esc(r.status)}</td><td>${r.id?`<button class="btn" type="button" data-act="openHousehold" data-id="${esc(r.id)}" data-view="actions">Open</button>`:`<button class="btn" type="button" data-nav="actions">Open</button>`}</td></tr>`}).join('')}</tbody></table></div>`:'<div class="empty">No open tasks'+(TASKF.who?' for '+esc(TASKF.who):'')+'.</div>'}</div>`;
+  $('#main').innerHTML=h;
+}
 function renderDrift(){
   const M=E.mandateCheck();const S_=S.mandate;const scls={'In line':'good',Drift:'warn',Incomplete:'bad'}[M.status];
   let h=`<div class="sec-head"><div><h2>Mandate check</h2><p>The agreed mandate against the risk profile and the current accounts. Targets come from the model portfolio; the current split is value-weighted across every account under Savings and investments.</p></div><div class="addrow"><button class="btn" type="button" data-nav="mandate">Edit mandate</button></div></div>`+bannerHTML(false);
@@ -746,11 +803,13 @@ function render(){
   if(VIEW==='clients')return renderClients();
   if(VIEW==='team')return renderTeam();
   if(VIEW==='diary')return renderDiary();
+  if(VIEW==='tasks')return renderTasks();
+  if(VIEW==='firmSettings'){m.innerHTML=renderFirmSettings();return}
   if(VIEW==='audit')return renderAudit();
   if(SCHEMA[VIEW])m.innerHTML=renderInput(VIEW);else if(VIEW==='bs')m.innerHTML=renderBS();else if(VIEW==='tax')m.innerHTML=renderTax();else if(VIEW==='risk')m.innerHTML=renderRisk();else if(VIEW==='kyc')m.innerHTML=renderKyc();else if(VIEW==='guide')m.innerHTML=renderGuide();else if(VIEW==='reviews')m.innerHTML=renderReviews();else if(VIEW==='drift')m.innerHTML=renderDrift();else m.innerHTML=renderChecks();
 }
 function renderTopbar(){
-  const server=Store.mode==='server';const inHH=!['clients','team','diary'].includes(VIEW);
+  const server=Store.mode==='server';const inHH=!FIRM_VIEWS.has(VIEW);
   $('#btnClients').hidden=!server||!inHH;
   for(const id of ['#btnImport','#btnExport','#btnJson'])$(id).hidden=!inHH;
   $('#resetWrap').hidden=server||!inHH;
@@ -764,6 +823,8 @@ let navT;
 function onEdit(e){const el=e.target;
   if(el.id==='whoIn'){Store.user=el.value.trim();try{localStorage.setItem(LS_USER,Store.user)}catch(x){}return}
   if(!el.dataset||!el.dataset.k)return;const {col,idx,k}=el.dataset;const s=SCHEMA[col];const f=fieldsOf(s).find(x=>x.k===k);
+  if(el.dataset.scope==='firm'){const v=parseVal(f,el.value,el.type==='checkbox'?el:null);const F=Store.firm.settings;const rec=s.single?F[col]:F[col][+idx];if(rec[k]===v)return;rec[k]=v;Store.touchFirm();
+    if(!s.single){const card=document.querySelector(`[data-card="${col}:${idx}"]`);if(card){const [t,meta,val]=summary(col,rec);card.querySelector('.sum').innerHTML=`<b>${esc(t)}</b><span class="meta">${esc(meta)}</span>`;card.querySelector('.val').textContent=val}}return}
   const v=parseVal(f,el.value,el.type==='checkbox'?el:null);const rec=s.single?S[col]:S[col][+idx];const old=rec[k];if(old===v)return;rec[k]=v;
   logChange(s.single?`${col}.${k}`:`${col}[${idx}].${k}`,old,v);Store.touch();
   clearTimeout(impT);impT=setTimeout(()=>refreshImpact(`${s.title}: ${f.l}`,f),120);
@@ -776,18 +837,24 @@ document.addEventListener('input',onEdit);document.addEventListener('change',onE
 document.addEventListener('click',async e=>{
   const nav=e.target.closest('[data-nav]');if(nav&&nav.dataset.nav){VIEW=nav.dataset.nav;if(banner&&!banner.sticky)banner=null;render();window.scrollTo({top:0});return}
   const b=e.target.closest('[data-act]');if(!b)return;const act=b.dataset.act,col=b.dataset.col,idx=+b.dataset.idx;
+  if(act==='del'&&FIRM_KEYS.has(col)){e.stopPropagation();const rem=recs(col).splice(idx,1)[0];Store.touchFirm();banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem,firm:true}};render();return}
   if(act==='del'){e.stopPropagation();const rem=S[col].splice(idx,1)[0];logChange(`${col}.count`,S[col].length+1,S[col].length);Store.touch();
     banner={html:`Removed ${esc(summary(col,rem)[0])}. <button class="btn" type="button" data-act="undo">Undo</button>`,undo:{col,idx,rem}};IMPACT.why=`<b>${esc(SCHEMA[col].item)} removed.</b> The figures above compare with when you opened this section.`;render();return}
+  if(act==='undo'&&banner&&banner.undo&&banner.undo.firm){const u=banner.undo;recs(u.col).splice(u.idx,0,u.rem);banner=null;Store.touchFirm();render();return}
   if(act==='undo'&&banner&&banner.undo){const u=banner.undo;S[u.col].splice(u.idx,0,u.rem);logChange(`${u.col}.count`,S[u.col].length-1,S[u.col].length);banner=null;Store.touch();render();return}
   if(act==='closeBanner'){banner=null;render();return}
   if(act==='navGroup'){const g=b.dataset.g;const grp=NAV.find(x=>x[0]===g);if(grp.some(([id])=>id===VIEW))return;NAV_OPEN.has(g)?NAV_OPEN.delete(g):NAV_OPEN.add(g);renderNav();return}
-  if(act==='goClients'||act==='team'||act==='diary'){await Store.flush();VIEW=act==='goClients'?'clients':act;banner=null;render();return}
+  if(['goClients','team','diary','tasks','firmSettings'].includes(act)){await Store.flush();VIEW=act==='goClients'?'clients':act;banner=null;render();return}
   if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}await Store.cloud.signOut();location.reload();return}
   if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
     try{await Store.api('POST','members',body);banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
   if(act==='memberActive'){try{await Store.api('PATCH','members/'+encodeURIComponent(b.dataset.uid),{active:b.dataset.on==='1'});banner=null}catch(err){banner={cls:'bad',html:esc(err.message)}}render();return}
   if(act==='toggle'){if(e.target.closest('[data-act="del"]'))return;const key=col+':'+idx;OPEN.has(key)?OPEN.delete(key):OPEN.add(key);const card=b.closest('.card');card.dataset.open=OPEN.has(key);b.setAttribute('aria-expanded',OPEN.has(key));return}
+  if(act==='toggleAll'&&FIRM_KEYS.has(col)){const L=recs(col);const all=L.every((_,i)=>OPEN.has(col+':'+i));L.forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='toggleAll'){const all=S[col].every((_,i)=>OPEN.has(col+':'+i));S[col].forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
+  if(act==='add'&&FIRM_KEYS.has(col)){recs(col).push(H.defaults(col));OPEN.add(col+':'+(recs(col).length-1));Store.touchFirm();render();return}
+  if(act==='reloadFirm'){banner=null;Store.firm.err=null;await Store.loadFirm();render();return}
+  if(act==='taskFilter'){TASKF[b.dataset.k]=b.dataset.v;render();return}
   if(act==='add'){const r=H.defaults(col);if(col==='members'){const ad=S.members.filter(isAdult).length;r.ref=ad<1?'P1':ad<2?'P2':'C'+(S.members.filter(m=>m.role==='child').length+1);r.role=ad<1?'primary':ad<2?'partner':'child'}
     else if(['income','db','protection'].includes(col))r.owner=S.members[0]?.ref||'';else if(fieldsOf(SCHEMA[col]).some(f=>f.t==='owner'))r.owner=S.members.filter(isAdult).length>1?'JOINT':(S.members[0]?.ref||'');
     S[col].push(r);logChange(`${col}.count`,S[col].length-1,S[col].length);OPEN.add(col+':'+(S[col].length-1));Store.touch();IMPACT.why=`<b>${esc(SCHEMA[col].item)} added.</b> Fill it in and the figures above update as you type.`;render();const cards=document.querySelectorAll('.card');cards[cards.length-1]?.scrollIntoView({behavior:'smooth',block:'center'});return}
@@ -874,6 +941,7 @@ $('#btnClients').onclick=async()=>{await Store.flush();VIEW='clients';banner=nul
   try{if(window.claude&&window.claude.use)window.claude.use('downloads').then(d=>{DL=d},()=>{})}catch(e){DL=null}
   try{await Store.init()}catch(e){if(!CFG.supabaseUrl)throw e;document.body.classList.add('gated');
     $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p>${Store.cloud?'<div class="addrow"><button class="btn" type="button" data-act="signOut">Sign out</button></div>':''}</div>`;return}
+  await Store.loadFirm();
   if(Store.mode==='server'){setState(H.blank());VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}
   resetUI(false);render();
