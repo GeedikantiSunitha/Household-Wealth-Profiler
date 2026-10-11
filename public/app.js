@@ -86,7 +86,7 @@ function logChange(path,from,to){if(Store.mode!=='local')return;S.audit=S.audit|
 const NAV=[
   ['client','Client',[['household'],['members'],['income'],['expenses'],['goals'],['assumptions']]],
   ['wealth','Wealth',[['accounts'],['db'],['property'],['other'],['liabilities'],['protection']]],
-  ['onboarding','Onboarding',[['compliance'],['kyc','KYC status'],['audit','Audit trail']]],
+  ['onboarding','Onboarding',[['compliance'],['rtq','Risk questionnaire'],['kyc','KYC status'],['audit','Audit trail']]],
   ['relationship','Relationship',[['contacts'],['actions'],['loas','Letters of authority'],['complaints'],['reviews','Reviews due']]],
   ['mandate','Mandate',[['mandate'],['models','Model portfolios'],['drift','Mandate check']]],
   ['analysis','Analysis',[['bs','Balance sheet'],['tax','Tax and allowances'],['risk','Risk profile and IPS'],['checks','Data checks'],['guide','How the model works']]]];
@@ -107,6 +107,7 @@ function renderNav(){
     if(id==='kyc'){ct=O.blockerCount?O.blockerCount+' open':O.stage;cls=O.blockerCount?'bad':''}
     if(id==='reviews'){const R=E.reviews(O);ct=R.overdue?R.overdue+' overdue':R.soon?R.soon+' due soon':'';cls=R.overdue?'bad':''}
     if(id==='actions'){const n=S.actions.filter(H.taskOpen).length;ct=n?n+' open':''}
+    if(id==='rtq'){const ad=S.members.filter(isAdult);const done=ad.filter(m=>{const q=S.rtq.find(x=>x.owner===m.ref);return q&&H.rtqScore(q).complete}).length;ct=ad.length?done+'/'+ad.length:'';cls=done<ad.length?'warn':''}
     if(id==='drift'){const MC=E.mandateCheck();ct=MC.status;cls=MC.status==='Incomplete'?'bad':MC.status==='Drift'?'warn':''}
     return {ct,cls}};
   let h='';
@@ -242,6 +243,7 @@ const FIELD_HELP={
   'actions.created':'When the task was raised.','actions.description':'What needs doing.','actions.owner':'Team member responsible. The list comes from Firm settings › Team members.',
   'actions.priority':'High-priority tasks sort first on the Tasks board.','actions.due':'Open tasks with a due date appear in Reviews due and on the Tasks board; overdue ones are highlighted.',
   'actions.status':'Anything other than Done or Cancelled counts as open. Waiting on client / provider shows where the task is held up.','actions.doneOn':'Date completed.','actions.notes':'Progress notes.',
+  'rtq.owner':'The adult this questionnaire belongs to. Results are written to their record under People.','rtq.completedOn':'Date the client answered. Repeat at each annual review.','rtq.by':'Adviser who took the client through it.',
   'loas.provider':'From Firm settings › Providers. The provider\u2019s address or email is printed on the letter.','loas.owner':'The plan holder. Their name, date of birth, NI number and address are printed on the letter.',
   'loas.planType':'Printed on the letter.','loas.policyRef':'Printed on the letter. Blank asks the provider to identify every plan in the client\u2019s name.','loas.employer':'Helps the provider find workplace scheme records.',
   'loas.reqValue':'Included in the list of information requested.','loas.reqTransfer':'Included in the list of information requested.','loas.reqFunds':'Included in the list of information requested.','loas.reqCharges':'Included in the list of information requested.',
@@ -327,6 +329,7 @@ const GROUP_HELP={
   'Enhanced due diligence':'Required when the rating is High: EDD findings, verified source of wealth and senior approval.',
   'Disclosures and consents':'Documents the client must receive or sign before onboarding completes.',
   'Sign-off':'Four-eyes review: the reviewer must differ from the preparer.',
+  'Attitude to risk':'Nine questions scored 1–5; the total sets risk tolerance 1–7. The 25% fall question sets the loss reaction.','Capacity for loss':'Six questions scored −1/0/+1; the total sets capacity low, medium or high.','Knowledge and experience':'Three questions scored 0–3; the total sets the knowledge level.','Client and date':'Who answered, when and with whom.',
   'Plan':'Which plan the letter is about, and whose it is.','Information requested':'Each ticked item is listed in the letter.','Progress':'Where the letter is. Drives the reminders in Reviews due.',
   'Service and model':'Which model the portfolio follows and the risk level agreed. These set the target allocation.',
   'Objectives and constraints':'What the portfolio is for and what it may not hold. Recorded for the IPS; the drift tolerance drives the mandate check.',
@@ -335,7 +338,7 @@ const GROUP_HELP={
   'Income tax and NI (rest of UK)':'Bands and rates for the Tax view and after-tax human capital.',
   'Wrappers and pensions':'ISA and pension allowances for the allowance checks and deferred pension tax.',
   'Capital gains and inheritance tax':'CGT rates for deferred tax and IHT bands for the second-death estimate.'};
-const NAV_HELP={loas:'Letters asking providers to release plan information.',mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
+const NAV_HELP={rtq:'Scored risk questionnaire: sets risk tolerance, capacity for loss and experience.',loas:'Letters asking providers to release plan information.',mandate:'The investment mandate agreed with the client.',models:'The firm\u2019s risk-rated model portfolios.',drift:'Mandate against the current portfolio and the risk profile.',contacts:'Meetings, calls, review meetings and life events.',actions:'Tasks assigned to team members, with due dates and status.',complaints:'Complaints handled under DISP.',reviews:'Every dated obligation for this household.',household:'The file, legal status and legacy wish.',members:'Everyone in the household: ages, work, KYC and suitability.',income:'Earnings become human capital; pensions and benefits become income rights.',
   expenses:'Future spending, valued today as a liability.',goals:'One-off capital needs, valued today.',accounts:'Cash, ISAs, pensions and investments.',db:'Final salary pensions not yet in payment.',property:'Homes and investment property.',
   other:'Business interests and other assets.',liabilities:'Mortgages and debts.',protection:'Life and health cover.',assumptions:'Tax rules and economic assumptions behind every figure.',
   compliance:'Relationship, AML factors, disclosures and sign-off.',kyc:'Onboarding status worked out from everything recorded.',audit:'Who changed what, and when.',
@@ -384,6 +387,7 @@ function summary(key,r){
     case 'models':{const eq=N(r.ukEq)+N(r.glEq)+N(r.emEq);return [r.name||'Model',`risk ${r.riskMin||'?'}–${r.riskMax||'?'}${r.benchmark?' · '+r.benchmark:''}`,`${eq}% equity`]}
     case 'contacts':return [r.type||'Contact',`${fmtDate(r.date)}${r.with?' · '+r.with:''}`,''];
     case 'actions':return [r.description||'Task',`${r.owner||'Unassigned'}${r.due?' · due '+fmtDate(r.due):''}${r.priority==='High'?' · high priority':''}`,r.status||''];
+    case 'rtq':{const sc=H.rtqScore(r);return [r.owner?memberName(r.owner):'Choose the client',`${sc.answered} of ${sc.of} answered${r.completedOn?' · '+fmtDate(r.completedOn):''}`,sc.complete?`Risk ${sc.atr.band} · capacity ${sc.cfl.level}`:'Incomplete']}
     case 'loas':return [`${r.provider||'Provider'}${r.policyRef?' · '+r.policyRef:''}`,`${r.owner?memberName(r.owner):'No client'} · ${r.planType||''}${r.sentOn?' · sent '+fmtDate(r.sentOn):''}`,r.status||''];
     case 'team':return [r.name||'Team member',`${r.role||''}${r.email?' · '+r.email:''}`,yes(r.active)?'':'Inactive'];
     case 'providers':return [r.name||'Provider',`${r.kind||''}${r.email?' · '+r.email:r.address?' · postal':''}`,r.address||r.email||r.portal?'':'Add contact details'];
@@ -459,6 +463,11 @@ const HOW={
     'A Review meeting resets the annual suitability review: the next one falls 12 months later.',
     'A Life event (marriage, inheritance, redundancy, retirement, a health change) creates a reassess-suitability item that stays until a review meeting is recorded after it.',
     'Other entries build the contact history for the file. None of them change the figures.']},
+  rtq:{feeds:['Risk profile','People','KYC status','Mandate check'],pts:[
+    'Every answer has a fixed score and every total a fixed band, shown in "How the scores are worked out" below. Two advisers with the same answers get the same result.',
+    'When all 19 questions are answered, the results are written to the person\u2019s record: risk tolerance (1–7), loss reaction, capacity for loss and knowledge and experience. The audit trail records the change.',
+    'The risk profile then combines willingness from the questionnaire with ability from the balance sheet, and the mandate check tests the agreed risk level against it.',
+    'KYC status lists any adult without a completed questionnaire, or whose record no longer matches it.']},
   loas:{feeds:['Letter','Reviews due'],pts:[
     'Letter builds a print-ready letter from the firm\u2019s details (Firm settings), the provider\u2019s address (provider directory) and the client\u2019s identity details (People). Anything missing is listed above the letter.',
     'Reviews due reminds you to get the client\u2019s signature after 14 days, to send a signed letter, and to chase the provider once the chase period has passed.',
@@ -484,7 +493,7 @@ const HOW={
     'CPI inflates spending and goals. The gap between inflation and the gilt rate is what matters.',
     'Mortality ages, dispersion and plan-to age set the survival weights and the horizon.',
     'Tax bands and allowances drive the Tax view and the deferred tax on pensions and gains.']}};
-const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models','loas']);
+const HOW_LS='hwp-how-open';const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models','loas','rtq']);
 function howHTML(key){const w=HOW[key];if(!w)return '';let open=true;try{open=localStorage.getItem(HOW_LS)!=='0'}catch(e){}
   return `<div class="how"><div class="how-h"><b>How this section is used</b><span class="feeds">${w.feeds.map(f=>`<span class="feed">${esc(f)}</span>`).join('')}</span></div><details id="howDetails"${open?' open':''}><summary>What the inputs change</summary><ul>${w.pts.map(p=>`<li>${esc(p)}</li>`).join('')}</ul></details></div>`}
 document.addEventListener('toggle',e=>{if(e.target.id==='howDetails')try{localStorage.setItem(HOW_LS,e.target.open?'1':'0')}catch(x){}},true);
@@ -536,6 +545,7 @@ function renderInput(key){
     if(key==='compliance')h+=`<div class="addrow"><button class="btn" type="button" data-nav="kyc">See onboarding status</button></div>`;
     return h}
   if(!S[key].length)h+=`<div class="empty">Nothing recorded yet. Use “Add ${esc(s.item)}” or import an Excel file.</div>`;
+  if(key==='rtq')h+=rtqPanel();
   if(key==='loas'&&S.loas.length)h+=`<p class="note" style="margin:0 0 12px">Open a letter, check the details, then use <b>Letter</b> to print it or save it as PDF for the client to sign.</p>`;
   S[key].forEach((r,i)=>{const [t,meta,v]=summary(key,r);const open=OPEN.has(key+':'+i);
     h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span>${key==='loas'?`<button class="btn" type="button" data-act="loaLetter" data-idx="${i}">Letter</button>`:''}<button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
@@ -752,6 +762,29 @@ function renderGuide(){
 }
 
 const REVIEW_CLS={overdue:'bad',soon:'warn',later:'neu'};
+const LOSS_LABEL={sellall:'Sell everything (−2)',sellsome:'Sell some (−1)',hold:'Hold (0)',buy:'Invest more (+1)'};
+function rtqPanel(){const ad=S.members.filter(isAdult);if(!ad.length)return '<div class="empty">Add the adults under People first.</div>';
+  let h='<div class="rtq-grid">';
+  for(const m of ad){const q=S.rtq.find(x=>x.owner===m.ref);const nm=memberName(m.ref);
+    if(!q){h+=`<div class="panel"><h3>${esc(nm)}</h3><p class="muted">No questionnaire yet.</p><button class="btn primary" type="button" data-act="rtqStart" data-ref="${esc(m.ref)}">Start questionnaire</button></div>`;continue}
+    const sc=H.rtqScore(q);const res=H.rtqResult(q);
+    const row=(l,a,of,tot,out)=>`<tr><td>${l}</td><td class="n">${a}/${of}</td><td class="n">${tot}</td><td><b>${out}</b></td></tr>`;
+    h+=`<div class="panel"><h3>${esc(nm)} <span class="pill ${sc.complete?'good':'warn'}">${sc.complete?'Complete':sc.answered+' of '+sc.of+' answered'}</span></h3>
+      <div class="tbl-wrap"><table><thead><tr><th>Part</th><th class="n">Answered</th><th class="n">Score</th><th>Result</th></tr></thead><tbody>
+      ${row('Attitude to risk',sc.atr.answered,sc.atr.of,sc.atr.total+' of 45',sc.atr.band?'Risk tolerance '+sc.atr.band:'–')}
+      ${row('Reaction to a 25% fall',sc.loss?1:0,1,'',sc.loss?LOSS_LABEL[sc.loss]:'–')}
+      ${row('Capacity for loss',sc.cfl.answered,sc.cfl.of,(sc.cfl.total>0?'+':'')+sc.cfl.total+' (−6 to +6)',sc.cfl.level?sc.cfl.level[0].toUpperCase()+sc.cfl.level.slice(1):'–')}
+      ${row('Knowledge and experience',sc.ke.answered,sc.ke.of,sc.ke.total+' of 9',sc.ke.level||'–')}</tbody></table></div>
+      ${res?`<p class="note">Applied to ${esc(nm)}’s record under People: risk tolerance ${res.riskTol}, loss reaction, capacity for loss ${res.capacity}, knowledge ${res.experience}. Willingness in the risk profile = ${res.riskTol} ${({sellall:'− 2',sellsome:'− 1',hold:'+ 0',buy:'+ 1'})[res.lossReaction]} for the loss reaction.</p>`:''}</div>`}
+  h+='</div>';
+  h+=`<details class="panel rtq-key"><summary><b>How the scores are worked out</b></summary>
+    <h4>Attitude to risk</h4><p>Nine questions, each answer scored 1 (most cautious) to 5. The total, from 9 to 45, sets the risk tolerance:</p>
+    <table><thead><tr><th>Total</th>${H.ATR_BANDS.map(([a,b])=>`<th class="n">${a}–${b}</th>`).join('')}</tr></thead><tbody><tr><td>Risk tolerance</td>${H.ATR_BANDS.map(([,,c])=>`<td class="n"><b>${c}</b></td>`).join('')}</tr></tbody></table>
+    <p>The reaction to a 25% fall is asked separately and sets the loss reaction. The risk profile then adjusts willingness by −2, −1, 0 or +1, so the answer counts once.</p>
+    <h4>Capacity for loss</h4><p>Six questions scored −1, 0 or +1. Total −2 or less: <b>low</b>; +2 or more: <b>high</b>; otherwise <b>medium</b>. This joins the balance-sheet measures (funded ratio, horizon, liquidity, earnings stability, leverage) in the ability-to-take-risk score.</p>
+    <h4>Knowledge and experience</h4><p>Three questions scored 0 to 3. Total 0–1: <b>none</b>; 2–4: <b>basic</b>; 5–7: <b>informed</b>; 8–9: <b>advanced</b>.</p>
+    <p class="note">The questions and bands are a starting framework. The firm should calibrate them against its own risk-profiling tool and keep a record of the version used.</p></details>`;
+  return h}
 let LOA_IDX=0;
 const LOA_REQ=[['reqValue','the current value of the plan'],['reqTransfer','the current transfer value and any exit charges or penalties'],['reqFunds','the funds held, with unit holdings and prices'],['reqCharges','all charges: product, fund and any adviser charges currently paid'],['reqContrib','the contribution history, including employer contributions'],['reqGuarantees','any guarantees or safeguarded benefits, such as guaranteed annuity rates, guaranteed minimum pension or protected tax-free cash'],['reqDeath','the death benefits and any nomination of beneficiaries'],['reqRetire','the selected retirement date and the options available at retirement']];
 function renderLetter(){const l=S.loas[LOA_IDX];if(!l)return '<div class="empty">Letter not found.</div>';const F=Store.firm.settings.firm;
@@ -856,6 +889,8 @@ function renderTopbar(){
 /* ---------- editing ---------- */
 function parseVal(f,raw,el){if(f.t===YN)return el?el.checked:raw;if(f.t==='num'||f.t==='pct'||f.t==='int'){if(raw===''||raw==null)return '';const n=parseFloat(String(raw).replace(/[£,%\s]/g,''));return isFinite(n)?n:''}return raw}
 let navT;
+function applyRtq(q){const r=H.rtqResult(q);if(!r)return;const m=S.members.find(x=>x.ref===q.owner);if(!m)return;const i=S.members.indexOf(m);
+  for(const [k,v] of Object.entries(r))if(String(m[k])!==String(v)){logChange(`members[${i}].${k}`,m[k],v);m[k]=v}Store.touch()}
 function onEdit(e){const el=e.target;
   if(el.id==='whoIn'){Store.user=el.value.trim();try{localStorage.setItem(LS_USER,Store.user)}catch(x){}return}
   if(!el.dataset||!el.dataset.k)return;const {col,idx,k}=el.dataset;const s=SCHEMA[col];const f=fieldsOf(s).find(x=>x.k===k);
@@ -868,6 +903,7 @@ function onEdit(e){const el=e.target;
   if(!s.single){const card=document.querySelector(`[data-card="${col}:${idx}"]`);if(card){const [t,meta,val]=summary(col,rec);card.querySelector('.sum').innerHTML=`<b>${esc(t)}</b><span class="meta">${esc(meta)}</span>`;card.querySelector('.val').textContent=val}}
   clearTimeout(navT);navT=setTimeout(renderNav,250);
   if(col==='members'&&k==='role'&&e.type==='change')render();
+  if(col==='rtq'&&e.type==='change'){applyRtq(rec);render()}
 }
 document.addEventListener('input',onEdit);document.addEventListener('change',onEdit);
 document.addEventListener('click',async e=>{
@@ -889,6 +925,7 @@ document.addEventListener('click',async e=>{
   if(act==='toggleAll'&&FIRM_KEYS.has(col)){const L=recs(col);const all=L.every((_,i)=>OPEN.has(col+':'+i));L.forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='toggleAll'){const all=S[col].every((_,i)=>OPEN.has(col+':'+i));S[col].forEach((_,i)=>all?OPEN.delete(col+':'+i):OPEN.add(col+':'+i));render();return}
   if(act==='add'&&FIRM_KEYS.has(col)){recs(col).push(H.defaults(col));OPEN.add(col+':'+(recs(col).length-1));Store.touchFirm();render();return}
+  if(act==='rtqStart'){const r=Object.assign(H.defaults('rtq'),{owner:b.dataset.ref,by:Store.user||''});S.rtq.push(r);logChange('rtq.count',S.rtq.length-1,S.rtq.length);OPEN.add('rtq:'+(S.rtq.length-1));Store.touch();render();return}
   if(act==='loaLetter'){e.stopPropagation();LOA_IDX=+b.dataset.idx;VIEW='letter';banner=null;render();window.scrollTo({top:0});return}
   if(act==='print'){window.print();return}
   if(act==='reloadFirm'){banner=null;Store.firm.err=null;await Store.loadFirm();render();return}

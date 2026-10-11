@@ -16,6 +16,48 @@
    the Excel template, import, export and the audit trail.
    ========================================================= */
 const YN = 'bool';
+/* Risk questionnaire. Deterministic: every answer has a fixed score and every total a fixed band.
+   Attitude to risk: 9 questions scored 1–5, total 9–45, banded 1–7 (ATR_BANDS). The reaction to a 25% fall is asked
+   separately and sets the loss reaction, which the risk profile already applies to willingness, so it counts once.
+   Capacity for loss: 6 questions scored −1/0/+1, total −6..+6: ≤ −2 low, ≥ +2 high, otherwise medium.
+   Knowledge and experience: 3 questions scored 0–3, total 0–9: 0–1 none, 2–4 basic, 5–7 informed, 8–9 advanced. */
+const A5=o=>o.map((l,i)=>[String(i+1),l]);
+const ATR_Q=[
+  ['atr1','Compared with other people, how willing are you to take financial risk?',A5(['Far less willing','Less willing','About the same','More willing','Far more willing'])],
+  ['atr2','How easily do you adjust when things go wrong financially?',A5(['With great difficulty','With some difficulty','Neither easily nor with difficulty','Fairly easily','Very easily'])],
+  ['atr3','When you hear the word "risk" in a financial context, what comes to mind first?',A5(['Danger','Loss','Uncertainty','Opportunity','Thrill'])],
+  ['atr4','How much of your investable savings would you put into investments that can fall in value?',A5(['Under 10%','10–25%','25–50%','50–75%','Over 75%'])],
+  ['atr5','Which matters more to you?',A5(['Avoiding any loss','Mostly avoiding losses','Both equally','Mostly achieving higher returns','Achieving the highest return'])],
+  ['atr6','How do you feel after making an important financial decision?',A5(['Very anxious','Somewhat anxious','Neutral','Fairly confident','Very confident'])],
+  ['atr7','Which would you choose?',A5(['£1,000 for certain','80% chance of £1,500','50% chance of £2,500','30% chance of £4,500','10% chance of £15,000'])],
+  ['atr8','How would a close friend describe you as a risk-taker?',A5(['Very cautious','Cautious','Balanced','Willing to take risks','A real risk-taker'])],
+  ['atr9','Over 10 years, which range of outcomes for £100,000 would you accept?',A5(['£95k–£130k','£85k–£150k','£75k–£175k','£65k–£210k','£50k–£260k'])]];
+const ATR_BANDS=[[9,13,1],[14,18,2],[19,23,3],[24,29,4],[30,34,5],[35,39,6],[40,45,7]];
+const LOSS_Q=['loss','If your investments fell 25% in a year, what would you most likely do?',[['sellall','Sell everything'],['sellsome','Sell some'],['hold','Hold and wait'],['buy','Invest more']]];
+const C3=(a,b,c)=>[['-1',a],['0',b],['1',c]];
+const CFL_Q=[
+  ['cfl1','Will you rely on this money for day-to-day living costs?',C3('Yes, entirely','Partly','No')],
+  ['cfl2','Outside these investments, how much do you hold in cash for emergencies?',C3('Under 3 months of spending','3–6 months','Over 6 months')],
+  ['cfl3','If these investments fell 30% and took 5 years to recover, how would your plans be affected?',C3('Seriously: goals would fail','Some goals delayed','Little or no effect')],
+  ['cfl4','When will you start drawing on this money?',C3('Within 5 years','In 5–10 years','After 10 years')],
+  ['cfl5','How secure is your income for the next five years?',C3('Insecure or none','Fairly secure','Very secure, or guaranteed pension income')],
+  ['cfl6','Do you have other assets or pensions to fall back on?',C3('None','Some','Substantial')]];
+const K4=(a,b,c,d)=>[['0',a],['1',b],['2',c],['3',d]];
+const KE_Q=[
+  ['ke1','Which investments have you held?',K4('Cash only','Funds, ISAs or pensions chosen by others','Funds and shares I chose myself','Shares, bonds and complex products (structured products, derivatives, private equity)')],
+  ['ke2','How long have you been investing?',K4('Never','Under 3 years','3–10 years','Over 10 years')],
+  ['ke3','Do you have relevant qualifications or work experience in finance?',K4('No','Some general knowledge','Relevant work experience or qualification','Professional in investment or finance')]];
+function rtqResult(r){const sc=rtqScore(r);if(!sc.complete)return null;return {riskTol:String(sc.atr.band),lossReaction:sc.loss,capacity:sc.cfl.level,experience:sc.ke.level}}
+function rtqScore(r){
+  const atrA=ATR_Q.map(([k])=>r[k]).filter(v=>has(v));const atrT=atrA.reduce((t,v)=>t+N(v),0);
+  const atrDone=atrA.length===ATR_Q.length;const band=atrDone?(ATR_BANDS.find(([a,b])=>atrT>=a&&atrT<=b)||[0,0,0])[2]:null;
+  const cflA=CFL_Q.map(([k])=>r[k]).filter(v=>has(v));const cflT=cflA.reduce((t,v)=>t+N(v),0);const cflDone=cflA.length===CFL_Q.length;
+  const cap=cflDone?(cflT<=-2?'low':cflT>=2?'high':'medium'):null;
+  const keA=KE_Q.map(([k])=>r[k]).filter(v=>has(v));const keT=keA.reduce((t,v)=>t+N(v),0);const keDone=keA.length===KE_Q.length;
+  const exp=keDone?(keT<=1?'None':keT<=4?'Basic':keT<=7?'Informed':'Advanced'):null;
+  const answered=atrA.length+cflA.length+keA.length+(has(r.loss)?1:0),total=ATR_Q.length+CFL_Q.length+KE_Q.length+1;
+  return {atr:{answered:atrA.length,of:ATR_Q.length,total:atrT,band},loss:has(r.loss)?r.loss:null,cfl:{answered:cflA.length,of:CFL_Q.length,total:cflT,level:cap},ke:{answered:keA.length,of:KE_Q.length,total:keT,level:exp},answered,of:total,complete:answered===total};
+}
 const TASK_STATUS=['Not started','In progress','Waiting on client','Waiting on provider','Done','Cancelled'];
 const taskOpen=t=>!['Done','Cancelled'].includes(t.status);
 /* Eight UK asset classes for mandates and holdings; each rolls up to the four the balance sheet uses */
@@ -293,6 +335,12 @@ const SCHEMA = {
       {k:'notes',l:'Notes',t:'area',w:1},
     ]},
   ]},
+  rtq:{title:'Risk questionnaire',sheet:'RiskQuestionnaire',item:'questionnaire',desc:'A structured, scored questionnaire for each adult. When complete it sets their risk tolerance, loss reaction, capacity for loss and knowledge and experience.',groups:[
+    {t:'Client and date',fields:[{k:'owner',l:'Client',t:'member'},{k:'completedOn',l:'Completed on',t:'date',d:today},{k:'by',l:'Taken by',t:'text'}]},
+    {t:'Attitude to risk',fields:ATR_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1})).concat([{k:LOSS_Q[0],l:LOSS_Q[1],t:'sel',o:LOSS_Q[2],w:1}])},
+    {t:'Capacity for loss',fields:CFL_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1}))},
+    {t:'Knowledge and experience',fields:KE_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1}))},
+  ]},
   firm:{single:true,title:'Firm details',sheet:'Firm',desc:'Used on letters of authority and client documents.',fields:[
     {k:'name',l:'Firm name',t:'text'},
     {k:'frn',l:'FCA firm reference number',t:'text',h:'Shown on letters: providers check it against the FCA register'},
@@ -376,7 +424,7 @@ const SCHEMA = {
       {k:'pensionIHT',l:'Include pensions in estate (from Apr 2027)',t:YN,d:true}]}
   ]}
 };
-const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models','loas'];
+const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models','loas','rtq'];
 const SINGLES = ['household','mandate','compliance','assumptions'];
 /* Default model portfolios: five risk-rated models benchmarked to the ARC Private Client Indices. Firms edit these. */
 const DEFAULT_MODELS=[
@@ -459,6 +507,10 @@ function sample(){
   Object.assign(s.mandate,{basis:'Advisory',model:'Balanced',agreedRisk:4,objective:'Balanced growth and income',horizon:20,restrictions:'No tobacco. Keep the LLP capital account outside the managed portfolio.',rebalance:'On drift',driftTol:5,agreedOn:addDays(today(),-9),agreedBy:'James and Priya Harrington'});
   s.contacts=[
     mk('contacts',{date:addDays(today(),-9),type:'Meeting',with:'James and Priya Harrington',by:'Sam Adviser',summary:'Discovery meeting at the office. Walked through objectives, the LLP income and the plan for the Leeds flat.'})];
+  const ans=(pre,v)=>Object.fromEntries(v.map((x,i)=>[pre+(i+1),String(x)]));
+  s.rtq=[
+    mk('rtq',{owner:'P1',completedOn:addDays(today(),-9),by:'Sam Adviser',...ans('atr',[4,4,4,3,4,3,4,4,3]),loss:'hold',...ans('cfl',[1,0,0,1,-1,0]),...ans('ke',[2,2,1])}),
+    mk('rtq',{owner:'P2',completedOn:addDays(today(),-9),by:'Sam Adviser',...ans('atr',[2,3,3,2,2,3,2,2,2]),loss:'sellsome',...ans('cfl',[0,0,0,0,1,0]),...ans('ke',[1,1,0])})];
   s.loas=[
     mk('loas',{provider:'Aviva',owner:'P1',planType:'Personal pension',policyRef:'PP4471209',status:'Sent to provider',createdOn:addDays(today(),-25),signedOn:addDays(today(),-22),sentOn:addDays(today(),-20),sentBy:'Post'}),
     mk('loas',{provider:'Scottish Widows',owner:'P2',planType:'Workplace pension',employer:'Leeds City Council (AVC)',status:'With client to sign',createdOn:addDays(today(),-3)})];
@@ -926,6 +978,9 @@ function onboarding(C){
   if(!has(c.purpose))add('kyc','warn','Record the purpose and intended nature of the relationship','','compliance');
   // Suitability (household)
   if(!has(S.household.objectives))add('suitability','bad',"Record the client's objectives",'','household');
+  for(const m of S.members.filter(isAdult)){const q=S.rtq.find(x=>x.owner===m.ref);const nm=memberName(m.ref);
+    if(!q||!rtqScore(q).complete)add('suitability','warn',`${nm}: risk questionnaire not completed`,m.ref,'rtq');
+    else{const r=rtqResult(q);const diff=Object.keys(r).filter(k=>String(m[k])!==String(r[k]));if(diff.length)add('suitability','warn',`${nm}: people record differs from the risk questionnaire (${diff.map(k=>fieldLabel('members',k).toLowerCase()).join(', ')})`,m.ref,'rtq')}}
   if(!S.mandate.model||!N(S.mandate.agreedRisk))add('suitability','warn','Mandate: choose a model portfolio and record the agreed risk level','','mandate');
   if(R.ability!==R.willingness&&!has(c.riskNote))add('suitability','bad',`Willingness (${R.willingness.toLowerCase()}) differs from ability (${R.ability.toLowerCase()}): record the rationale for the agreed risk level`,'','compliance');
   if(R.will.length>1&&Math.max(...R.will)-Math.min(...R.will)>=2&&!has(c.riskNote))add('suitability','warn','Partners have different risk attitudes: explain how this is reflected','','compliance');
@@ -984,7 +1039,7 @@ function diff(before,after){const a=flatten(before||blank()),b=flatten(after);co
   for(const c of COLS){const n=cnt(c);if(n.a!==n.b)ch.push({field:`${c}.count`,from:n.b,to:n.a})}
   return ch}
 
-return {SCHEMA,COLS,SINGLES,YN,ROLES,TASK_STATUS,taskOpen,FIRM_SINGLES,FIRM_COLS,firmBlank,firmNormalise,firmDiff,openTasks,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
+return {SCHEMA,COLS,SINGLES,YN,ROLES,ATR_Q,ATR_BANDS,LOSS_Q,CFL_Q,KE_Q,rtqScore,rtqResult,TASK_STATUS,taskOpen,FIRM_SINGLES,FIRM_COLS,firmBlank,firmNormalise,firmDiff,openTasks,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
   fieldsOf,fieldLabel,defaults,blank,normalise,sample,bind,coerce,optList,today,N,has,yes,
   validNino,validPostcode,validEmail,parseDate,addYears,addMonths,addDays,flatten,diff,normKey};
 });
