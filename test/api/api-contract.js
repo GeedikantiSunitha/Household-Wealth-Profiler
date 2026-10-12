@@ -113,7 +113,7 @@ function apiContract(ctx) {
 
     test('POST with the same Idempotency-Key twice: the same reply, one household; a bad key is 400', async () => {
       const key = 'contract-' + crypto.randomUUID();
-      const st = H.blank(); st.household.name = 'Once only ' + key.slice(-6);
+      const st = H.blank(); st.household.name = 'Once only ' + key.slice(-6); st.household.reference = 'ONCE-' + key.slice(-6); // a reference: the repeat must not be refused as a duplicate of itself
       const before = (await (await call('GET', '/api/households', { who: sam })).json()).length;
       const a = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });
       const b = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });

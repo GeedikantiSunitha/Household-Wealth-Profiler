@@ -95,6 +95,10 @@ function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = ''
         if (!hmac) return Promise.resolve(null);
         return inFirm(async c => { const r = (await c.query('select id from households where firm_id = $1 and reference_hmac = $2 limit 1', [firmId, hmac])).rows[0]; return r ? r.id : null; });
       },
+      // The reply stored for this user and key within the last day, else null
+      recall(idem) {
+        return inFirm(async c => { const r = (await c.query(`select reply from idempotency_keys where scope = $1 and firm_id = $2 and created_at >= now() - interval '24 hours'`, [scopeOf(idem.user, idem.key), firmId])).rows[0]; return r ? JSON.parse(r.reply) : null; });
+      },
       async create(rec, audit, idem) {
         const s = idem && scopeOf(idem.user, idem.key);
         try {

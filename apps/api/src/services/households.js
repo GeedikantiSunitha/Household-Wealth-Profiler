@@ -63,6 +63,8 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
       const idem = idempotencyKey ? { user: ctx.user, key: idempotencyKey } : null;
       // Repeats with the same key queue behind each other, so the second sees the first's reply
       return withLock(`${ctx.firmId}:` + (idem ? `create:${ctx.user}:${idempotencyKey}` : rec.id), async () => {
+        // A repeat of a create that already went through replays its reply: its own reference is not "taken"
+        if (idem) { const prev = await scoped.recall(idem); if (prev) return prev; }
         await refuseTakenReference(scoped, s, null);
         return asDuplicate(s, scoped.create(rec, [{ ts, user: ctx.user, field: 'created', from: '', to: s.household.name || '' }], idem));
       });

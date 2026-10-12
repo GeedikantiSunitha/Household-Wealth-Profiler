@@ -48,6 +48,12 @@ test('create with an idempotency key: the same user and key again returns the fi
   assert.notEqual((await svc.create(SAM, H.blank(), { idempotencyKey: 'click-0002' })).id, first.id, 'another key is another household');
   assert.notEqual((await svc.create(CHRIS, H.blank(), { idempotencyKey: 'click-0001' })).id, first.id, 'keys are per user');
   assert.equal((await svc.list(SAM)).length, 3);
+  // With a client reference, the repeat replays too: the household the key made is not a duplicate of itself
+  const st = H.blank(); st.household.reference = 'REF-ONCE';
+  const withRef = await svc.create(SAM, st, { idempotencyKey: 'click-0003' });
+  assert.deepEqual(await svc.create(SAM, st, { idempotencyKey: 'click-0003' }), withRef, 'the same key replays, not 409');
+  await assert.rejects(svc.create(SAM, st, { idempotencyKey: 'click-0004' }), { status: 409 }, 'another key with that reference is a duplicate');
+  assert.equal((await svc.list(SAM)).length, 4);
   // Two identical requests at the same moment: still one household
   const { svc: svc2 } = setup();
   const both = await Promise.all([svc2.create(SAM, H.blank(), { idempotencyKey: 'same-key-1' }), svc2.create(SAM, H.blank(), { idempotencyKey: 'same-key-1' })]);

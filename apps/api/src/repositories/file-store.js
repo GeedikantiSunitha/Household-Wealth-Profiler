@@ -113,6 +113,7 @@ function createFileStore(root, { seal, open, key }) {
         }
         return null;
       },
+      recall: idem => recallIdem(idem.user, idem.key),
       async create(rec, audit, idem) {
         if (idem) { const prev = await recallIdem(idem.user, idem.key); if (prev) return prev; }
         await writeRecord(rec);
