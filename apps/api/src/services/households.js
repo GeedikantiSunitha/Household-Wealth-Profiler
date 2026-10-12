@@ -60,7 +60,8 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
       const scoped = forFirm(ctx);
       const ts = now();
       const rec = { id: newId(), version: 1, state: s, createdAt: ts, createdBy: ctx.user, updatedAt: ts, updatedBy: ctx.user };
-      const idem = idempotencyKey ? { user: ctx.user, key: idempotencyKey } : null;
+      // The request goes with the key: the same key with a different request is refused (422), not replayed
+      const idem = idempotencyKey ? { user: ctx.user, key: idempotencyKey, request: JSON.stringify(s) } : null;
       // Repeats with the same key queue behind each other, so the second sees the first's reply
       return withLock(`${ctx.firmId}:` + (idem ? `create:${ctx.user}:${idempotencyKey}` : rec.id), async () => {
         // A repeat of a create that already went through replays its reply: its own reference is not "taken"

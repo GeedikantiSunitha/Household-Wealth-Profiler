@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { createPool, tx: inTx, runMigrations, migrateWith, pendingWith } = require('../db/pool.js');
 const { createFirmSealer, newDataKey, wrapKey, unwrapKey, referenceIndex, indexKeyFor } = require('../crypto/seal.js');
 const { ID_RE } = require('./ids.js');
+const { requestHash, replay } = require('./idempotency.js');
 
 const logUnreadable = (id, e) => console.error(new Date().toISOString(), `unreadable household ${id}:`, e.message);
 const refOf = rec => rec && rec.state && rec.state.household ? rec.state.household.reference : undefined;
@@ -71,6 +72,10 @@ function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = ''
         on conflict (firm_id) do update set version = excluded.version, doc = excluded.doc, updated_at = excluded.updated_at`, [firmId, rec.version, doc, rec.updatedAt]);
     }
     const scopeOf = (user, k) => crypto.createHash('sha256').update(`${firmId}:${user}:${k}`).digest('hex');
+    async function storedReply(c, indexKey, idem) {
+      const r = (await c.query(`select reply, request_hash from idempotency_keys where scope = $1 and firm_id = $2 and created_at >= now() - interval '24 hours'`, [scopeOf(idem.user, idem.key), firmId])).rows[0];
+      return r ? replay({ reply: JSON.parse(r.reply), requestHash: r.request_hash }, requestHash(indexKey, idem.request)) : null;
+    }
 
     return {
       async ids() { return inFirm(async c => (await c.query('select id from households where firm_id = $1', [firmId])).rows.map(r => r.id)); },
@@ -95,32 +100,30 @@ function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = ''
         if (!hmac) return Promise.resolve(null);
         return inFirm(async c => { const r = (await c.query('select id from households where firm_id = $1 and reference_hmac = $2 limit 1', [firmId, hmac])).rows[0]; return r ? r.id : null; });
       },
-      // The reply stored for this user and key within the last day, else null
-      recall(idem) {
-        return inFirm(async c => { const r = (await c.query(`select reply from idempotency_keys where scope = $1 and firm_id = $2 and created_at >= now() - interval '24 hours'`, [scopeOf(idem.user, idem.key), firmId])).rows[0]; return r ? JSON.parse(r.reply) : null; });
-      },
+      // The reply stored for this user and key within the last day, else null; a key with a different request is refused
+      recall(idem) { return inFirm((c, sealer, indexKey) => storedReply(c, indexKey, idem)); },
       async create(rec, audit, idem) {
         const s = idem && scopeOf(idem.user, idem.key);
         try {
           return await inFirm(async (c, sealer, indexKey) => {
             if (s) {
               await c.query(`delete from idempotency_keys where firm_id = $1 and created_at < now() - interval '24 hours'`, [firmId]);
-              const prev = (await c.query('select reply from idempotency_keys where scope = $1 and firm_id = $2', [s, firmId])).rows[0];
-              if (prev) return JSON.parse(prev.reply);
+              const prev = await storedReply(c, indexKey, idem);
+              if (prev) return prev;
             }
             const doc = sealer.seal(JSON.stringify(rec));
             await c.query('insert into households (id, version, doc, updated_at, firm_id, reference_hmac) values ($1, $2, $3, $4, $5, $6)', [rec.id, rec.version, doc, rec.updatedAt, firmId, referenceIndex(indexKey, refOf(rec))]);
             await insertVersion(c, sealer, rec, audit);
             const reply = { id: rec.id, version: rec.version };
-            if (s) await c.query('insert into idempotency_keys (scope, reply, firm_id) values ($1, $2, $3)', [s, JSON.stringify(reply), firmId]);
+            if (s) await c.query('insert into idempotency_keys (scope, reply, firm_id, request_hash) values ($1, $2, $3, $4)', [s, JSON.stringify(reply), firmId, requestHash(indexKey, idem.request)]);
             return reply;
           });
         } catch (e) {
           // The same key at the same moment on another connection: that transaction committed first,
           // this one was rolled back whole (household included); answer with the first reply
           if (s && e.code === '23505') {
-            const prev = await inFirm(async c => (await c.query('select reply from idempotency_keys where scope = $1 and firm_id = $2', [s, firmId])).rows[0]);
-            if (prev) return JSON.parse(prev.reply);
+            const prev = await inFirm((c, sealer, indexKey) => storedReply(c, indexKey, idem));
+            if (prev) return prev;
           }
           throw e;
         }

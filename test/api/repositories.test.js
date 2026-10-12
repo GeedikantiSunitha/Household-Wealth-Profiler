@@ -40,11 +40,25 @@ function storeContract(label, makeStore, rawRows, rawFirm, hooks) {
       assert.equal(await store.get(b), null, 'no second household');
       assert.equal((await store.create(rec(b, 1, 'Other user'), [], { user: 'chris', key: 'key-000001' })).id, b, 'keys are per user');
     });
+    test('an idempotency key sent with a different request is refused (422), not answered with the first reply', async () => {
+      const a = crypto.randomUUID(), b = crypto.randomUUID();
+      const idem = { user: 'sam', key: 'key-000003', request: '{"household":{"name":"One"}}' };
+      assert.deepEqual(await store.create(rec(a, 1, 'One'), [], idem), { id: a, version: 1 });
+      assert.deepEqual(await store.recall(idem), { id: a, version: 1 }, 'recall gives the stored reply for the same request');
+      assert.deepEqual(await store.create(rec(b, 1, 'One'), [], { ...idem }), { id: a, version: 1 }, 'the same request replays');
+      const changed = { ...idem, request: '{"household":{"name":"Two"}}' };
+      await assert.rejects(store.recall(changed), { status: 422, message: 'This Idempotency-Key was already used for a different request' });
+      await assert.rejects(store.create(rec(b, 1, 'Two'), [], changed), { status: 422 });
+      assert.equal(await store.get(b), null, 'nothing was stored for the refused request');
+      assert.equal(await store.recall({ user: 'sam', key: 'key-never-used', request: 'x' }), null, 'an unknown key recalls nothing');
+    });
     test('an idempotency key older than 24 hours no longer replays', async () => {
       const a = crypto.randomUUID(), b = crypto.randomUUID();
-      await store.create(rec(a, 1, 'Old'), [], { user: 'sam', key: 'key-000002' });
+      await store.create(rec(a, 1, 'Old'), [], { user: 'sam', key: 'key-000002', request: 'old request' });
       await hooks.ageKeys(25);
-      assert.equal((await store.create(rec(b, 1, 'New'), [], { user: 'sam', key: 'key-000002' })).id, b);
+      assert.equal(await store.recall({ user: 'sam', key: 'key-000002', request: 'old request' }), null, 'nothing to replay');
+      assert.equal(await store.recall({ user: 'sam', key: 'key-000002', request: 'another request' }), null, 'and no mismatch either: the key is new');
+      assert.equal((await store.create(rec(b, 1, 'New'), [], { user: 'sam', key: 'key-000002', request: 'another request' })).id, b, 'a new create, whatever it sends');
     });
     test('list skips a record that cannot be read and reports its id; get on it fails', async () => {
       const bad = crypto.randomUUID();

@@ -54,6 +54,25 @@ test('create with an idempotency key: the same user and key again returns the fi
   assert.deepEqual(await svc.create(SAM, st, { idempotencyKey: 'click-0003' }), withRef, 'the same key replays, not 409');
   await assert.rejects(svc.create(SAM, st, { idempotencyKey: 'click-0004' }), { status: 409 }, 'another key with that reference is a duplicate');
   assert.equal((await svc.list(SAM)).length, 4);
+  // The same key with a different request is refused, never answered with a reply that is not its own
+  const changed = H.blank(); changed.household.name = 'Not the same request';
+  await assert.rejects(svc.create(SAM, changed, { idempotencyKey: 'click-0001' }), { status: 422, message: 'This Idempotency-Key was already used for a different request' });
+  assert.deepEqual(await svc.create(SAM, H.blank(), { idempotencyKey: 'click-0001' }), first, 'the original request still replays');
+  assert.equal((await svc.list(SAM)).length, 4, 'nothing was made');
+});
+
+test('another firm reusing a key gets its own create and nothing about the first firm, whatever it sends', async () => {
+  const { svc } = setup();
+  const a = await svc.create(SAM, H.blank(), { idempotencyKey: 'shared-key-1' });
+  const changed = H.blank(); changed.household.name = 'Different request';
+  const b = await svc.create(OTHER_FIRM, changed, { idempotencyKey: 'shared-key-1' });
+  assert.notEqual(b.id, a.id, "no replay of the first firm's reply, and no 422 that would say the key was used there");
+  assert.deepEqual(await svc.create(OTHER_FIRM, changed, { idempotencyKey: 'shared-key-1' }), b, "the second firm's own repeat replays its own reply");
+  await assert.rejects(svc.create(OTHER_FIRM, H.blank(), { idempotencyKey: 'shared-key-1' }), { status: 422 }, "judged against the second firm's own record only");
+  assert.deepEqual(await svc.create(SAM, H.blank(), { idempotencyKey: 'shared-key-1' }), a, 'the first firm is unaffected');
+  assert.equal(await svc.get(OTHER_FIRM, a.id), null, "the first firm's household is invisible");
+  assert.deepEqual((await svc.list(OTHER_FIRM)).map(h => h.id), [b.id]);
+  assert.deepEqual((await svc.list(SAM)).map(h => h.id), [a.id]);
   // Two identical requests at the same moment: still one household
   const { svc: svc2 } = setup();
   const both = await Promise.all([svc2.create(SAM, H.blank(), { idempotencyKey: 'same-key-1' }), svc2.create(SAM, H.blank(), { idempotencyKey: 'same-key-1' })]);

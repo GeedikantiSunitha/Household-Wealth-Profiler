@@ -162,6 +162,30 @@ test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to
       const ra = await (await call(A, 'POST', '/api/households', { state: st }, { 'Idempotency-Key': key })).json();
       const rb = await (await call(B, 'POST', '/api/households', { state: st }, { 'Idempotency-Key': key })).json();
       assert.notEqual(ra.id, rb.id, 'idempotency keys are per firm');
+      assert.equal((await call(B, 'GET', '/api/households/' + ra.id)).status, 404, "A's household stays invisible to B");
+      // B reusing A's key with a different request: a plain 201 of its own, never a 422 that would reveal A used the key
+      const key2 = 'api-key-' + crypto.randomUUID().slice(0, 8);
+      const st2 = H.blank(); st2.household.name = 'Only in B'; st2.household.reference = 'B-' + key2;
+      const ra2 = await (await call(A, 'POST', '/api/households', { state: st }, { 'Idempotency-Key': key2 })).json();
+      const r2 = await call(B, 'POST', '/api/households', { state: st2 }, { 'Idempotency-Key': key2 });
+      assert.equal(r2.status, 201); const rb2 = await r2.json();
+      assert.notEqual(rb2.id, ra2.id);
+      assert.ok(!(await (await call(B, 'GET', '/api/households')).json()).some(h => h.id === ra2.id || h.id === ra.id), "B's list holds nothing of A");
+      const mism = await call(A, 'POST', '/api/households', { state: st2 }, { 'Idempotency-Key': key2 });
+      assert.equal(mism.status, 422, "A's key with a different request is refused within A");
     } finally { server.close(); }
+  });
+
+  test("firm B reusing firm A's key: no replay, no sign the key was used, and B's own repeat rule applies to B's record only", async () => {
+    const sa = store.forFirm(A), sb = store.forFirm(B);
+    const ia = { user: 'sam', key: 'key-shared-2', request: 'request of A' };
+    const ka2 = await sa.create(rec(crypto.randomUUID(), 1, 'Keyed A'), [], ia);
+    assert.equal(await sb.recall(ia), null, "B recalls nothing for A's key and request");
+    assert.equal(await sb.recall({ ...ia, request: 'request of B' }), null, 'and is not told the key was used (no 422)');
+    const kb2 = await sb.create(rec(crypto.randomUUID(), 1, 'Keyed B'), [], { ...ia, request: 'request of B' });
+    assert.notEqual(kb2.id, ka2.id);
+    assert.deepEqual(await sb.recall({ ...ia, request: 'request of B' }), kb2, "B's own reply");
+    await assert.rejects(sb.recall(ia), { status: 422 }, "B's key now belongs to B's request, not A's");
+    assert.deepEqual(await sa.recall(ia), ka2, 'A is unaffected');
   });
 });

@@ -118,9 +118,15 @@ function apiContract(ctx) {
       const a = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });
       const b = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });
       assert.equal(a.status, 201); assert.equal(b.status, 201);
-      assert.deepEqual(await b.json(), await a.json());
+      const ja = await a.json(); assert.deepEqual(await b.json(), ja);
       const after = (await (await call('GET', '/api/households', { who: sam })).json()).length;
       assert.equal(after, before + 1);
+      // The same key with a different request is refused, not answered with the first reply; the original repeat still replays
+      const other = H.blank(); other.household.name = 'Something else ' + key.slice(-6);
+      const c = await call('POST', '/api/households', { who: sam, body: { state: other }, headers: { 'Idempotency-Key': key } });
+      assert.equal(c.status, 422); assert.deepEqual(await c.json(), { error: 'This Idempotency-Key was already used for a different request' });
+      assert.deepEqual(await (await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } })).json(), ja, 'the original request still replays');
+      assert.equal((await (await call('GET', '/api/households', { who: sam })).json()).length, before + 1, 'still one household');
       const bad = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': 'no spaces allowed' } });
       assert.equal(bad.status, 400);
       assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' });

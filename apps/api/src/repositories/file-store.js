@@ -15,6 +15,7 @@ const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
 const { ID_RE, DEFAULT_FIRM_ID } = require('./ids.js');
+const { requestHash, replay } = require('./idempotency.js');
 const { referenceIndex, indexKeyFor } = require('../crypto/seal.js');
 
 const IDEM_TTL_MS = 24 * 3600e3;
@@ -65,17 +66,21 @@ function createFileStore(root, { seal, open, key }) {
       try { return (await fsp.readdir(path.join(dir, 'households'))).filter(x => ID_RE.test(x)); }
       catch (e) { if (e.code === 'ENOENT') return []; throw e; }
     }
-    // The reply stored for this user and key within the last day, else null
-    async function recallIdem(user, k) {
-      const f = idemFile(user, k);
+    // The reply stored for this user and key within the last day, else null; a key with a different
+    // request is refused. (A file from before request hashes were kept holds the bare reply.)
+    async function recallIdem(idem) {
+      const f = idemFile(idem.user, idem.key);
+      let stored;
       try {
         const st = await fsp.stat(f);
         if (Date.now() - st.mtimeMs > IDEM_TTL_MS) return null;
-        return JSON.parse(await fsp.readFile(f, 'utf8'));
+        stored = JSON.parse(await fsp.readFile(f, 'utf8'));
       } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+      if (!stored.reply) stored = { reply: stored, requestHash: null };
+      return replay(stored, requestHash(indexKey, idem.request));
     }
-    async function rememberIdem(user, k, reply) {
-      await writeAtomic(idemFile(user, k), JSON.stringify(reply));
+    async function rememberIdem(idem, reply) {
+      await writeAtomic(idemFile(idem.user, idem.key), JSON.stringify({ reply, requestHash: requestHash(indexKey, idem.request) }));
       for (const f of await fsp.readdir(idemDir)) { // keys past their day go
         try { const st = await fsp.stat(path.join(idemDir, f)); if (Date.now() - st.mtimeMs > IDEM_TTL_MS) await fsp.unlink(path.join(idemDir, f)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
       }
@@ -113,13 +118,13 @@ function createFileStore(root, { seal, open, key }) {
         }
         return null;
       },
-      recall: idem => recallIdem(idem.user, idem.key),
+      recall: recallIdem,
       async create(rec, audit, idem) {
-        if (idem) { const prev = await recallIdem(idem.user, idem.key); if (prev) return prev; }
+        if (idem) { const prev = await recallIdem(idem); if (prev) return prev; }
         await writeRecord(rec);
         await appendAudit(rec.id, audit);
         const reply = { id: rec.id, version: rec.version };
-        if (idem) await rememberIdem(idem.user, idem.key, reply);
+        if (idem) await rememberIdem(idem, reply);
         return reply;
       },
       async update(id, decide) {

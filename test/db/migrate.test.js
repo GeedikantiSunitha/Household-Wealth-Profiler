@@ -94,6 +94,18 @@ test('0004: existing rows move into the default firm; frozen tables accept only 
   } finally { await pg.close(); }
 });
 
+test('0009: idempotency keys gain a nullable request hash; rows from before it still fit', async () => {
+  const pg = await pglite();
+  try {
+    await upTo(pg, '0008_policies_in_schema.sql');
+    await pg.query(`insert into idempotency_keys (scope, reply, firm_id) values ('old', '{"id":"x","version":1}', 'f1a00000-0000-4000-8000-000000000001')`);
+    const applied = await migrate(adapt(pg), { dir: DIR });
+    assert.ok(applied.includes('0009_idempotency_request.sql'), applied.join());
+    await pg.query(`insert into idempotency_keys (scope, reply, firm_id, request_hash) values ('new', '{"id":"y","version":1}', 'f1a00000-0000-4000-8000-000000000001', 'abc')`);
+    assert.deepEqual((await pg.query('select scope, request_hash from idempotency_keys order by scope')).rows, [{ scope: 'new', request_hash: 'abc' }, { scope: 'old', request_hash: null }]);
+  } finally { await pg.close(); }
+});
+
 // A database with every migration up to and including `last` applied, for testing the next one
 async function upTo(pg, last) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-upto-'));
