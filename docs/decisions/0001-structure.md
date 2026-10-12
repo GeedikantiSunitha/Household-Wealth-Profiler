@@ -59,3 +59,24 @@ Reorganise the code into one structure with clear layers, **without changing beh
 - Each step is small and checked against the baseline, so a problem points to one commit.
 - npm workspaces are switched on in step B2, when `packages/core` becomes the first package.
 - Documentation and the pull request explain the new layout to Umesh before anything merges.
+
+## Outcome (steps B1 to B21)
+
+Done as planned: `packages/core`, `apps/api` in layers, `apps/web` as browser modules,
+`db/migrations`, tests grouped by layer, and the local launcher in `deploy/local`. `core.js` is
+unchanged from the baseline. Where the result differs from the plan above:
+
+- **Two deliberate behaviour changes**, each in its own commit and kept out of the moves:
+  - The served app saves client data only on the server. If the server cannot be reached, it shows an error instead of quietly saving in the browser. Browser-only saving remains only in the single-file demo build.
+  - The Supabase migrations can also run on plain PostgreSQL 14+.
+- **One accepted difference in B10:** a malformed request body with no length or chunking now
+  gets Node's own 400 reply instead of a 404. Every valid request is answered exactly as before.
+- **`import-files` stays in `apps/api/src/cli`**, not `ops/`. It is built on the API's own
+  storage code, so moving it would make operations tooling depend on the API's internals.
+- **`docs/` holds only decisions and the screen checklist.** Architecture, API and data-model
+  pages were not added; the READMEs in each folder and the API contract test cover them.
+- **Not yet done:** the `ops/` tools (backup, restore, admin, keys) and `deploy/dcdeploy/` are
+  planned in `ops/README.md` and `deploy/README.md` but not built. The Supabase edition and the old deploy files are untouched, pending their own
+  retirement decision.
+- **The unit tests run on a fixed clock** (2026-10-10). One of them had hard-coded dates and began
+  failing on 2026-10-12; the fix touched only the tests.

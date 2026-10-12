@@ -12,7 +12,7 @@ package is `pg`, and it is used only when the data is kept in PostgreSQL.
 
 ```sh
 npm install
-npm test          # tax, balance sheet, IHT, KYC rules, server security, Supabase edition
+npm test          # rules (tax, balance sheet, IHT, KYC), the API, migrations, Supabase edition
 npm run dev       # http://localhost:8080, sign in as demo / demo, data in ./data-dev
 ```
 
@@ -282,18 +282,22 @@ The agreement date starts an annual mandate review in Reviews due.
 
 ```
 packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
-apps/web/public/js/main.js  the interface (browser modules; bundled by esbuild for npm run build)
-apps/web/public/index.html  page shell
-apps/web/public/styles.css  styles
-apps/web/public/cloud.js    sign-in and two-step verification for the Supabase edition
-server.js           API, sign-in, encryption, versions, audit trail (self-hosted)
-db/                 migrations and migration runner for server.js with PostgreSQL
+apps/api/src/       the self-hosted API: settings, sign-in, encryption, storage, versions, audit trail, routes
+apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js)
+apps/web/public/cloud.js  sign-in and two-step verification for the Supabase edition
+server.js           starts the API (npm start) and runs its commands (hash-password, gen-key, import-files)
+db/                 PostgreSQL migrations and the migration runner for the self-hosted API
+deploy/             how the app runs: deploy/local/dev.js is npm run dev
+ops/                operating a deployment: backups, restores, data migrations (being filled in)
+docs/               decision records and the manual screen checklist
 supabase/           database migrations and the `api` Edge Function (Supabase edition)
 scripts/firms.js    create and manage customer firms (Supabase edition)
 scripts/supabase-db.js  apply Supabase migrations to any PostgreSQL 14+, backfill list columns
 scripts/build.js    builds dist/wealth-profiler.html, a single file that runs without a server
-test/               node:test suites
+test/               unit (rules), api, db, supabase and e2e (npm run screens) tests
 ```
+
+Each of `apps/api`, `apps/web` and `packages/core` has its own README with the detail.
 
 ### Adding a field
 

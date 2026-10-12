@@ -1,7 +1,7 @@
 # Screen check
 
-Run after every restructuring step that touches the front end or how files are served
-(Stage B steps B2, B10, B12 to B20). The app must look and behave exactly as it did at the
+Run after any change that touches the front end or how files are served. During the restructure
+(Stage B: B2, B10, B12 to B21) it proved the app looks and behaves exactly as it did at the
 `baseline-before-restructure` tag.
 
 ## 1. Automatic part (2 minutes)
@@ -24,10 +24,11 @@ It fails if any of these goes wrong:
 | Side rail | 27 sections in this order: household, members, income, expenses, goals, accounts, db, property, other, liabilities, protection, assumptions, compliance, kyc, audit, contacts, actions, complaints, reviews, mandate, models, drift, bs, tax, risk, checks, guide |
 | Rules on screen | Header shows "KYC and AML"; KYC in the rail shows "2 open" |
 | Every section | Renders without a script error, and without "undefined" or "NaN" on screen |
-| Autosave | Typing a change ends with "All changes saved" |
+| Typing and autosave | Typing in a field shows "Unsaved changes" and a note in the live-effect panel, then "All changes saved" |
 | Reload | The change is still there in the client list and in the form |
 | Reviews due | The firm-wide diary renders |
 | Edit conflict | A save after someone else's shows "Someone else saved this household…" and "Not saved: newer version exists"; "Reload their version" loads theirs |
+| Top bar | "Export JSON" downloads the open household |
 | Phone width | Household, balance sheet and KYC captured at 390 px (page width recorded in the report) |
 | Server unreachable at start-up | When the start-up call fails, or something other than the server answers, the app shows "Cannot open the profiler" and no data-entry field: it never falls back to saving in the browser |
 
@@ -41,7 +42,8 @@ git-ignored. The report ends with one of:
 The audit trail and the client list show the server's real save times, so they are not compared.
 
 **Baseline:** made once, before the first restructuring step, with
-`npm run screens -- baseline`. Do not remake it during Stage B; it is the reference.
+`npm run screens -- baseline`. Do not remake it for a change that should not alter the screens;
+remake it only after a deliberate, reviewed screen change, and say so in the pull request.
 
 ## 2. By hand (5 minutes)
 
@@ -60,4 +62,4 @@ Excel needs the internet (SheetJS loads from cdnjs) unless `scripts/fetch-xlsx.s
 
 ## 3. Record the result
 
-In the commit message for the step: `Screen check: automatic SAME (or LOOK: <screens>, expected because …); by hand 1-8 OK`.
+In the commit message for the change: `Screen check: automatic SAME (or LOOK: <screens>, expected because …); by hand 1-8 OK`.

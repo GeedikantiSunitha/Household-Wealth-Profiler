@@ -34,5 +34,5 @@ the Docker image and never reaches users).
   what other scripts provide (`window.HWP` from core.js, `window.HWP_CONFIG`, `window.HWPCloud`).
 - A module that only registers listeners (`events/editing.js`, `events/toolbar.js`) must be imported
   for its effect (`import './events/editing.js'`): nothing else loads it.
-- After each step, `npm run screens` must report `SAME` (see `docs/checklists/screen-smoke.md`),
-  and `npm run build` must still produce a working `dist/wealth-profiler.html`.
+- After any change here, `npm run screens` must report `SAME`, or `LOOK` with every difference
+  explained (see `docs/checklists/screen-smoke.md`), and `npm run build` must still produce a working `dist/wealth-profiler.html`.
