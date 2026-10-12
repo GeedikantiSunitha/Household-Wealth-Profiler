@@ -73,10 +73,17 @@ test('household ids must be UUIDs', () => {
 });
 
 // PostgreSQL store: raw text = households.doc, household_versions.doc, audit_log.entry
-const URL_ = process.env.TEST_DATABASE_URL;
-if (URL_) {
+const BASE_URL = process.env.TEST_DATABASE_URL;
+if (BASE_URL) {
   const { Client } = require('pg');
-  storeContract('PostgreSQL', () => createStore({ databaseUrl: URL_, databasePoolMax: 2, root: ROOT }, sealer), async id => {
+  // test/api/postgres.test.js uses the same database at the same time, with its own key. Each run
+  // here gets a schema of its own (dropped afterwards), so neither file sees the other's rows.
+  const schema = 'hwp_repositories_' + crypto.randomBytes(4).toString('hex');
+  const u = new URL(BASE_URL); u.searchParams.set('options', `-c search_path=${schema}`);
+  const URL_ = u.toString();
+  const admin = async sql => { const c = new Client({ connectionString: BASE_URL }); await c.connect(); try { await c.query(sql); } finally { await c.end(); } };
+  test.after(() => admin(`drop schema if exists ${schema} cascade`));
+  storeContract('PostgreSQL', async () => { await admin(`create schema ${schema}`); return createStore({ databaseUrl: URL_, databasePoolMax: 2, root: ROOT }, sealer); }, async id => {
     const c = new Client({ connectionString: URL_ }); await c.connect();
     try {
       return [...(await c.query('select doc from households where id = $1', [id])).rows.map(r => r.doc),
