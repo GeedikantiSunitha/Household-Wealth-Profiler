@@ -13,6 +13,7 @@ const path = require('node:path');
 const H = require('../../packages/core/core.js');
 const { apiContract } = require('./api-contract.js');
 const { testDatabaseUrl } = require('./test-db.js');
+const { waitForServer } = require('./servers.js');
 
 const URL_ = testDatabaseUrl();
 const ROOT = path.join(__dirname, '..', '..');
@@ -25,6 +26,7 @@ const J = { 'Content-Type': 'application/json' };
 let proc, db, KEY, ENV;
 
 test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to run' }, () => {
+  // A server that fails to start must fail the run in minutes, not hang it (seen on Windows)
   test.before(async () => {
     const { Client } = require('pg');
     db = new Client({ connectionString: URL_ });
@@ -37,9 +39,8 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       AUTH_USERS: [node(['hash-password', 'sam', 'correct horse']), node(['hash-password', 'chris', 'battery staple'])].join(';') };
     proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: ENV, stdio: 'pipe' });
     proc.stderr.on('data', d => serverLog.push(String(d))); // shown at the end if the server logged an error
-    for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
-    throw new Error('server did not start');
-  });
+    await waitForServer(proc, BASE);
+  }, { timeout: 120000 });
   const serverLog = [];
   test.after(async () => {
     if (proc) proc.kill(); if (db) await db.end();
@@ -68,19 +69,24 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     assert.equal((await fetch(`${BASE}/api/households/${crypto.randomUUID()}`, { headers: SAM })).status, 404);
   });
 
-  test('two saves of the same version at once: exactly one wins', async () => {
-    const rec = await (await fetch(`${BASE}/api/households/${id}`, { headers: SAM })).json();
-    const save = (who, v) => { const st = structuredClone(rec.state); st.household.reference = v; return fetch(`${BASE}/api/households/${id}`, { method: 'PUT', headers: { ...who, ...J }, body: JSON.stringify({ version: rec.version, state: st }) }); };
-    const codes = (await Promise.all([save(SAM, 'A-1'), save(CHRIS, 'B-2')])).map(r => r.status).sort();
-    assert.deepEqual(codes, [200, 409]);
+  test('two saves of the same version at once: exactly one wins, every time (25 rounds, never a server error)', async () => {
+    for (let round = 1; round <= 25; round++) {
+      const rec = await (await fetch(`${BASE}/api/households/${id}`, { headers: SAM })).json();
+      const save = (who, v) => { const st = structuredClone(rec.state); st.household.reference = v; return fetch(`${BASE}/api/households/${id}`, { method: 'PUT', headers: { ...who, ...J }, body: JSON.stringify({ version: rec.version, state: st }) }); };
+      const replies = await Promise.all([save(SAM, `A-${round}`), save(CHRIS, `B-${round}`)]);
+      const codes = replies.map(r => r.status).sort();
+      assert.deepEqual(codes, [200, 409], `round ${round}: ${await replies[codes.indexOf(500) >= 0 ? replies.findIndex(r => r.status === 500) : 0].text()}`);
+    }
   });
 
   test('rows are encrypted and every version is kept', async () => {
     const h = (await db.query('select version, doc from households where id = $1', [id])).rows[0];
     // Sealed with the firm's own key (enc:v2); records from before tenancy are enc:v1 and still open
-    assert.equal(h.version, 3); assert.match(h.doc, /^enc:v2:/); assert.doesNotMatch(h.doc, /Harrington/);
+    const current = (await (await fetch(`${BASE}/api/households/${id}`, { headers: SAM })).json()).version;
+    assert.ok(current >= 3);
+    assert.equal(h.version, current); assert.match(h.doc, /^enc:v2:/); assert.doesNotMatch(h.doc, /Harrington/);
     const v = (await db.query('select version, doc from household_versions where household_id = $1 order by version', [id])).rows;
-    assert.deepEqual(v.map(x => x.version), [1, 2, 3]); assert.ok(v.every(x => x.doc.startsWith('enc:v2:')));
+    assert.deepEqual(v.map(x => x.version), Array.from({ length: current }, (_, i) => i + 1), 'every version kept'); assert.ok(v.every(x => x.doc.startsWith('enc:v2:')));
     const firm = (await db.query('select wrapped_key from firms')).rows[0];
     assert.match(firm.wrapped_key, /^wk:v1:/, "the firm's key is stored wrapped");
     const a = (await db.query('select entry from audit_log where household_id = $1', [id])).rows;
@@ -107,16 +113,16 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const p2 = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, DATA_KEY: NEW, PORT: String(PORT + 2) }, stdio: 'pipe' });
     try {
       const B2 = `http://127.0.0.1:${PORT + 2}`;
-      for (let i = 0; i < 50; i++) { try { if ((await fetch(B2 + '/healthz')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+      await waitForServer(p2, B2);
       const rec = await (await fetch(`${B2}/api/households/${id}`, { headers: SAM })).json();
-      assert.equal(rec.version, 3);
+      assert.ok(rec.version >= 3, 'the record sealed before the rotation opens with the new key');
       assert.ok((await (await fetch(B2 + '/api/households', { headers: SAM })).json()).length >= 1);
     } finally { p2.kill(); }
     // The old master key no longer opens anything: a server with it cannot unwrap the firm key
     const p3 = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, PORT: String(PORT + 3) }, stdio: 'pipe' });
     try {
       const B3 = `http://127.0.0.1:${PORT + 3}`;
-      for (let i = 0; i < 50; i++) { try { if ((await fetch(B3 + '/healthz')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+      await waitForServer(p3, B3);
       assert.equal((await fetch(`${B3}/api/households/${id}`, { headers: SAM })).status, 500);
     } finally { p3.kill(); }
     // Rotate back, so the rest of this file (and the server started with the old key) carry on
@@ -173,7 +179,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const fileServer = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, DATABASE_URL: '', DATA_DIR: dir, PORT: String(PORT + 1) }, stdio: 'pipe' });
     try {
       const FB = `http://127.0.0.1:${PORT + 1}`;
-      for (let i = 0; i < 50; i++) { try { if ((await fetch(FB + '/healthz')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+      await waitForServer(fileServer, FB);
       const st = H.sample(); st.household.name = 'Imported household';
       const { id: fid } = await (await fetch(FB + '/api/households', { method: 'POST', headers: { ...SAM, ...J }, body: JSON.stringify({ state: st }) })).json();
       st.household.reference = 'IMP-1';

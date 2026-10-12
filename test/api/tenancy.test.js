@@ -43,7 +43,7 @@ test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to
     await asRole('hwp_owner', c => c.query(`insert into firms (id, name) values ($1, 'Firm B')`, [B]));
     store = createStore({ databaseUrl: urlFor('hwp_app'), databasePoolMax: 1, root: ROOT }, createSealer(crypto.randomBytes(32)));
     await store.ready();
-  });
+  }, { timeout: 120000 });
   test.after(async () => {
     if (store) await store.end();
     await admin.query(`drop schema if exists ${schema} cascade`);
