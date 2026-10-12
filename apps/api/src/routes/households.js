@@ -1,7 +1,9 @@
-/* Household routes. Each reads its input, calls the household service once and turns the outcome
-   into a reply. There is deliberately no DELETE: records are kept for regulatory retention.
+/* Household routes. Each reads its input, calls the household service once with the sign-in
+   context { user, firmId } and turns the outcome into a reply. There is deliberately no DELETE:
+   records are kept for regulatory retention.
      GET  /api/households              client list
-     POST /api/households              create            201 {id, version}
+     POST /api/households              create            201 {id, version}; 409 when the firm already
+                                       has a household with that client reference
                                        with an Idempotency-Key header, a repeat within a day gets
                                        the first reply (no second household); a bad key is 400
      GET  /api/households/:id          the record        404 if unknown
@@ -13,13 +15,13 @@
 const IDEM_KEY = /^[A-Za-z0-9_-]{8,200}$/;
 
 function createHouseholdRoutes({ households, ID_RE, send, readBody }) {
-  return async function householdRoutes(req, res, p, user) {
-    if (p === '/api/households' && req.method === 'GET') { send(res, 200, await households.list()); return true; }
+  return async function householdRoutes(req, res, p, ctx) {
+    if (p === '/api/households' && req.method === 'GET') { send(res, 200, await households.list(ctx)); return true; }
     if (p === '/api/households' && req.method === 'POST') {
       const key = req.headers['idempotency-key'];
       if (key !== undefined && !IDEM_KEY.test(key)) { send(res, 400, { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' }); return true; }
       const body = await readBody(req);
-      send(res, 201, await households.create(body.state, user, key ? { idempotencyKey: key } : undefined));
+      send(res, 201, await households.create(ctx, body.state, key ? { idempotencyKey: key } : undefined));
       return true;
     }
     const m = /^\/api\/households\/([^/]+)(\/audit)?$/.exec(p);
@@ -27,17 +29,17 @@ function createHouseholdRoutes({ households, ID_RE, send, readBody }) {
     const id = m[1];
     if (!ID_RE.test(id)) { send(res, 404, { error: 'Not found' }); return true; }
     if (m[2] && req.method === 'GET') {
-      const entries = await households.audit(id);
+      const entries = await households.audit(ctx, id);
       entries ? send(res, 200, entries) : send(res, 404, { error: 'Not found' });
       return true;
     }
     if (!m[2] && req.method === 'GET') {
-      const rec = await households.get(id);
+      const rec = await households.get(ctx, id);
       rec ? send(res, 200, rec) : send(res, 404, { error: 'Not found' });
       return true;
     }
     if (!m[2] && req.method === 'PUT') {
-      const r = await households.save(id, await readBody(req), user);
+      const r = await households.save(ctx, id, await readBody(req));
       if (r.notFound) send(res, 404, { error: 'Not found' });
       else if (r.conflict) send(res, 409, { error: 'This household was changed by someone else', ...r.conflict });
       else send(res, 200, r);

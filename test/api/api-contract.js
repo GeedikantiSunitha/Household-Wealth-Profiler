@@ -84,8 +84,10 @@ function apiContract(ctx) {
       assert.equal(j.user, 'sam'); assert.equal(typeof j.encrypted, 'boolean'); assert.equal(j.production, false);
     });
 
+    // The contract household has its own client reference: a reference may exist once per firm
+    const REF = 'HH-C-' + crypto.randomUUID().slice(0, 6).toUpperCase();
     test('POST /api/households: 201 {id, version: 1}', async () => {
-      sent = H.sample(); sent.household.name = 'Contract household';
+      sent = H.sample(); sent.household.name = 'Contract household'; sent.household.reference = REF;
       const r = await call('POST', '/api/households', { who: sam, body: { state: sent } });
       assert.equal(r.status, 201);
       const j = await r.json();
@@ -93,6 +95,13 @@ function apiContract(ctx) {
       assert.match(j.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
       assert.equal(j.version, 1);
       id = j.id;
+    });
+
+    test('POST with a client reference another household in the firm already has: 409, in any spelling', async () => {
+      const again = H.blank(); again.household.reference = ' ' + REF.toLowerCase() + ' ';
+      const r = await call('POST', '/api/households', { who: chris, body: { state: again } });
+      assert.equal(r.status, 409);
+      assert.deepEqual(await r.json(), { error: `A household with reference "${REF}" already exists` });
     });
 
     test('POST with the same Idempotency-Key twice: the same reply, one household; a bad key is 400', async () => {
@@ -177,7 +186,7 @@ function apiContract(ctx) {
       for (const c of changes) { assert.deepEqual(keys(c), CHANGE_AUDIT_KEYS); assert.equal(c.user, 'chris'); assert.equal(c.version, 2); }
       assert.deepEqual(changes.map(c => c.field).sort(), ['household.reference', 'members[1].poaType']);
       const ref = changes.find(c => c.field === 'household.reference');
-      assert.equal(ref.from, 'HH-0001'); assert.equal(ref.to, 'HH-CONTRACT');
+      assert.equal(ref.from, REF); assert.equal(ref.to, 'HH-CONTRACT');
     });
 
     // Firm settings: works from whatever version is there, so other tests may have saved before

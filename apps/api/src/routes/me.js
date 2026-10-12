@@ -3,9 +3,9 @@
 'use strict';
 
 function createMeRoute({ send, encrypted, production = false }) {
-  return function me(req, res, p, user) {
+  return function me(req, res, p, ctx) {
     if (p !== '/api/me' || req.method !== 'GET') return false;
-    send(res, 200, { user, encrypted, production });
+    send(res, 200, { user: ctx.user, encrypted, production });
     return true;
   };
 }

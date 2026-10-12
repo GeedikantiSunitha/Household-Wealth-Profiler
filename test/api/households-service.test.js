@@ -1,5 +1,6 @@
 // apps/api/src/services/households.js: the household flow without HTTP. A fixed clock and ids
 // make every result exact; expected summaries are worked out with packages/core directly.
+// Every call carries the context { user, firmId }: the store is scoped to that firm.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -8,88 +9,111 @@ const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
 const { createHouseholdService, summarise, AUDIT_LIMIT } = require('../../apps/api/src/services/households.js');
-const { createFileStore } = require('../../apps/api/src/repositories');
+const { createFileStore, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
 const { createSealer } = require('../../apps/api/src/crypto/seal.js');
 
-function setup() {
+const SAM = { user: 'sam', firmId: DEFAULT_FIRM_ID }, CHRIS = { user: 'chris', firmId: DEFAULT_FIRM_ID };
+const OTHER_FIRM = { user: 'sam', firmId: '0f1e0000-0000-4000-8000-000000000002' };
+
+function setup({ production = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-svc-'));
   const store = createFileStore(dir, createSealer(null));
   let t = 0, n = 0;
   const now = () => `2026-10-10T10:00:${String(t++).padStart(2, '0')}.000Z`;
   const newId = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
   const logged = [];
-  return { store, dir, logged, svc: createHouseholdService({ store, HWP: H, now, newId, log: (...a) => logged.push(a.join(' ')) }) };
+  return { store, dir, logged, svc: createHouseholdService({ store, HWP: H, now, newId, production, log: (...a) => logged.push(a.join(' ')) }) };
 }
 const json = v => JSON.parse(JSON.stringify(v));
 const stored = st => { const s = H.normalise(json(st)); delete s.audit; return json(s); };
+// A household with its own reference, so several can live in one firm
+const withRef = (st, ref) => { st.household.reference = ref; return st; };
 
 test('create: version 1, cleaned state, author and a "created" audit entry', async () => {
   const { svc } = setup();
   const st = H.sample(); st.extra = 'dropped'; st.audit = [{ field: 'from the browser' }];
-  assert.deepEqual(await svc.create(st, 'sam'), { id: '00000000-0000-4000-8000-000000000001', version: 1 });
-  const rec = await svc.get('00000000-0000-4000-8000-000000000001');
+  assert.deepEqual(await svc.create(SAM, st), { id: '00000000-0000-4000-8000-000000000001', version: 1 });
+  const rec = await svc.get(SAM, '00000000-0000-4000-8000-000000000001');
   assert.deepEqual(json(rec), { id: '00000000-0000-4000-8000-000000000001', version: 1, state: stored(st),
     createdAt: '2026-10-10T10:00:00.000Z', createdBy: 'sam', updatedAt: '2026-10-10T10:00:00.000Z', updatedBy: 'sam' });
   assert.equal(rec.state.extra, undefined); assert.equal(rec.state.audit, undefined);
-  assert.deepEqual(await svc.audit(rec.id), [{ ts: '2026-10-10T10:00:00.000Z', user: 'sam', field: 'created', from: '', to: 'Harrington household' }]);
+  assert.deepEqual(await svc.audit(SAM, rec.id), [{ ts: '2026-10-10T10:00:00.000Z', user: 'sam', field: 'created', from: '', to: 'Harrington household' }]);
 });
 
 test('create with an idempotency key: the same user and key again returns the first reply and makes no second household', async () => {
   const { svc } = setup();
-  const first = await svc.create(H.sample(), 'sam', { idempotencyKey: 'click-0001' });
+  const first = await svc.create(SAM, H.blank(), { idempotencyKey: 'click-0001' });
   assert.deepEqual(first, { id: '00000000-0000-4000-8000-000000000001', version: 1 });
-  assert.deepEqual(await svc.create(H.sample(), 'sam', { idempotencyKey: 'click-0001' }), first, 'a repeat (double-click, retried request) replays');
-  assert.notEqual((await svc.create(H.sample(), 'sam', { idempotencyKey: 'click-0002' })).id, first.id, 'another key is another household');
-  assert.notEqual((await svc.create(H.sample(), 'chris', { idempotencyKey: 'click-0001' })).id, first.id, 'keys are per user');
-  assert.equal((await svc.list()).length, 3);
+  assert.deepEqual(await svc.create(SAM, H.blank(), { idempotencyKey: 'click-0001' }), first, 'a repeat (double-click, retried request) replays');
+  assert.notEqual((await svc.create(SAM, H.blank(), { idempotencyKey: 'click-0002' })).id, first.id, 'another key is another household');
+  assert.notEqual((await svc.create(CHRIS, H.blank(), { idempotencyKey: 'click-0001' })).id, first.id, 'keys are per user');
+  assert.equal((await svc.list(SAM)).length, 3);
   // Two identical requests at the same moment: still one household
   const { svc: svc2 } = setup();
-  const both = await Promise.all([svc2.create(H.sample(), 'sam', { idempotencyKey: 'same-key-1' }), svc2.create(H.sample(), 'sam', { idempotencyKey: 'same-key-1' })]);
+  const both = await Promise.all([svc2.create(SAM, H.blank(), { idempotencyKey: 'same-key-1' }), svc2.create(SAM, H.blank(), { idempotencyKey: 'same-key-1' })]);
   assert.equal(both[0].id, both[1].id);
-  assert.equal((await svc2.list()).length, 1);
+  assert.equal((await svc2.list(SAM)).length, 1);
+});
+
+test('create refuses a client reference that another household in the firm already has (409), in any spelling', async () => {
+  const { svc } = setup();
+  const { id } = await svc.create(SAM, H.sample()); // HH-0001
+  await assert.rejects(svc.create(CHRIS, H.sample()), { status: 409, message: 'A household with reference "HH-0001" already exists' });
+  await assert.rejects(svc.create(SAM, withRef(H.blank(), '  hh-0001 ')), { status: 409 });
+  assert.equal((await svc.list(SAM)).length, 1);
+  assert.equal(typeof (await svc.create(SAM, withRef(H.blank(), 'HH-0002'))).id, 'string', 'another reference is fine');
+  assert.equal(typeof (await svc.create(SAM, H.blank())).id, 'string', 'no reference is fine');
+  assert.equal(typeof (await svc.create(OTHER_FIRM, H.sample())).id, 'string', 'another firm may use the same reference');
+  // A save that leaves a reference in place is allowed; a save that would make a duplicate is not refused yet (the rule for existing duplicates is pending)
+  const st = json((await svc.get(SAM, id)).state); st.household.name = 'Renamed';
+  assert.deepEqual(await svc.save(SAM, id, { version: 1, state: st }), { version: 2, changes: 1 });
 });
 
 test('list: a household that cannot be read is skipped and logged with its id; the rest still list', async () => {
   const { svc, dir, logged } = setup();
   const a = H.sample(); a.household.name = 'Readable';
-  const { id: good } = await svc.create(a, 'sam');
-  const { id: bad } = await svc.create(H.blank(), 'sam');
+  const { id: good } = await svc.create(SAM, a);
+  const { id: bad } = await svc.create(SAM, H.blank());
   fs.writeFileSync(path.join(dir, 'households', bad, 'current.json'), '{not json');
-  const list = await svc.list();
+  const list = await svc.list(SAM);
   assert.deepEqual(list.map(x => x.id), [good]);
   assert.equal(logged.length, 1);
   assert.match(logged[0], new RegExp(`unreadable household ${bad}`));
 });
 
-test('list: summaries from core.js, most recently changed first', async () => {
+test('list: summaries from core.js, most recently changed first; another firm lists nothing', async () => {
   const { svc } = setup();
   const a = H.sample(); a.household.name = 'Older';
   const b = H.blank(); b.household.name = 'Newer';
-  await svc.create(a, 'sam'); await svc.create(b, 'chris');
-  const list = await svc.list();
+  await svc.create(SAM, a); await svc.create(CHRIS, b);
+  const list = await svc.list(SAM);
   assert.deepEqual(list.map(x => x.name), ['Newer', 'Older']);
   const E = H.bind(H.normalise(stored(a))); const O = E.onboarding(E.compute()); const R = E.reviews(O);
   assert.deepEqual(json(list[1]), json({ id: '00000000-0000-4000-8000-000000000001', name: 'Older', reference: a.household.reference, stage: O.stage, rating: O.rating,
     nextReview: O.nextReview, blockers: O.blockerCount, due: R.nextDue, overdue: R.overdue, tasks: H.openTasks(H.normalise(stored(a))), version: 1, updatedAt: '2026-10-10T10:00:00.000Z', updatedBy: 'sam' }));
+  assert.deepEqual(await svc.list(OTHER_FIRM), []);
+  assert.equal(await svc.get(OTHER_FIRM, list[1].id), null);
+  assert.equal(await svc.audit(OTHER_FIRM, list[1].id), null);
+  assert.deepEqual(await svc.save(OTHER_FIRM, list[1].id, { version: 1, state: a }), { notFound: true });
 });
 
 test('save: nothing changed means no new version', async () => {
   const { svc } = setup();
-  const st = H.sample(); const { id } = await svc.create(st, 'sam');
-  assert.deepEqual(await svc.save(id, { version: 1, state: st }, 'chris'), { version: 1, changes: 0 });
-  assert.equal((await svc.get(id)).updatedBy, 'sam');
-  assert.equal((await svc.audit(id)).length, 1);
+  const st = H.sample(); const { id } = await svc.create(SAM, st);
+  assert.deepEqual(await svc.save(CHRIS, id, { version: 1, state: st }), { version: 1, changes: 0 });
+  assert.equal((await svc.get(SAM, id)).updatedBy, 'sam');
+  assert.equal((await svc.audit(SAM, id)).length, 1);
 });
 
 test('save: changes make version 2 with one audit entry per changed field', async () => {
   const { svc } = setup();
-  const st = H.sample(); const { id } = await svc.create(st, 'sam');
+  const st = H.sample(); const { id } = await svc.create(SAM, st);
   const ed = json(st); ed.household.reference = 'HH-NEW'; ed.members[1].poaType = 'bank';
-  assert.deepEqual(await svc.save(id, { version: 1, state: ed }, 'chris'), { version: 2, changes: 2 });
-  const rec = await svc.get(id);
+  assert.deepEqual(await svc.save(CHRIS, id, { version: 1, state: ed }), { version: 2, changes: 2 });
+  const rec = await svc.get(SAM, id);
   assert.equal(rec.version, 2); assert.equal(rec.updatedBy, 'chris'); assert.equal(rec.createdBy, 'sam');
   assert.equal(rec.updatedAt, '2026-10-10T10:00:01.000Z'); assert.deepEqual(json(rec.state), stored(ed));
-  const changes = (await svc.audit(id)).slice(0, 2);
+  const changes = (await svc.audit(SAM, id)).slice(0, 2);
   assert.deepEqual(changes.map(c => c.field).sort(), ['household.reference', 'members[1].poaType']);
   for (const c of changes) { assert.equal(c.user, 'chris'); assert.equal(c.version, 2); assert.equal(c.ts, '2026-10-10T10:00:01.000Z'); }
   assert.deepEqual(changes.find(c => c.field === 'household.reference'), { ts: '2026-10-10T10:00:01.000Z', user: 'chris', field: 'household.reference', from: 'HH-0001', to: 'HH-NEW', version: 2 });
@@ -97,51 +121,49 @@ test('save: changes make version 2 with one audit entry per changed field', asyn
 
 test('save on an old version: conflict with who saved last; nothing saved', async () => {
   const { svc } = setup();
-  const st = H.sample(); const { id } = await svc.create(st, 'sam');
+  const st = H.sample(); const { id } = await svc.create(SAM, st);
   const ed = json(st); ed.household.reference = 'HH-NEW';
-  await svc.save(id, { version: 1, state: ed }, 'chris');
+  await svc.save(CHRIS, id, { version: 1, state: ed });
   const again = json(st); again.household.reference = 'HH-MINE';
-  assert.deepEqual(await svc.save(id, { version: 1, state: again }, 'sam'), { conflict: { version: 2, updatedBy: 'chris', updatedAt: '2026-10-10T10:00:01.000Z' } });
-  assert.equal((await svc.get(id)).state.household.reference, 'HH-NEW');
+  assert.deepEqual(await svc.save(SAM, id, { version: 1, state: again }), { conflict: { version: 2, updatedBy: 'chris', updatedAt: '2026-10-10T10:00:01.000Z' } });
+  assert.equal((await svc.get(SAM, id)).state.household.reference, 'HH-NEW');
 });
 
 test('two saves of the same version at once: exactly one wins', async () => {
   const { svc } = setup();
-  const st = H.sample(); const { id } = await svc.create(st, 'sam');
+  const st = H.sample(); const { id } = await svc.create(SAM, st);
   const x = json(st); x.household.reference = 'X'; const y = json(st); y.household.reference = 'Y';
-  const results = await Promise.all([svc.save(id, { version: 1, state: x }, 'sam'), svc.save(id, { version: 1, state: y }, 'chris')]);
+  const results = await Promise.all([svc.save(SAM, id, { version: 1, state: x }), svc.save(CHRIS, id, { version: 1, state: y })]);
   assert.equal(results.filter(r => r.version === 2).length, 1);
   assert.equal(results.filter(r => r.conflict).length, 1);
-  assert.equal((await svc.get(id)).version, 2);
+  assert.equal((await svc.get(SAM, id)).version, 2);
 });
 
 test('unknown household: get null, audit null, save not found', async () => {
   const { svc } = setup();
   const id = '00000000-0000-4000-8000-999999999999';
-  assert.equal(await svc.get(id), null);
-  assert.equal(await svc.audit(id), null);
-  assert.deepEqual(await svc.save(id, { version: 1, state: H.sample() }, 'sam'), { notFound: true });
+  assert.equal(await svc.get(SAM, id), null);
+  assert.equal(await svc.audit(SAM, id), null);
+  assert.deepEqual(await svc.save(SAM, id, { version: 1, state: H.sample() }), { notFound: true });
 });
 
 test('in production a sample household is refused on create and on save (400); elsewhere it is allowed', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-svc-'));
-  const store = createFileStore(dir, createSealer(null));
-  const prod = createHouseholdService({ store, HWP: H, production: true });
-  await assert.rejects(prod.create(H.sample(), 'sam'), { status: 400, message: 'Sample households are not allowed in production' });
-  const { id } = await prod.create(H.blank(), 'sam');
-  await assert.rejects(prod.save(id, { version: 1, state: H.sample() }, 'sam'), { status: 400, message: 'Sample households are not allowed in production' });
-  assert.equal((await prod.get(id)).version, 1, 'nothing was saved');
-  assert.equal((await prod.list()).length, 1);
-  const dev = createHouseholdService({ store, HWP: H });
-  assert.equal(typeof (await dev.create(H.sample(), 'sam')).id, 'string');
+  const { svc: prod } = setup({ production: true });
+  await assert.rejects(prod.create(SAM, H.sample()), { status: 400, message: 'Sample households are not allowed in production' });
+  const { id } = await prod.create(SAM, H.blank());
+  await assert.rejects(prod.save(SAM, id, { version: 1, state: H.sample() }), { status: 400, message: 'Sample households are not allowed in production' });
+  assert.equal((await prod.get(SAM, id)).version, 1, 'nothing was saved');
+  assert.equal((await prod.list(SAM)).length, 1);
+  const { svc: dev } = setup();
+  assert.equal(typeof (await dev.create(SAM, H.sample())).id, 'string');
 });
 
 test('audit is capped at 5000 entries, newest first', async () => {
   assert.equal(AUDIT_LIMIT, 5000);
   const audit = Array.from({ length: 5003 }, (_, i) => ({ i }));
-  const store = { get: async () => ({ id: 'x' }), audit: async () => audit };
+  const store = { forFirm: () => ({ get: async () => ({ id: 'x' }), audit: async () => audit }) };
   const svc = createHouseholdService({ store, HWP: H });
-  const out = await svc.audit('x');
+  const out = await svc.audit(SAM, 'x');
   assert.equal(out.length, 5000); assert.equal(out[0].i, 0);
 });
 

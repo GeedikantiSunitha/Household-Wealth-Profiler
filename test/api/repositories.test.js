@@ -8,21 +8,22 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createStore, ID_RE } = require('../../apps/api/src/repositories');
+const { createStore, ID_RE, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
 const { createSealer } = require('../../apps/api/src/crypto/seal.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const sealer = createSealer(crypto.randomBytes(32));
-const rec = (id, version, name, by = 'sam') => ({ id, version, state: { household: { name } }, createdAt: '2026-10-10T09:00:00.000Z', createdBy: 'sam', updatedAt: `2026-10-10T09:0${version}:00.000Z`, updatedBy: by });
+const OTHER_FIRM = '0f1e0000-0000-4000-8000-000000000002';
+const rec = (id, version, name, by = 'sam') => ({ id, version, state: { household: { name, reference: 'R-' + id.slice(0, 8) } }, createdAt: '2026-10-10T09:00:00.000Z', createdBy: 'sam', updatedAt: `2026-10-10T09:0${version}:00.000Z`, updatedBy: by });
 
 // hooks: corrupt(id) makes a stored record unreadable; ageKeys(hours) backdates every idempotency key
 function storeContract(label, makeStore, rawRows, rawFirm, hooks) {
   test.describe(`${label} store`, () => {
-    let store; const id = crypto.randomUUID();
-    test.before(async () => { store = await makeStore(); await store.init(); });
-    test.after(async () => { if (store.end) await store.end(); });
+    let root, store; const id = crypto.randomUUID();
+    test.before(async () => { root = await makeStore(); await root.init(); store = root.forFirm(DEFAULT_FIRM_ID); });
+    test.after(async () => { if (root.end) await root.end(); });
 
-    test('describe says where the data is', () => assert.match(store.describe, /^data in /));
+    test('describe says where the data is', () => assert.match(root.describe, /^data in /));
     test('unknown household: get is null, audit is empty', async () => {
       assert.equal(await store.get(crypto.randomUUID()), null);
       assert.deepEqual(await store.audit(crypto.randomUUID()), []);
@@ -73,10 +74,33 @@ function storeContract(label, makeStore, rawRows, rawFirm, hooks) {
     test('update of an unknown household passes null to decide', async () => {
       assert.equal(await store.update(crypto.randomUUID(), cur => ({ result: cur })), null);
     });
+    test('the reference index: found by its normalised reference within the firm, not by another spelling', async () => {
+      const h = await store.indexReference('  r-' + id.slice(0, 8).toUpperCase() + ' ');
+      assert.match(h, /^[0-9a-f]{64}$/);
+      assert.equal(await store.findByReference(h), id);
+      assert.equal(await store.findByReference(await store.indexReference('R-nothing')), null);
+      assert.equal(await store.indexReference(''), null);
+    });
+    test('another firm sees none of it: get, list, audit, versions, update, reference, firm settings', async () => {
+      await hooks.addFirm(OTHER_FIRM); // a firm exists before it has a store (PostgreSQL: a firms row; files: nothing needed)
+      const other = root.forFirm(OTHER_FIRM);
+      assert.equal(await other.get(id), null);
+      assert.deepEqual(await other.list(), []);
+      assert.deepEqual(await other.audit(id), []);
+      assert.deepEqual(await other.versions(id), []);
+      assert.equal(await other.update(id, cur => ({ result: cur, next: cur && rec(id, 9, 'Stolen', 'eve') })), null);
+      assert.equal((await store.get(id)).version, 2, 'untouched');
+      assert.equal(await other.findByReference(await other.indexReference('R-' + id.slice(0, 8))), null, 'the index is per firm');
+      assert.equal(await other.firm.get(), null);
+      const own = crypto.randomUUID();
+      await other.create(rec(own, 1, 'Theirs'), []);
+      assert.equal(await store.get(own), null, 'and the default firm sees nothing of theirs');
+      assert.deepEqual((await other.list()).map(r => r.id), [own]);
+    });
     test('what is stored is encrypted: no readable names', async () => {
       const raw = await rawRows(id);
       assert.ok(raw.length >= 3, 'current, versions and audit are all stored');
-      for (const text of raw) { assert.match(text, /^enc:v1:/); assert.doesNotMatch(text, /Alpha|chris|household\.name/); }
+      for (const text of raw) { assert.match(text, /^enc:v(1|2):/); assert.doesNotMatch(text, /Alpha|chris|household\.name/); }
     });
 
     const firmRec = (version, name, by = 'sam') => ({ version, settings: { firm: { name } }, updatedAt: `2026-10-10T10:0${version}:00.000Z`, updatedBy: by });
@@ -96,7 +120,7 @@ function storeContract(label, makeStore, rawRows, rawFirm, hooks) {
     test('firm settings are encrypted where they are stored', async () => {
       const raw = await rawFirm();
       assert.equal(raw.length, 5, 'current, two versions and two audit entries');
-      for (const text of raw) { assert.match(text, /^enc:v1:/); assert.doesNotMatch(text, /Alder|chris|firm\.name/); }
+      for (const text of raw) { assert.match(text, /^enc:v(1|2):/); assert.doesNotMatch(text, /Alder|chris|firm\.name/); }
     });
   });
 }
@@ -111,12 +135,14 @@ storeContract('file', () => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-r
     return [fs.readFileSync(path.join(d, 'current.json'), 'utf8'), ...fs.readdirSync(path.join(d, 'versions')).map(f => fs.readFileSync(path.join(d, 'versions', f), 'utf8')),
       ...fs.readFileSync(path.join(d, 'audit.log'), 'utf8').split('\n').filter(Boolean)]; },
   { corrupt: async rid => fs.writeFileSync(path.join(dir, 'households', rid, 'current.json'), 'enc:v1:garbage'),
-    ageKeys: async hours => { const d = path.join(dir, 'idempotency'); const t = new Date(Date.now() - hours * 3600e3); for (const f of fs.readdirSync(d)) fs.utimesSync(path.join(d, f), t, t); } });
+    ageKeys: async hours => { const d = path.join(dir, 'idempotency'); const t = new Date(Date.now() - hours * 3600e3); for (const f of fs.readdirSync(d)) fs.utimesSync(path.join(d, f), t, t); },
+    addFirm: async () => {} });
 
-test('file store: version files are kept, one per saved version', () => {
+test('file store: version files are kept, one per saved version; the default firm keeps the original layout, other firms live under firms/', () => {
   const versions = fs.readdirSync(path.join(dir, 'households')).filter(x => ID_RE.test(x)).map(h => fs.readdirSync(path.join(dir, 'households', h, 'versions')).sort());
   assert.ok(versions.some(v => v.join() === '000001.json,000002.json'), 'the household saved twice has two version files');
   assert.ok(versions.every(v => v[0] === '000001.json'), 'every household starts at version 1');
+  assert.equal(fs.readdirSync(path.join(dir, 'firms', OTHER_FIRM, 'households')).filter(x => ID_RE.test(x)).length, 1, 'the other firm has its own folder');
 });
 test('household ids must be UUIDs', () => {
   assert.ok(ID_RE.test(crypto.randomUUID()));
@@ -144,13 +170,14 @@ if (BASE_URL) {
   }, async () => {
     const c = new Client({ connectionString: URL_ }); await c.connect();
     try {
-      return [...(await c.query('select doc from firm_settings')).rows.map(r => r.doc),
-        ...(await c.query('select doc from firm_versions')).rows.map(r => r.doc),
+      return [...(await c.query('select doc from firm_records')).rows.map(r => r.doc),
+        ...(await c.query('select doc from firm_record_versions')).rows.map(r => r.doc),
         ...(await c.query('select entry as doc from firm_audit')).rows.map(r => r.doc)];
     } finally { await c.end(); }
   }, {
     corrupt: async rid => { const c = new Client({ connectionString: URL_ }); await c.connect(); try { await c.query(`update households set doc = 'enc:v1:garbage' where id = $1`, [rid]); } finally { await c.end(); } },
     ageKeys: async hours => { const c = new Client({ connectionString: URL_ }); await c.connect(); try { await c.query(`update idempotency_keys set created_at = now() - ($1 || ' hours')::interval`, [String(hours)]); } finally { await c.end(); } },
+    addFirm: async fid => { const c = new Client({ connectionString: URL_ }); await c.connect(); try { await c.query(`insert into firms (id, name) values ($1, 'Other firm') on conflict do nothing`, [fid]); } finally { await c.end(); } },
   });
 } else {
   test('PostgreSQL store', { skip: 'set TEST_DATABASE_URL to run' }, () => {});

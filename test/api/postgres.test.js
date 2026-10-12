@@ -69,11 +69,23 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
 
   test('rows are encrypted and every version is kept', async () => {
     const h = (await db.query('select version, doc from households where id = $1', [id])).rows[0];
-    assert.equal(h.version, 3); assert.match(h.doc, /^enc:v1:/); assert.doesNotMatch(h.doc, /Harrington/);
+    // Sealed with the firm's own key (enc:v2); records from before tenancy are enc:v1 and still open
+    assert.equal(h.version, 3); assert.match(h.doc, /^enc:v2:/); assert.doesNotMatch(h.doc, /Harrington/);
     const v = (await db.query('select version, doc from household_versions where household_id = $1 order by version', [id])).rows;
-    assert.deepEqual(v.map(x => x.version), [1, 2, 3]); assert.ok(v.every(x => x.doc.startsWith('enc:v1:')));
+    assert.deepEqual(v.map(x => x.version), [1, 2, 3]); assert.ok(v.every(x => x.doc.startsWith('enc:v2:')));
+    const firm = (await db.query('select wrapped_key from firms')).rows[0];
+    assert.match(firm.wrapped_key, /^wk:v1:/, "the firm's key is stored wrapped");
     const a = (await db.query('select entry from audit_log where household_id = $1', [id])).rows;
     assert.ok(a.length >= 3); assert.ok(a.every(x => !/chris|bank/.test(x.entry)));
+  });
+
+  test('index-references fills the reference index for rows that lack it, and only those', async () => {
+    await db.query('update households set reference_hmac = null where id = $1', [id]);
+    const run = () => execFileSync(process.execPath, ['server.js', 'index-references'], { cwd: ROOT, env: ENV }).toString();
+    assert.match(run(), /1 household\(s\) indexed/);
+    const h = (await db.query('select reference_hmac from households where id = $1', [id])).rows[0];
+    assert.match(h.reference_hmac, /^[0-9a-f]{64}$/);
+    assert.match(run(), /0 household\(s\) indexed/);
   });
 
   test('the database refuses deletes and rewrites', async () => {
@@ -111,7 +123,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       assert.match(second, /Firm settings not copied: the database already has firm settings/);
       assert.deepEqual(await (await fetch(BASE + '/api/firm', { headers: SAM })).json(), fileFirm);
       assert.deepEqual(await (await fetch(BASE + '/api/firm/audit', { headers: SAM })).json(), fileFirmAudit);
-      assert.equal((await db.query('select count(*)::int n from firm_versions')).rows[0].n, 2);
+      assert.equal((await db.query('select count(*)::int n from firm_record_versions')).rows[0].n, 2);
       const rec = await (await fetch(`${BASE}/api/households/${fid}`, { headers: SAM })).json();
       assert.equal(rec.version, 2); assert.equal(rec.state.household.reference, 'IMP-1');
       const audit = await (await fetch(`${BASE}/api/households/${fid}/audit`, { headers: SAM })).json();
