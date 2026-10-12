@@ -1,0 +1,137 @@
+# Runs on every pull request and on pushes to develop and main. Every job here is a required check
+# (branch protection is switched on by the repository owner; see CONTRIBUTING.md).
+#   test            the whole suite with PostgreSQL, the single-file build, and the screen check
+#   change-control  migrations only add; runtime licences allowed; core.js changes need the
+#                   "rules-change" label (compliance sign-off named in the pull request)
+#   security        npm audit, secret scan of the whole history, software bill of materials
+#   container       the Docker image builds and carries no known high or critical vulnerabilities
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hwp_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Tests (unit, API in both storage modes, migrations, Supabase edition)
+        run: npm test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/hwp_test
+      - name: Single-file build
+        run: npm run build
+      - name: Screen check (headless Chrome; fails on any broken screen)
+        run: npm run screens
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens
+          path: docs/checklists/screens/
+          retention-days: 14
+
+  change-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Migrations only add
+        run: node scripts/ci/check-migrations.js db/migrations
+      - name: Runtime licences are allowed
+        run: node scripts/ci/check-licences.js
+      - name: The business rules change only with a reviewed rules change
+        if: github.event_name == 'pull_request'
+        env:
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'rules-change') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! git diff --quiet "$BASE" "$HEAD" -- packages/core/core.js supabase/functions/_shared/core.js; then
+            if [ "$HAS_LABEL" != "true" ]; then
+              echo "::error::packages/core/core.js changed. Add the 'rules-change' label and name the compliance sign-off in the pull request."
+              exit 1
+            fi
+            echo "core.js changed under the rules-change label"
+          else
+            echo "core.js unchanged"
+          fi
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Known vulnerabilities (any in runtime packages; high or above in development packages)
+        run: |
+          npm audit --omit=dev --audit-level=low
+          npm audit --audit-level=high
+      - name: Secret scan of the whole history
+        env:
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks detect --source . --redact --no-banner
+      - name: Software bill of materials (CycloneDX)
+        run: npm sbom --sbom-format cyclonedx --omit dev > sbom.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 90
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t hwp:ci .
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: hwp:ci
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
