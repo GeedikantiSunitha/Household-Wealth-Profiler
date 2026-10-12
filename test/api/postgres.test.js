@@ -137,6 +137,31 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     assert.equal((await fetch(`${BASE}/api/households/${lid}`, { headers: SAM })).status, 200, 'the legacy record still reads');
   });
 
+  test('a create whose transaction hits a deadlock or serialization failure is run again: one household, the Idempotency-Key honoured', async () => {
+    for (const code of ['40P01', '40001']) {
+      // A trigger that fails the first insert attempt only (a sequence counts attempts; sequences are not rolled back)
+      await db.query(`create sequence retry_probe;
+        create function fail_once() returns trigger language plpgsql as $$ begin
+          if nextval('retry_probe') = 1 then raise exception 'simulated %', '${code}' using errcode = '${code}'; end if; return new; end $$;
+        create trigger fail_once before insert on households for each row execute function fail_once()`);
+      try {
+        const before = (await (await fetch(BASE + '/api/households', { headers: SAM })).json()).length;
+        const st = H.blank(); st.household.name = 'Retried after ' + code; st.household.reference = 'RETRY-' + code;
+        const key = 'retry-' + crypto.randomUUID();
+        const r1 = await fetch(BASE + '/api/households', { method: 'POST', headers: { ...SAM, ...J, 'Idempotency-Key': key }, body: JSON.stringify({ state: st }) });
+        const j1 = await r1.json(); assert.equal(r1.status, 201, code + ' ' + JSON.stringify(j1));
+        assert.equal((await db.query('select last_value::int n from retry_probe')).rows[0].n, 2, 'one failed attempt, then one that succeeded');
+        const r2 = await fetch(BASE + '/api/households', { method: 'POST', headers: { ...SAM, ...J, 'Idempotency-Key': key }, body: JSON.stringify({ state: st }) });
+        assert.equal(r2.status, 201); assert.deepEqual(await r2.json(), j1, 'the same key replays the reply from the retried create');
+        assert.equal((await (await fetch(BASE + '/api/households', { headers: SAM })).json()).length, before + 1, 'exactly one household');
+        assert.equal((await db.query('select count(*)::int n from households where id = $1', [j1.id])).rows[0].n, 1);
+        assert.equal((await db.query(`select count(*)::int n from idempotency_keys where reply like '%' || $1 || '%'`, [j1.id])).rows[0].n, 1, 'one key row');
+      } finally {
+        await db.query('drop trigger if exists fail_once on households; drop function if exists fail_once(); drop sequence if exists retry_probe');
+      }
+    }
+  });
+
   test('the database refuses deletes and rewrites', async () => {
     for (const sql of ['delete from households', 'delete from household_versions', 'update household_versions set doc = $$x$$', 'delete from audit_log', 'update audit_log set entry = $$x$$', 'truncate audit_log cascade']) {
       await assert.rejects(db.query(sql), /not allowed: records are kept/, sql);

@@ -18,7 +18,7 @@ const households = {
   create: async (ctx, state, opts) => { calls.push(['create', ctx.user, ctx.firmId, opts && opts.idempotencyKey]); return { id: ID, version: 1 }; },
   get: async (ctx, id) => ctx.firmId === FIRM && id === ID ? { id: ID, version: 1 } : null,
   audit: async (ctx, id) => ctx.firmId === FIRM && id === ID ? [{ field: 'created' }] : null,
-  save: async (ctx, id, body) => id !== ID ? { notFound: true } : body.version !== 1 ? { conflict: { version: 1, updatedBy: 'x', updatedAt: 't' } } : body.boom ? (() => { throw new Error('secret detail'); })() : { version: 2, changes: 1 },
+  save: async (ctx, id, body) => id !== ID ? { notFound: true } : body.version !== 1 ? { conflict: { version: 1, updatedBy: 'x', updatedAt: 't' } } : body.boom ? (() => { throw new Error('secret detail'); })() : body.busy ? (() => { throw Object.assign(new Error('The server is busy. Try again in a moment.'), { status: 503 }); })() : { version: 2, changes: 1 },
 };
 const authenticate = req => req.headers.authorization === 'ok' ? { user: 'sam', firmId: FIRM } : req.headers.authorization === 'locked' ? { locked: true } : null;
 let storageUp = true;
@@ -119,6 +119,9 @@ test('errors: 400 keeps its message; anything unexpected is "Server error" with 
   assert.equal(boom.status, 500);
   assert.deepEqual(await boom.json(), { error: 'Server error' }, 'the detail stays on the server');
   assert.ok(logged.some(l => /secret detail/.test(l)), 'and is logged there');
+  // No free database connection: 503 with its message (the pool reports this with a status), never a 500
+  const busy = await call('PUT', `/api/households/${ID}`, { headers: J, body: JSON.stringify({ version: 1, busy: true }) });
+  assert.equal(busy.status, 503); assert.deepEqual(await busy.json(), { error: 'The server is busy. Try again in a moment.' });
 });
 
 test('every reply carries the security headers, with HSTS when switched on', async () => {
