@@ -103,6 +103,39 @@ test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to
     assert.equal((await store.raw(`select current_setting('app.firm_id', true) as f`)).rows[0].f || '', '', 'the setting does not outlive its transaction');
   });
 
+  test('the app role, with a firm set, reads nothing of another firm; the owner reads every firm (ciphertext) but inserts nothing', async () => {
+    const a = (await store.forFirm(A).list()).length, b = (await store.forFirm(B).list()).length;
+    assert.ok(a >= 2 && b >= 1, 'both firms hold data');
+    await asRole('hwp_app', async c => {
+      await c.query('begin');
+      await c.query("select set_config('app.firm_id', $1, true)", [A]);
+      assert.equal((await c.query('select count(*)::int n from households where firm_id = $1', [B])).rows[0].n, 0, "firm B's rows");
+      assert.equal((await c.query('select count(*)::int n from households')).rows[0].n, a, "only firm A's rows");
+      assert.equal((await c.query('select count(*)::int n from firms')).rows[0].n, 1, 'only its own firm');
+      await c.query('commit');
+    });
+    await asRole('hwp_owner', async c => {
+      assert.equal((await c.query('select count(*)::int n from households')).rows[0].n, a + b, 'the owner reads across firms');
+      assert.ok((await c.query('select doc from households limit 1')).rows[0].doc.startsWith('enc:v'), 'ciphertext only');
+      await assert.rejects(c.query(`insert into households (id, version, doc, updated_at, firm_id) values ($1, 1, 'x', now(), $2)`, [crypto.randomUUID(), A]), /row-level security/, 'no insert policy for the owner');
+      assert.equal((await c.query('select count(*)::int n from households')).rows[0].n, a + b, 'nothing was inserted');
+    });
+  });
+
+  test('a row with no firm cannot be inserted, as the app role or as the owner', async () => {
+    const before = await asRole('hwp_owner', async c => (await c.query('select count(*)::int n from households')).rows[0].n);
+    await asRole('hwp_app', async c => {
+      await c.query('begin');
+      await c.query("select set_config('app.firm_id', $1, true)", [A]);
+      await assert.rejects(c.query(`insert into households (id, version, doc, updated_at) values ($1, 1, 'x', now())`, [crypto.randomUUID()]), /not-null|row-level security/);
+      await c.query('rollback');
+    });
+    await asRole('hwp_owner', async c => {
+      await assert.rejects(c.query(`insert into households (id, version, doc, updated_at) values ($1, 1, 'x', now())`, [crypto.randomUUID()]), /not-null|row-level security/);
+      assert.equal((await c.query('select count(*)::int n from households')).rows[0].n, before);
+    });
+  });
+
   test('every API endpoint: written under firm A, invisible under firm B', async () => {
     const households = createHouseholdService({ store, HWP: H });
     const firm = createFirmService({ store, HWP: H });

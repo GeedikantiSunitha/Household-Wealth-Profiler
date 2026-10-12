@@ -94,13 +94,80 @@ test('0004: existing rows move into the default firm; frozen tables accept only 
   } finally { await pg.close(); }
 });
 
+// A database with every migration up to and including `last` applied, for testing the next one
+async function upTo(pg, last) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-upto-'));
+  for (const f of fs.readdirSync(DIR).filter(f => f.endsWith('.sql') && f <= last)) fs.copyFileSync(path.join(DIR, f), path.join(dir, f));
+  await migrate(adapt(pg), { dir });
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+const household = (pg, id, firm, hmac) => pg.query(`insert into households (id, version, doc, updated_at, firm_id, reference_hmac) values ($1, 1, 'enc:v2:x', now(), $2, $3)`, [id, firm, hmac]);
+
+test('0005: a client reference may exist once per firm; refused loudly while duplicates exist, applied once they are gone', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await upTo(pg, '0004_firms.sql');
+    const other = crypto.randomUUID();
+    await pg.query(`insert into firms (id, name) values ($1, 'Other')`, [other]);
+    const a = crypto.randomUUID(), b = crypto.randomUUID(), c = crypto.randomUUID(), d = crypto.randomUUID();
+    await household(pg, a, DEFAULT_FIRM, 'h1'); await household(pg, b, DEFAULT_FIRM, 'h1'); // the duplicate
+    await household(pg, c, other, 'h1');                                                    // the same reference in another firm is fine
+    await household(pg, d, DEFAULT_FIRM, null);                                            // no reference is fine, any number of times
+    await household(pg, crypto.randomUUID(), DEFAULT_FIRM, null);
+    await assert.rejects(migrate(db, { dir: DIR }), /0005_reference_unique\.sql failed.*1 duplicate client reference/s);
+    assert.equal((await db.query(`select count(*)::int n from pg_indexes where indexname = 'households_reference_unique'`))[0].n, 0, 'nothing applied');
+    await pg.query(`update households set reference_hmac = 'h2' where id = $1`, [b]); // the operator resolves it
+    assert.ok((await migrate(db, { dir: DIR })).includes('0005_reference_unique.sql'));
+    await assert.rejects(household(pg, crypto.randomUUID(), DEFAULT_FIRM, 'h1'), /households_reference_unique/, 'the database itself now refuses a duplicate');
+    await household(pg, crypto.randomUUID(), other, 'h2');
+  } finally { await pg.close(); }
+});
+
+test('0006: firm_id becomes required; refused loudly while any row has none', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await upTo(pg, '0005_reference_unique.sql');
+    await pg.query(`insert into households (id, version, doc, updated_at) values ($1, 1, 'enc:v1:old', now())`, [ID]);
+    await assert.rejects(migrate(db, { dir: DIR }), /0006_firm_id_required\.sql failed.*households: 1 row\(s\) without a firm/s);
+    assert.equal((await db.query(`select is_nullable from information_schema.columns where table_name = 'households' and column_name = 'firm_id'`))[0].is_nullable, 'YES', 'nothing applied');
+    await pg.query(`update households set firm_id = $1 where firm_id is null`, [DEFAULT_FIRM]);
+    assert.ok((await migrate(db, { dir: DIR })).includes('0006_firm_id_required.sql'));
+    for (const t of ['households', 'household_versions', 'audit_log', 'firm_audit', 'idempotency_keys'])
+      assert.equal((await db.query(`select is_nullable from information_schema.columns where table_name = $1 and column_name = 'firm_id'`, [t]))[0].is_nullable, 'NO', t);
+    await assert.rejects(pg.query(`insert into households (id, version, doc, updated_at) values ($1, 1, 'x', now())`, [crypto.randomUUID()]), /not-null/);
+  } finally { await pg.close(); }
+});
+
+test('after the whole chain: the app role reads its firm only, the owner reads every firm, and no one inserts a row with no firm', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await migrate(db, { dir: DIR });
+    // As deployed: the tables belong to hwp_owner (here they were made by the superuser, so hand them over)
+    await pg.exec(fs.readFileSync(path.join(DIR, '..', 'handover-owner.sql'), 'utf8'));
+    const other = crypto.randomUUID();
+    await pg.query(`insert into firms (id, name) values ($1, 'Other')`, [other]);
+    await household(pg, crypto.randomUUID(), DEFAULT_FIRM, 'a1'); await household(pg, crypto.randomUUID(), DEFAULT_FIRM, 'a2'); await household(pg, crypto.randomUUID(), other, 'b1');
+    await pg.exec('set role hwp_app');
+    const app = await pg.exec(`begin; select set_config('app.firm_id', '${DEFAULT_FIRM}', true); select count(*)::int as n from households; select count(*)::int as n from households where firm_id = '${other}'; commit`);
+    assert.equal(app[2].rows[0].n, 2, "the app role, with its firm set, sees that firm's rows");
+    assert.equal(app[3].rows[0].n, 0, "and none of another firm's");
+    await assert.rejects(pg.query(`insert into households (id, version, doc, updated_at) values ($1, 1, 'x', now())`, [crypto.randomUUID()]), /not-null|row-level security/, 'app: no firm, no insert');
+    await pg.exec('reset role; set role hwp_owner');
+    assert.equal((await db.query(`select count(*)::int n from households`))[0].n, 3, 'the owner reads every firm (0007)');
+    await assert.rejects(pg.query(`insert into households (id, version, doc, updated_at) values ($1, 1, 'x', now())`, [crypto.randomUUID()]), /not-null|row-level security/, 'owner: no firm, no insert');
+    await assert.rejects(pg.query(`insert into households (id, version, doc, updated_at, firm_id) values ($1, 1, 'x', now(), $2)`, [crypto.randomUUID(), DEFAULT_FIRM]), /row-level security/, 'owner: no insert policy at all');
+    await pg.exec('reset role');
+    assert.equal((await db.query(`select count(*)::int n from households`))[0].n, 3);
+  } finally { await pg.close(); }
+});
+
 test('firm settings: one row, and versions and audit entries can never be changed or deleted', async () => {
   const pg = await pglite(), db = adapt(pg);
   try {
     await migrate(db, { dir: DIR });
     await pg.query(`insert into firm_settings (version, doc, updated_at) values (1, 'enc:v1:firm', now())`);
     await pg.query(`insert into firm_versions (version, doc) values (1, 'enc:v1:one')`);
-    await pg.query(`insert into firm_audit (entry) values ('enc:v1:a')`);
+    await pg.query(`insert into firm_audit (entry, firm_id) values ('enc:v1:a', $1)`, [DEFAULT_FIRM]);
     await assert.rejects(pg.query(`insert into firm_settings (id, version, doc, updated_at) values (false, 1, 'x', now())`), /check/i, 'only the one firm row');
     await assert.rejects(pg.query(`insert into firm_settings (version, doc, updated_at) values (2, 'x', now())`), /duplicate key/i);
     await pg.query(`update firm_settings set version = 2, doc = 'enc:v1:two'`); // the current row moves on with each save
