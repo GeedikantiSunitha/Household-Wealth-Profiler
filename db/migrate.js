@@ -79,7 +79,19 @@ async function migrate(db, { dir, tracking = 'app', before, log = () => {} }) {
   }
 }
 
+// The migration files not yet applied, without changing anything (a production server checks
+// this at start-up and refuses to run until `node server.js migrate` has been run as the owner)
+async function pending(db, { dir, tracking = 'app' }) {
+  const t = TRACKING[tracking];
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
+  const table = tracking === 'app' ? 'schema_migrations' : 'supabase_migrations.schema_migrations';
+  const [{ exists }] = await db.query(`select to_regclass($1) is not null as exists`, [table]);
+  if (!exists) return files;
+  const applied = new Set((await db.query(t.applied)).map(r => r.key));
+  return files.filter(f => !applied.has(t.key(f)));
+}
+
 // Adapter for a node-postgres client (not a pool: the advisory lock belongs to one connection)
 const pgClient = c => ({ query: async (sql, params) => (await c.query(sql, params)).rows, exec: sql => c.query(sql) });
 
-module.exports = { migrate, pgClient, MIN_VERSION };
+module.exports = { migrate, pending, pgClient, MIN_VERSION };

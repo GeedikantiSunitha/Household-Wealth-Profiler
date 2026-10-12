@@ -4,3 +4,11 @@ data-dev/
 .env
 dist/
 docs/checklists/screens/
+
+# Secrets and data never belong in the repository (the pre-commit hook refuses them too)
+.env.*
+!.env.example
+*.dump
+*.key
+*.pem
+db-backups/

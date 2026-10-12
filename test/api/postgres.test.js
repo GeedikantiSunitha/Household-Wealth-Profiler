@@ -12,8 +12,10 @@ const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
 const { apiContract } = require('./api-contract.js');
+const { testDatabaseUrl } = require('./test-db.js');
+const { waitForServer } = require('./servers.js');
 
-const URL_ = process.env.TEST_DATABASE_URL;
+const URL_ = testDatabaseUrl();
 const ROOT = path.join(__dirname, '..', '..');
 const PORT = 19000 + Math.floor(Math.random() * 1000);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -24,6 +26,7 @@ const J = { 'Content-Type': 'application/json' };
 let proc, db, KEY, ENV;
 
 test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to run' }, () => {
+  // A server that fails to start must fail the run in minutes, not hang it (seen on Windows)
   test.before(async () => {
     const { Client } = require('pg');
     db = new Client({ connectionString: URL_ });
@@ -31,13 +34,19 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const left = (await db.query(`select count(*)::int n from information_schema.tables where table_schema = 'public' and table_name = 'households'`)).rows[0].n;
     if (left) throw new Error('TEST_DATABASE_URL must point at an empty database');
     KEY = node(['gen-key']);
-    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
+    // DATABASE_OWNER_URL is blanked too: a developer's .env must never steer a test server's migrations elsewhere
+    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATABASE_OWNER_URL: '', DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
       AUTH_USERS: [node(['hash-password', 'sam', 'correct horse']), node(['hash-password', 'chris', 'battery staple'])].join(';') };
     proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: ENV, stdio: 'pipe' });
-    for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
-    throw new Error('server did not start');
+    proc.stderr.on('data', d => serverLog.push(String(d))); // shown at the end if the server logged an error
+    await waitForServer(proc, BASE);
+  }, { timeout: 120000 });
+  const serverLog = [];
+  test.after(async () => {
+    if (proc) proc.kill(); if (db) await db.end();
+    const errors = serverLog.join('').split('\n').filter(l => /error/i.test(l) && !/applied migration/.test(l));
+    if (errors.length) console.error('the test server logged errors during this run:\n' + errors.join('\n'));
   });
-  test.after(async () => { if (proc) proc.kill(); if (db) await db.end(); });
 
   let id;
   test('create, save, version conflict and audit trail', async () => {
@@ -60,20 +69,103 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     assert.equal((await fetch(`${BASE}/api/households/${crypto.randomUUID()}`, { headers: SAM })).status, 404);
   });
 
-  test('two saves of the same version at once: exactly one wins', async () => {
-    const rec = await (await fetch(`${BASE}/api/households/${id}`, { headers: SAM })).json();
-    const save = (who, v) => { const st = structuredClone(rec.state); st.household.reference = v; return fetch(`${BASE}/api/households/${id}`, { method: 'PUT', headers: { ...who, ...J }, body: JSON.stringify({ version: rec.version, state: st }) }); };
-    const codes = (await Promise.all([save(SAM, 'A-1'), save(CHRIS, 'B-2')])).map(r => r.status).sort();
-    assert.deepEqual(codes, [200, 409]);
+  test('two saves of the same version at once: exactly one wins, every time (25 rounds, never a server error)', async () => {
+    for (let round = 1; round <= 25; round++) {
+      const rec = await (await fetch(`${BASE}/api/households/${id}`, { headers: SAM })).json();
+      const save = (who, v) => { const st = structuredClone(rec.state); st.household.reference = v; return fetch(`${BASE}/api/households/${id}`, { method: 'PUT', headers: { ...who, ...J }, body: JSON.stringify({ version: rec.version, state: st }) }); };
+      const replies = await Promise.all([save(SAM, `A-${round}`), save(CHRIS, `B-${round}`)]);
+      const codes = replies.map(r => r.status).sort();
+      assert.deepEqual(codes, [200, 409], `round ${round}: ${await replies[codes.indexOf(500) >= 0 ? replies.findIndex(r => r.status === 500) : 0].text()}`);
+    }
   });
 
   test('rows are encrypted and every version is kept', async () => {
     const h = (await db.query('select version, doc from households where id = $1', [id])).rows[0];
-    assert.equal(h.version, 3); assert.match(h.doc, /^enc:v1:/); assert.doesNotMatch(h.doc, /Harrington/);
+    // Sealed with the firm's own key (enc:v2); records from before tenancy are enc:v1 and still open
+    const current = (await (await fetch(`${BASE}/api/households/${id}`, { headers: SAM })).json()).version;
+    assert.ok(current >= 3);
+    assert.equal(h.version, current); assert.match(h.doc, /^enc:v2:/); assert.doesNotMatch(h.doc, /Harrington/);
     const v = (await db.query('select version, doc from household_versions where household_id = $1 order by version', [id])).rows;
-    assert.deepEqual(v.map(x => x.version), [1, 2, 3]); assert.ok(v.every(x => x.doc.startsWith('enc:v1:')));
+    assert.deepEqual(v.map(x => x.version), Array.from({ length: current }, (_, i) => i + 1), 'every version kept'); assert.ok(v.every(x => x.doc.startsWith('enc:v2:')));
+    const firm = (await db.query('select wrapped_key from firms')).rows[0];
+    assert.match(firm.wrapped_key, /^wk:v1:/, "the firm's key is stored wrapped");
     const a = (await db.query('select entry from audit_log where household_id = $1', [id])).rows;
     assert.ok(a.length >= 3); assert.ok(a.every(x => !/chris|bank/.test(x.entry)));
+  });
+
+  test('index-references fills the reference index for rows that lack it, and only those', async () => {
+    await db.query('update households set reference_hmac = null where id = $1', [id]);
+    const run = () => execFileSync(process.execPath, ['server.js', 'index-references'], { cwd: ROOT, env: ENV }).toString();
+    assert.match(run(), /1 household\(s\) indexed/);
+    const h = (await db.query('select reference_hmac from households where id = $1', [id])).rows[0];
+    assert.match(h.reference_hmac, /^[0-9a-f]{64}$/);
+    assert.match(run(), /0 household\(s\) indexed/);
+  });
+
+  test('rotate-key re-wraps every firm key with NEW_DATA_KEY; a server with the new key reads everything', async () => {
+    const run = (args, extra) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_, ...extra }, encoding: 'utf8' }).trim();
+    const before = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
+    const NEW = node(['gen-key']);
+    assert.match(run(['rotate-key'], { NEW_DATA_KEY: NEW }), /1 firm key\(s\) re-wrapped/);
+    const after = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
+    assert.notEqual(after, before); assert.match(after, /^wk:v1:/);
+    // A fresh server with the new master key opens the records sealed before the rotation
+    const p2 = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, DATA_KEY: NEW, PORT: String(PORT + 2) }, stdio: 'pipe' });
+    try {
+      const B2 = `http://127.0.0.1:${PORT + 2}`;
+      await waitForServer(p2, B2);
+      const rec = await (await fetch(`${B2}/api/households/${id}`, { headers: SAM })).json();
+      assert.ok(rec.version >= 3, 'the record sealed before the rotation opens with the new key');
+      assert.ok((await (await fetch(B2 + '/api/households', { headers: SAM })).json()).length >= 1);
+    } finally { p2.kill(); }
+    // The old master key no longer opens anything: a server with it cannot unwrap the firm key
+    const p3 = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, PORT: String(PORT + 3) }, stdio: 'pipe' });
+    try {
+      const B3 = `http://127.0.0.1:${PORT + 3}`;
+      await waitForServer(p3, B3);
+      assert.equal((await fetch(`${B3}/api/households/${id}`, { headers: SAM })).status, 500);
+    } finally { p3.kill(); }
+    // Rotate back, so the rest of this file (and the server started with the old key) carry on
+    assert.match(run(['rotate-key'], { DATA_KEY: NEW, NEW_DATA_KEY: KEY }), /1 firm key\(s\) re-wrapped/);
+    assert.match(run(['rotate-key'], { NEW_DATA_KEY: KEY }).toString(), /re-wrapped/, 'the same key again is harmless');
+  });
+
+  test('rotate-key refuses while any record is still sealed with the master key itself (enc:v1)', async () => {
+    const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+    const legacy = createSealer(Buffer.from(KEY, 'base64'));
+    const lid = crypto.randomUUID();
+    const rec = { id: lid, version: 1, state: H.blank(), createdAt: '2026-10-01T00:00:00.000Z', createdBy: 'old', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'old' };
+    rec.state.household.name = 'Legacy household';
+    await db.query(`insert into households (id, version, doc, updated_at, firm_id) values ($1, 1, $2, now(), 'f1a00000-0000-4000-8000-000000000001')`, [lid, legacy.seal(JSON.stringify(rec))]);
+    const r = require('node:child_process').spawnSync(process.execPath, ['server.js', 'rotate-key'], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_, NEW_DATA_KEY: node(['gen-key']) }, encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /1 record\(s\) still sealed with DATA_KEY itself \(enc:v1\)/);
+    assert.equal((await fetch(`${BASE}/api/households/${lid}`, { headers: SAM })).status, 200, 'the legacy record still reads');
+  });
+
+  test('a create whose transaction hits a deadlock or serialization failure is run again: one household, the Idempotency-Key honoured', async () => {
+    for (const code of ['40P01', '40001']) {
+      // A trigger that fails the first insert attempt only (a sequence counts attempts; sequences are not rolled back)
+      await db.query(`create sequence retry_probe;
+        create function fail_once() returns trigger language plpgsql as $$ begin
+          if nextval('retry_probe') = 1 then raise exception 'simulated %', '${code}' using errcode = '${code}'; end if; return new; end $$;
+        create trigger fail_once before insert on households for each row execute function fail_once()`);
+      try {
+        const before = (await (await fetch(BASE + '/api/households', { headers: SAM })).json()).length;
+        const st = H.blank(); st.household.name = 'Retried after ' + code; st.household.reference = 'RETRY-' + code;
+        const key = 'retry-' + crypto.randomUUID();
+        const r1 = await fetch(BASE + '/api/households', { method: 'POST', headers: { ...SAM, ...J, 'Idempotency-Key': key }, body: JSON.stringify({ state: st }) });
+        const j1 = await r1.json(); assert.equal(r1.status, 201, code + ' ' + JSON.stringify(j1));
+        assert.equal((await db.query('select last_value::int n from retry_probe')).rows[0].n, 2, 'one failed attempt, then one that succeeded');
+        const r2 = await fetch(BASE + '/api/households', { method: 'POST', headers: { ...SAM, ...J, 'Idempotency-Key': key }, body: JSON.stringify({ state: st }) });
+        assert.equal(r2.status, 201); assert.deepEqual(await r2.json(), j1, 'the same key replays the reply from the retried create');
+        assert.equal((await (await fetch(BASE + '/api/households', { headers: SAM })).json()).length, before + 1, 'exactly one household');
+        assert.equal((await db.query('select count(*)::int n from households where id = $1', [j1.id])).rows[0].n, 1);
+        assert.equal((await db.query(`select count(*)::int n from idempotency_keys where reply like '%' || $1 || '%'`, [j1.id])).rows[0].n, 1, 'one key row');
+      } finally {
+        await db.query('drop trigger if exists fail_once on households; drop function if exists fail_once(); drop sequence if exists retry_probe');
+      }
+    }
   });
 
   test('the database refuses deletes and rewrites', async () => {
@@ -87,7 +179,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const fileServer = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, DATABASE_URL: '', DATA_DIR: dir, PORT: String(PORT + 1) }, stdio: 'pipe' });
     try {
       const FB = `http://127.0.0.1:${PORT + 1}`;
-      for (let i = 0; i < 50; i++) { try { if ((await fetch(FB + '/healthz')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+      await waitForServer(fileServer, FB);
       const st = H.sample(); st.household.name = 'Imported household';
       const { id: fid } = await (await fetch(FB + '/api/households', { method: 'POST', headers: { ...SAM, ...J }, body: JSON.stringify({ state: st }) })).json();
       st.household.reference = 'IMP-1';
@@ -111,7 +203,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       assert.match(second, /Firm settings not copied: the database already has firm settings/);
       assert.deepEqual(await (await fetch(BASE + '/api/firm', { headers: SAM })).json(), fileFirm);
       assert.deepEqual(await (await fetch(BASE + '/api/firm/audit', { headers: SAM })).json(), fileFirmAudit);
-      assert.equal((await db.query('select count(*)::int n from firm_versions')).rows[0].n, 2);
+      assert.equal((await db.query('select count(*)::int n from firm_record_versions')).rows[0].n, 2);
       const rec = await (await fetch(`${BASE}/api/households/${fid}`, { headers: SAM })).json();
       assert.equal(rec.version, 2); assert.equal(rec.state.household.reference, 'IMP-1');
       const audit = await (await fetch(`${BASE}/api/households/${fid}/audit`, { headers: SAM })).json();

@@ -21,6 +21,7 @@ test('defaults when only users and key are set', () => {
   assert.equal(c.host, '0.0.0.0');
   assert.equal(c.dataDir, path.join(r, 'data'));
   assert.equal(c.databaseUrl, '');
+  assert.equal(c.databaseOwnerUrl, '', 'migrations run with DATABASE_URL unless an owner URL is given');
   assert.equal(c.databasePoolMax, 10);
   assert.equal(c.clientIpHeader, '');
   assert.equal(c.hsts, true);
@@ -29,8 +30,9 @@ test('defaults when only users and key are set', () => {
 });
 
 test('settings from the environment', () => {
-  const c = ok({ PORT: '9001', HOST: '127.0.0.1', DATA_DIR: 'some/dir', DATABASE_URL: 'postgres://x', DATABASE_POOL_MAX: '3', CLIENT_IP_HEADER: 'Fly-Client-IP', HSTS: '0' });
+  const c = ok({ PORT: '9001', HOST: '127.0.0.1', DATA_DIR: 'some/dir', DATABASE_URL: 'postgres://x', DATABASE_OWNER_URL: 'postgres://owner@x', DATABASE_POOL_MAX: '3', CLIENT_IP_HEADER: 'Fly-Client-IP', HSTS: '0' });
   assert.equal(c.port, 9001);
+  assert.equal(c.databaseOwnerUrl, 'postgres://owner@x');
   assert.equal(c.host, '127.0.0.1');
   assert.equal(c.dataDir, path.resolve('some/dir'));
   assert.equal(c.databaseUrl, 'postgres://x');
@@ -70,6 +72,13 @@ test('NODE_ENV=production refuses files, plaintext, plain HTTP and Basic sign-in
   assert.throws(() => prod({}), /No users configured/);
   assert.equal(ok().production, false, 'NODE_ENV unset is not production');
   assert.equal(ok({ NODE_ENV: 'development', ALLOW_PLAINTEXT: '1', DATA_KEY: '' }).production, false);
+});
+
+test('DATABASE_OWNER_URL must name the same host and database as DATABASE_URL', () => {
+  assert.equal(ok({ DATABASE_URL: 'postgres://hwp_app:a@db.example:5432/hwp', DATABASE_OWNER_URL: 'postgres://hwp_owner:b@db.example:5432/hwp' }).databaseOwnerUrl, 'postgres://hwp_owner:b@db.example:5432/hwp');
+  for (const other of ['postgres://hwp_owner:b@other.example:5432/hwp', 'postgres://hwp_owner:b@db.example:5432/other', 'not a url'])
+    assert.throws(() => ok({ DATABASE_URL: 'postgres://hwp_app:a@db.example:5432/hwp', DATABASE_OWNER_URL: other }),
+      { message: 'DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).' }, other);
 });
 
 test('a malformed AUTH_USERS entry is refused at start-up, not as a server error at sign-in', () => {

@@ -5,6 +5,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createBasicAuth, hashPassword, MAX_FAILURES, LOCK_MS, CACHE_MS } = require('../../apps/api/src/auth/providers/basic');
 const { parseUsers } = require('../../apps/api/src/config');
+const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+// Basic sign-in is development-only: every user belongs to the default firm
+const firmId = DEFAULT_FIRM_ID;
 
 const USERS = parseUsers([hashPassword('sam', 'correct horse'), hashPassword('chris', 'pa:ss:word'), hashPassword('zoë', 'ünïcode ✓')].join(';'));
 const basic = (name, pass) => 'Basic ' + Buffer.from(`${name}:${pass}`, 'utf8').toString('base64');
@@ -22,14 +25,14 @@ test('limits: 10 failures, 15-minute lock, 5-minute cache', () => {
 
 test('right name and password sign in; names are case-sensitive', () => {
   const { auth } = setup();
-  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam' });
+  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam', firmId });
   assert.equal(auth(req(basic('SAM', 'correct horse'))), null);
 });
 
 test('passwords may contain colons and any characters; the name ends at the first colon', () => {
   const { auth } = setup();
-  assert.deepEqual(auth(req(basic('chris', 'pa:ss:word'))), { user: 'chris' });
-  assert.deepEqual(auth(req(basic('zoë', 'ünïcode ✓'))), { user: 'zoë' });
+  assert.deepEqual(auth(req(basic('chris', 'pa:ss:word'))), { user: 'chris', firmId });
+  assert.deepEqual(auth(req(basic('zoë', 'ünïcode ✓'))), { user: 'zoë', firmId });
 });
 
 test('wrong password, unknown name, empty name and no colon are refused', () => {
@@ -43,7 +46,7 @@ test('wrong password, unknown name, empty name and no colon are refused', () => 
 test('no credentials, or not Basic, is refused but never counts towards the lockout', () => {
   const { auth } = setup();
   for (let i = 0; i < 25; i++) { assert.equal(auth(req()), null); assert.equal(auth(req('Bearer abc')), null); }
-  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam' });
+  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam', firmId });
 });
 
 test('10 failures lock the address for 15 minutes, even with the right password', () => {
@@ -55,22 +58,22 @@ test('10 failures lock the address for 15 minutes, even with the right password'
   clock.t += LOCK_MS - 1;
   assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { locked: true }, 'still locked 1 ms before the end');
   clock.t += 1;
-  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam' }, 'open again after 15 minutes');
+  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam', firmId }, 'open again after 15 minutes');
 });
 
 test('the lock is per address; other addresses are not affected', () => {
   const { auth } = setup();
   fail(auth, '10.0.0.1', 10);
   assert.deepEqual(auth(req(basic('sam', 'correct horse'), '10.0.0.1')), { locked: true });
-  assert.deepEqual(auth(req(basic('sam', 'correct horse'), '10.0.0.2')), { user: 'sam' });
+  assert.deepEqual(auth(req(basic('sam', 'correct horse'), '10.0.0.2')), { user: 'sam', firmId });
 });
 
 test('a success clears the count: 9 failures, a success, then 9 more do not lock', () => {
   const { auth } = setup();
   fail(auth, '10.0.0.1', 9);
-  assert.deepEqual(auth(req(basic('chris', 'pa:ss:word'))), { user: 'chris' });
+  assert.deepEqual(auth(req(basic('chris', 'pa:ss:word'))), { user: 'chris', firmId });
   fail(auth, '10.0.0.1', 9);
-  assert.deepEqual(auth(req(basic('zoë', 'ünïcode ✓'))), { user: 'zoë' });
+  assert.deepEqual(auth(req(basic('zoë', 'ünïcode ✓'))), { user: 'zoë', firmId });
 });
 
 test('after a lock runs out, the count starts again from one', () => {
@@ -78,7 +81,7 @@ test('after a lock runs out, the count starts again from one', () => {
   fail(auth, '10.0.0.1', 10);
   clock.t += LOCK_MS;
   fail(auth, '10.0.0.1', 9);
-  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam' }, '9 new failures are not enough');
+  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam', firmId }, '9 new failures are not enough');
 });
 
 test('failures older than 15 minutes no longer count towards the lock', () => {
@@ -86,7 +89,7 @@ test('failures older than 15 minutes no longer count towards the lock', () => {
   fail(auth, '10.0.0.1', 9);
   clock.t += LOCK_MS + 1;
   fail(auth, '10.0.0.1', 9);
-  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam' }, '9 old and 9 recent failures are not 10 recent ones');
+  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam', firmId }, '9 old and 9 recent failures are not 10 recent ones');
 });
 
 test('an unknown name takes as long to refuse as a wrong password, so replies do not reveal which names exist', () => {
@@ -117,7 +120,7 @@ test('behind a proxy: the configured header is the address; without the setting 
   const viaProxy = setup('x-client-ip').auth;
   for (let i = 0; i < 10; i++) viaProxy(req(basic('sam', 'nope' + i), '127.0.0.1', { 'x-client-ip': '203.0.113.9' }));
   assert.deepEqual(viaProxy(req(basic('sam', 'correct horse'), '127.0.0.1', { 'x-client-ip': '203.0.113.9' })), { locked: true });
-  assert.deepEqual(viaProxy(req(basic('sam', 'correct horse'), '127.0.0.1', { 'x-client-ip': '198.51.100.7' })), { user: 'sam' });
+  assert.deepEqual(viaProxy(req(basic('sam', 'correct horse'), '127.0.0.1', { 'x-client-ip': '198.51.100.7' })), { user: 'sam', firmId });
   const direct = setup('').auth;
   for (let i = 0; i < 10; i++) direct(req(basic('sam', 'nope' + i), '127.0.0.1', { 'x-client-ip': '203.0.113.' + i }));
   assert.deepEqual(direct(req(basic('sam', 'correct horse'), '127.0.0.1', { 'x-client-ip': '198.51.100.7' })), { locked: true }, 'a spoofed header does not dodge the lock');
@@ -128,10 +131,10 @@ test('a successful login is remembered for 5 minutes, then checked again', () =>
   const clock = { t: 0 };
   const auth = createBasicAuth({ users, now: () => clock.t }).authenticate;
   const h = basic('sam', 'correct horse');
-  assert.deepEqual(auth(req(h)), { user: 'sam' });
+  assert.deepEqual(auth(req(h)), { user: 'sam', firmId });
   users.delete('sam'); // proves the next answers come from the cache, not a password check
   clock.t += CACHE_MS - 1;
-  assert.deepEqual(auth(req(h)), { user: 'sam' });
+  assert.deepEqual(auth(req(h)), { user: 'sam', firmId });
   clock.t += 1;
   assert.equal(auth(req(h)), null, 'after 5 minutes the password is checked again');
 });
@@ -141,5 +144,5 @@ test('hashPassword makes an AUTH_USERS entry that signs in', () => {
   assert.match(entry, /^dana:[0-9a-f]{32}:[0-9a-f]{128}$/);
   assert.notEqual(hashPassword('dana', 'x'), hashPassword('dana', 'x'), 'random salt');
   const auth = createBasicAuth({ users: parseUsers(entry) }).authenticate;
-  assert.deepEqual(auth(req(basic('dana', 's3cret:with colon'))), { user: 'dana' });
+  assert.deepEqual(auth(req(basic('dana', 's3cret:with colon'))), { user: 'dana', firmId });
 });

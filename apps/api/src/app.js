@@ -53,11 +53,12 @@ function createApp({ config, households, firm, prices, authenticate, ready = asy
       return send(res, auth && auth.locked ? 429 : 401, { error: auth && auth.locked ? 'Too many failed sign-ins. Try again in 15 minutes.' : 'Sign in required' },
         auth && auth.locked ? {} : CHALLENGE);
     }
-    const user = auth.user;
+    // Everything a route and service may act on: who is signed in, and the one firm they work in
+    const ctx = { user: auth.user, firmId: auth.firmId };
     if (!p.startsWith('/api/')) return req.method === 'GET' ? serveStatic(req, res, p) : send(res, 405, { error: 'Method not allowed' });
     const refused = checkWrite(req);
     if (refused) return send(res, ...refused);
-    for (const route of routes) if (await route(req, res, p, user)) return;
+    for (const route of routes) if (await route(req, res, p, ctx)) return;
     return send(res, 404, { error: 'Not found' });
   }
 

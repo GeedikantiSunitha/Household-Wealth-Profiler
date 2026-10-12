@@ -11,14 +11,16 @@ const { checkWrite } = require('../../apps/api/src/http/guards.js');
 const ROOT = path.join(__dirname, '..', '..');
 const ID = '00000000-0000-4000-8000-000000000001';
 let base, server, calls, logged;
+// Every service call receives the context { user, firmId } from sign-in; the fakes record it
+const FIRM = 'f1a00000-0000-4000-8000-000000000001';
 const households = {
-  list: async () => { calls.push('list'); return [{ id: ID }]; },
-  create: async (state, user, opts) => { calls.push(['create', user, opts && opts.idempotencyKey]); return { id: ID, version: 1 }; },
-  get: async id => id === ID ? { id: ID, version: 1 } : null,
-  audit: async id => id === ID ? [{ field: 'created' }] : null,
-  save: async (id, body) => id !== ID ? { notFound: true } : body.version !== 1 ? { conflict: { version: 1, updatedBy: 'x', updatedAt: 't' } } : body.boom ? (() => { throw new Error('secret detail'); })() : { version: 2, changes: 1 },
+  list: async ctx => { calls.push(['list', ctx.firmId]); return [{ id: ID }]; },
+  create: async (ctx, state, opts) => { calls.push(['create', ctx.user, ctx.firmId, opts && opts.idempotencyKey]); return { id: ID, version: 1 }; },
+  get: async (ctx, id) => ctx.firmId === FIRM && id === ID ? { id: ID, version: 1 } : null,
+  audit: async (ctx, id) => ctx.firmId === FIRM && id === ID ? [{ field: 'created' }] : null,
+  save: async (ctx, id, body) => id !== ID ? { notFound: true } : body.version !== 1 ? { conflict: { version: 1, updatedBy: 'x', updatedAt: 't' } } : body.boom ? (() => { throw new Error('secret detail'); })() : body.busy ? (() => { throw Object.assign(new Error('The server is busy. Try again in a moment.'), { status: 503 }); })() : { version: 2, changes: 1 },
 };
-const authenticate = req => req.headers.authorization === 'ok' ? { user: 'sam' } : req.headers.authorization === 'locked' ? { locked: true } : null;
+const authenticate = req => req.headers.authorization === 'ok' ? { user: 'sam', firmId: FIRM } : req.headers.authorization === 'locked' ? { locked: true } : null;
 let storageUp = true;
 const ready = async () => { if (!storageUp) throw new Error('database down: secret detail'); };
 
@@ -84,10 +86,13 @@ test('4. writes: the same-site check comes before the JSON check', async () => {
 test('5. API routes, then 404 for everything else', async () => {
   assert.deepEqual(await (await call('GET', '/api/me')).json(), { user: 'sam', encrypted: true, production: false });
   assert.equal((await call('POST', '/api/households', { headers: J, body: '{"state":{}}' })).status, 201);
-  assert.deepEqual(calls, [['create', 'sam', undefined]], 'the signed-in user is passed to the service');
+  assert.deepEqual(calls, [['create', 'sam', FIRM, undefined]], 'the signed-in user and firm are passed to the service');
+  calls = [];
+  assert.equal((await call('GET', '/api/households')).status, 200);
+  assert.deepEqual(calls, [['list', FIRM]], 'reads carry the firm too');
   calls = [];
   assert.equal((await call('POST', '/api/households', { headers: { ...J, 'Idempotency-Key': 'abc-12345' }, body: '{"state":{}}' })).status, 201);
-  assert.deepEqual(calls, [['create', 'sam', 'abc-12345']], 'the Idempotency-Key header reaches the service');
+  assert.deepEqual(calls, [['create', 'sam', FIRM, 'abc-12345']], 'the Idempotency-Key header reaches the service');
   calls = [];
   const bad = await call('POST', '/api/households', { headers: { ...J, 'Idempotency-Key': 'short' }, body: '{"state":{}}' });
   assert.equal(bad.status, 400); assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' });
@@ -114,6 +119,9 @@ test('errors: 400 keeps its message; anything unexpected is "Server error" with 
   assert.equal(boom.status, 500);
   assert.deepEqual(await boom.json(), { error: 'Server error' }, 'the detail stays on the server');
   assert.ok(logged.some(l => /secret detail/.test(l)), 'and is logged there');
+  // No free database connection: 503 with its message (the pool reports this with a status), never a 500
+  const busy = await call('PUT', `/api/households/${ID}`, { headers: J, body: JSON.stringify({ version: 1, busy: true }) });
+  assert.equal(busy.status, 503); assert.deepEqual(await busy.json(), { error: 'The server is busy. Try again in a moment.' });
 });
 
 test('every reply carries the security headers, with HSTS when switched on', async () => {

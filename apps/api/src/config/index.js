@@ -49,9 +49,20 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     if (env.HSTS === '0') throw new Error('NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.');
     if (env.AUTH_USERS) throw new Error("NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in.");
   }
+  // NEW_DATA_KEY: only for node server.js rotate-key
+  let newKey = null;
+  if (env.NEW_DATA_KEY) {
+    newKey = Buffer.from(env.NEW_DATA_KEY, 'base64');
+    if (newKey.length !== 32) throw new Error('NEW_DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key');
+  }
+  // The owner connection must be to the same database as the app's: migrations run where the data is
+  if (env.DATABASE_URL && env.DATABASE_OWNER_URL) {
+    const same = (a, b) => { try { const x = new URL(a), y = new URL(b); return x.host === y.host && x.pathname === y.pathname; } catch (e) { return false; } };
+    if (!same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
+  }
   const users = parseUsers(env.AUTH_USERS);
-  // import-files only copies data, so it runs without sign-in users
-  if (!users.size && command !== 'import-files') throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
+  // The data commands run without sign-in users
+  if (!users.size && !['import-files', 'migrate', 'index-references', 'rotate-key'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
   if (!key && env.ALLOW_PLAINTEXT !== '1') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
@@ -61,6 +72,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     host: env.HOST || '0.0.0.0',
     dataDir: path.resolve(env.DATA_DIR || path.join(root, 'data')),
     databaseUrl: env.DATABASE_URL || '',
+    // The owner connection for migrations (node server.js migrate); the server itself runs as the
+    // app role in DATABASE_URL, which cannot change the schema or bypass row-level security
+    databaseOwnerUrl: env.DATABASE_OWNER_URL || '',
     databasePoolMax: +env.DATABASE_POOL_MAX || 10,
     // Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
     // to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.
@@ -69,6 +83,7 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     alphavantageKey: env.ALPHAVANTAGE_KEY || '',
     users,
     key,
+    newKey,
     hsts: env.HSTS !== '0',
   };
 }

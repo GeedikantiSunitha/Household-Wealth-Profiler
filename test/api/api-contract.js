@@ -84,8 +84,10 @@ function apiContract(ctx) {
       assert.equal(j.user, 'sam'); assert.equal(typeof j.encrypted, 'boolean'); assert.equal(j.production, false);
     });
 
+    // The contract household has its own client reference: a reference may exist once per firm
+    const REF = 'HH-C-' + crypto.randomUUID().slice(0, 6).toUpperCase();
     test('POST /api/households: 201 {id, version: 1}', async () => {
-      sent = H.sample(); sent.household.name = 'Contract household';
+      sent = H.sample(); sent.household.name = 'Contract household'; sent.household.reference = REF;
       const r = await call('POST', '/api/households', { who: sam, body: { state: sent } });
       assert.equal(r.status, 201);
       const j = await r.json();
@@ -95,16 +97,36 @@ function apiContract(ctx) {
       id = j.id;
     });
 
+    test('a client reference another household in the firm already has: 409 on create and on save, in any spelling', async () => {
+      const again = H.blank(); again.household.reference = ' ' + REF.toLowerCase() + ' ';
+      const r = await call('POST', '/api/households', { who: chris, body: { state: again } });
+      assert.equal(r.status, 409);
+      assert.deepEqual(await r.json(), { error: `A household with reference "${REF}" already exists` });
+      const other = H.blank(); other.household.reference = REF + '-B';
+      const { id: oid } = await (await call('POST', '/api/households', { who: chris, body: { state: other } })).json();
+      other.household.reference = REF.toLowerCase();
+      const s = await call('PUT', '/api/households/' + oid, { who: chris, body: { version: 1, state: other } });
+      assert.equal(s.status, 409);
+      assert.deepEqual(await s.json(), { error: `A household with reference "${REF}" already exists` });
+      assert.equal((await (await call('GET', '/api/households/' + oid, { who: chris })).json()).version, 1, 'nothing saved');
+    });
+
     test('POST with the same Idempotency-Key twice: the same reply, one household; a bad key is 400', async () => {
       const key = 'contract-' + crypto.randomUUID();
-      const st = H.blank(); st.household.name = 'Once only ' + key.slice(-6);
+      const st = H.blank(); st.household.name = 'Once only ' + key.slice(-6); st.household.reference = 'ONCE-' + key.slice(-6); // a reference: the repeat must not be refused as a duplicate of itself
       const before = (await (await call('GET', '/api/households', { who: sam })).json()).length;
       const a = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });
       const b = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });
       assert.equal(a.status, 201); assert.equal(b.status, 201);
-      assert.deepEqual(await b.json(), await a.json());
+      const ja = await a.json(); assert.deepEqual(await b.json(), ja);
       const after = (await (await call('GET', '/api/households', { who: sam })).json()).length;
       assert.equal(after, before + 1);
+      // The same key with a different request is refused, not answered with the first reply; the original repeat still replays
+      const other = H.blank(); other.household.name = 'Something else ' + key.slice(-6);
+      const c = await call('POST', '/api/households', { who: sam, body: { state: other }, headers: { 'Idempotency-Key': key } });
+      assert.equal(c.status, 422); assert.deepEqual(await c.json(), { error: 'This Idempotency-Key was already used for a different request' });
+      assert.deepEqual(await (await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } })).json(), ja, 'the original request still replays');
+      assert.equal((await (await call('GET', '/api/households', { who: sam })).json()).length, before + 1, 'still one household');
       const bad = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': 'no spaces allowed' } });
       assert.equal(bad.status, 400);
       assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' });
@@ -177,7 +199,7 @@ function apiContract(ctx) {
       for (const c of changes) { assert.deepEqual(keys(c), CHANGE_AUDIT_KEYS); assert.equal(c.user, 'chris'); assert.equal(c.version, 2); }
       assert.deepEqual(changes.map(c => c.field).sort(), ['household.reference', 'members[1].poaType']);
       const ref = changes.find(c => c.field === 'household.reference');
-      assert.equal(ref.from, 'HH-0001'); assert.equal(ref.to, 'HH-CONTRACT');
+      assert.equal(ref.from, REF); assert.equal(ref.to, 'HH-CONTRACT');
     });
 
     // Firm settings: works from whatever version is there, so other tests may have saved before

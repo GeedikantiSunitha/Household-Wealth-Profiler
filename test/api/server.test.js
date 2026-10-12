@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
 const { apiContract } = require('./api-contract.js');
+const { waitForServer } = require('./servers.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-test-'));
@@ -23,20 +24,19 @@ let proc;
 
 test.before(async () => {
   // DATABASE_URL is blanked so a developer's .env cannot point the test at a real database
-  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY, DATABASE_URL: '', ALPHAVANTAGE_KEY: '', CLIENT_IP_HEADER: 'X-Client-IP',
+  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', ALPHAVANTAGE_KEY: '', CLIENT_IP_HEADER: 'X-Client-IP',
     AUTH_USERS: [user('sam', 'correct horse'), user('chris', 'battery staple')].join(';') }, stdio: 'pipe' });
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
-  throw new Error('server did not start');
-});
+  await waitForServer(proc, BASE);
+}, { timeout: 120000 }); // a server that fails to start must fail the run in minutes, not hang it (seen on Windows)
 test.after(() => { proc.kill(); fs.rmSync(DATA, { recursive: true, force: true }); });
 
 // Windows delivers no signals (process.kill ends the process outright), so this runs on Linux and macOS, including CI
 test('SIGTERM: no new connections, the request in flight finishes, then the process exits 0', { skip: process.platform === 'win32' && 'no signals on Windows' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-stop-'));
-  const port = PORT + 7, env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', ALPHAVANTAGE_KEY: '', AUTH_USERS: user('sam', 'correct horse') };
+  const port = PORT + 7, env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', ALPHAVANTAGE_KEY: '', AUTH_USERS: user('sam', 'correct horse') };
   const p = spawn(process.execPath, ['server.js'], { cwd: ROOT, env, stdio: 'pipe' });
   try {
-    for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+    await waitForServer(p, `http://127.0.0.1:${port}`);
     const body = JSON.stringify({ state: H.sample() });
     const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/api/households', headers: { ...SAM, ...J, 'Content-Length': Buffer.byteLength(body) } });
     const reply = new Promise(ok => req.on('response', res => { let t = ''; res.on('data', d => t += d); res.on('end', () => ok({ status: res.statusCode, body: t })); }));

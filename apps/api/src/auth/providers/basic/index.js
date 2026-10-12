@@ -1,6 +1,6 @@
 /* Sign-in with HTTP Basic (named users from AUTH_USERS, passwords hashed with scrypt).
-   Must only be used over HTTPS: the browser sends the password with every request.
-     authenticate(req)  { user } signed in | { locked: true } too many failures | null not signed in
+   Development only (production refuses AUTH_USERS): every user belongs to the default firm.
+     authenticate(req)  { user, firmId } signed in | { locked: true } too many failures | null not signed in
    - Each client address gets 10 failed attempts; then it is locked out for 15 minutes, even with
      the right password. A lock that has run out starts the count again; a success clears it.
    - The address is the proxy's header when CLIENT_IP_HEADER is set, else the connection's.
@@ -12,6 +12,7 @@
      once a minute and capped, so they cannot grow without limit. */
 'use strict';
 const crypto = require('crypto');
+const { DEFAULT_FIRM_ID } = require('../../../repositories/ids.js');
 
 const MAX_FAILURES = 10;
 const LOCK_MS = 15 * 60e3;
@@ -47,7 +48,7 @@ function createBasicAuth({ users, clientIpHeader = '', now = Date.now }) {
     if (!h.startsWith('Basic ')) return null;
     const key = crypto.createHash('sha256').update(h).digest('hex');
     const hit = authCache.get(key);
-    if (hit && hit.exp > t) return { user: hit.user };
+    if (hit && hit.exp > t) return { user: hit.user, firmId: DEFAULT_FIRM_ID };
     let decoded = '';
     try { decoded = Buffer.from(h.slice(6), 'base64').toString('utf8'); } catch (e) { return null; }
     const i = decoded.indexOf(':');
@@ -67,7 +68,7 @@ function createBasicAuth({ users, clientIpHeader = '', now = Date.now }) {
     failures.delete(ip);
     authCache.set(key, { user: name, exp: t + CACHE_MS });
     cap(authCache);
-    return { user: name };
+    return { user: name, firmId: DEFAULT_FIRM_ID };
   }
 
   const stats = () => ({ failures: failures.size, cached: authCache.size });
