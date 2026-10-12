@@ -18,7 +18,9 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 
-const ROOT = path.join(__dirname, '..', '..');
+// HWP_SCREENS_ROOT runs the same check against another copy of the app (for example a release being
+// compared with this one); by default it is this project.
+const ROOT = process.env.HWP_SCREENS_ROOT ? path.resolve(process.env.HWP_SCREENS_ROOT) : path.join(__dirname, '..', '..');
 const LABEL = process.argv[2] || new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const OUT = path.join(ROOT, 'docs', 'checklists', 'screens', LABEL);
 const FROZEN = '2026-10-10T10:00:00Z';
@@ -28,9 +30,17 @@ const CHROME = process.env.CHROME || [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
 ].find(p => fs.existsSync(p));
-// The sections in the side rail, in order. A change here is a change to the app's navigation.
-const NAV = ['household', 'members', 'income', 'expenses', 'goals', 'accounts', 'db', 'property', 'other', 'liabilities', 'protection', 'assumptions',
-  'compliance', 'kyc', 'audit', 'contacts', 'actions', 'complaints', 'reviews', 'mandate', 'models', 'drift', 'bs', 'tax', 'risk', 'checks', 'guide'];
+// The side rail: six collapsible groups and their sections, in order. A change here is a change to
+// the app's navigation.
+const GROUPS = [
+  ['client', ['household', 'members', 'income', 'expenses', 'goals', 'assumptions']],
+  ['wealth', ['accounts', 'db', 'property', 'other', 'liabilities', 'protection']],
+  ['onboarding', ['compliance', 'rtq', 'kyc', 'audit']],
+  ['relationship', ['contacts', 'actions', 'loas', 'complaints', 'reviews']],
+  ['mandate', ['mandate', 'models', 'drift', 'perf']],
+  ['analysis', ['bs', 'scenarios', 'tax', 'risk', 'checks', 'guide']],
+];
+const NAV = GROUPS.flatMap(([, ids]) => ids);
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const freePort = () => new Promise((ok, fail) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); s.on('error', fail); });
@@ -116,6 +126,12 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       while (Date.now() < end) { if (await js(expr).catch(() => false)) return true; await sleep(100); }
       throw new Error('Timed out waiting for ' + what); };
     const click = sel => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('No element ${sel.replace(/'/g, '')}'); el.click(); return true; })()`);
+    // Opens a section from the side rail, first opening its group when that is collapsed
+    const nav = async id => {
+      const [g] = GROUPS.find(([, ids]) => ids.includes(id));
+      if (!(await js(`!!document.querySelector('[data-nav="${id}"]')`))) await click(`[data-act="navGroup"][data-g="${g}"]`);
+      await click(`[data-nav="${id}"]`);
+    };
     const type = (sel, value) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     const text = sel => js(`document.querySelector(${JSON.stringify(sel)})?.textContent.trim() || ''`);
     // 30 s: a cold Chrome also fetches the Google fonts before the page counts as loaded
@@ -151,9 +167,13 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       await click('[data-act="newSample"]');
       await until(`/Harrington household/.test(document.querySelector('#hhName').textContent)`, 'the new household');
     });
-    await step('the side rail lists the 27 sections in order', async () => {
+    await step(`the side rail has ${GROUPS.length} groups; opened, they list the ${NAV.length} sections in order`, async () => {
+      const groups = await js(`[...document.querySelectorAll('[data-act="navGroup"]')].map(b => b.dataset.g)`);
+      if (JSON.stringify(groups) !== JSON.stringify(GROUPS.map(([g]) => g))) throw new Error('groups: ' + groups.join(','));
+      for (const [g] of GROUPS) if (await js(`document.querySelector('[data-act="navGroup"][data-g="${g}"]').getAttribute('aria-expanded')`) !== 'true') await click(`[data-act="navGroup"][data-g="${g}"]`);
       const ids = await js(`[...document.querySelectorAll('[data-nav]')].map(b => b.dataset.nav)`);
       if (JSON.stringify(ids) !== JSON.stringify(NAV)) throw new Error('got ' + ids.join(','));
+      await shot('rail-open');
     });
     await step('the header and rail show what core.js works out (KYC and AML, 2 open)', async () => {
       if (!/KYC and AML/.test(await text('#hhName'))) throw new Error('header: ' + await text('#hhName'));
@@ -162,7 +182,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     });
     for (const id of NAV) {
       await step(`section renders: ${id}`, async () => {
-        await click(`[data-nav="${id}"]`);
+        await nav(id);
         await until(`document.querySelector('[data-nav="${id}"]').getAttribute('aria-current') === 'true' && document.querySelector('#main').children.length > 0`, id);
         if (id === 'audit') await until(`!/Loading/.test(document.querySelector('#main').textContent)`, 'the audit trail');
         if (/Something went wrong|undefined|NaN/.test(await text('#main'))) throw new Error('suspicious text on screen');
@@ -170,7 +190,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       });
     }
     await step('typing a change is picked up, then autosaved ("Unsaved changes", then "All changes saved")', async () => {
-      await click('[data-nav="household"]');
+      await nav('household');
       await until(`!!document.querySelector('#f-household-0-reference')`, 'the reference field');
       await type('#f-household-0-reference', 'HH-SCREEN');
       // A freshly opened household already says "All changes saved", so first prove the typing registered
@@ -184,7 +204,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       await shot('clients-one-household');
       await click('[data-act="openHousehold"]');
       await until(`/Harrington household/.test(document.querySelector('#hhName').textContent)`, 'the household to open');
-      await click('[data-nav="household"]');
+      await nav('household');
       await until(`document.querySelector('#f-household-0-reference')?.value === 'HH-SCREEN'`, 'the saved value in the form');
     });
     await step('"Reviews due" across households renders', async () => {
@@ -194,12 +214,22 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       await until(`document.querySelector('#main h2')?.textContent === 'Reviews due' && !/Loading/.test(document.querySelector('#main').textContent)`, 'the diary');
       await shot('diary');
     });
+    await step('"Tasks" and "Firm settings" across the firm render', async () => {
+      await click('[data-act="tasks"]');
+      await until(`document.querySelector('[data-act="tasks"]').getAttribute('aria-current') === 'true' && document.querySelector('#main').children.length > 0`, 'the tasks board');
+      if (/Something went wrong|undefined|NaN/.test(await text('#main'))) throw new Error('suspicious text on the tasks board');
+      await shot('tasks');
+      await click('[data-act="firmSettings"]');
+      await until(`document.querySelector('[data-act="firmSettings"]').getAttribute('aria-current') === 'true' && document.querySelector('#main').children.length > 0`, 'firm settings');
+      if (/Something went wrong|undefined|NaN/.test(await text('#main'))) throw new Error('suspicious text in firm settings');
+      await shot('firm-settings');
+    });
     await step('a save after someone else\'s save shows the conflict warning', async () => {
       await click('[data-act="goClients"]');
       await until(`!!document.querySelector('[data-act="openHousehold"]')`, 'the client list');
       await click('[data-act="openHousehold"]');
       await until(`/Harrington household/.test(document.querySelector('#hhName').textContent)`, 'the household');
-      await click('[data-nav="household"]');
+      await nav('household');
       await until(`!!document.querySelector('#f-household-0-reference')`, 'the form');
       // Another adviser saves first, straight through the API
       await js(`(async () => { const [h] = await (await fetch('api/households')).json(); const rec = await (await fetch('api/households/' + h.id)).json();
@@ -221,7 +251,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     });
     await step('phone width (390 px): household, balance sheet, KYC', async () => {
       for (const id of ['household', 'bs', 'kyc']) {
-        await click(`[data-nav="${id}"]`);
+        await nav(id);
         await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 900, deviceScaleFactor: 1, mobile: true });
         await sleep(250);
         // Recorded, not judged: today's layout is the baseline to compare against

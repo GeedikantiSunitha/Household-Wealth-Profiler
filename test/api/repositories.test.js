@@ -15,7 +15,7 @@ const ROOT = path.join(__dirname, '..', '..');
 const sealer = createSealer(crypto.randomBytes(32));
 const rec = (id, version, name, by = 'sam') => ({ id, version, state: { household: { name } }, createdAt: '2026-10-10T09:00:00.000Z', createdBy: 'sam', updatedAt: `2026-10-10T09:0${version}:00.000Z`, updatedBy: by });
 
-function storeContract(label, makeStore, rawRows) {
+function storeContract(label, makeStore, rawRows, rawFirm) {
   test.describe(`${label} store`, () => {
     let store; const id = crypto.randomUUID();
     test.before(async () => { store = await makeStore(); await store.init(); });
@@ -53,6 +53,26 @@ function storeContract(label, makeStore, rawRows) {
       assert.ok(raw.length >= 3, 'current, versions and audit are all stored');
       for (const text of raw) { assert.match(text, /^enc:v1:/); assert.doesNotMatch(text, /Alpha|chris|household\.name/); }
     });
+
+    const firmRec = (version, name, by = 'sam') => ({ version, settings: { firm: { name } }, updatedAt: `2026-10-10T10:0${version}:00.000Z`, updatedBy: by });
+    test('firm settings: none before the first save; decide sees null', async () => {
+      assert.equal(await store.firm.get(), null);
+      assert.deepEqual(await store.firm.audit(), []);
+      assert.equal(await store.firm.update(cur => ({ result: cur })), null);
+      assert.equal(await store.firm.get(), null, 'nothing saved without "next"');
+    });
+    test('firm settings: each save keeps the version and its audit entries, newest audit first', async () => {
+      assert.equal(await store.firm.update(() => ({ result: 1, next: firmRec(1, 'Alder'), audit: [{ ts: 't1', user: 'sam', field: 'firm.name', from: '', to: 'Alder', version: 1 }] })), 1);
+      assert.equal(await store.firm.update(cur => ({ result: cur.version + 1, next: firmRec(2, 'Alder LLP', 'chris'), audit: [{ ts: 't2', user: 'chris', field: 'firm.name', from: 'Alder', to: 'Alder LLP', version: 2 }] })), 2);
+      assert.deepEqual(await store.firm.get(), firmRec(2, 'Alder LLP', 'chris'));
+      assert.deepEqual((await store.firm.audit()).map(a => a.to), ['Alder LLP', 'Alder']);
+      assert.ok((await store.list()).every(r => r.id && r.settings === undefined), 'never in the household list');
+    });
+    test('firm settings are encrypted where they are stored', async () => {
+      const raw = await rawFirm();
+      assert.equal(raw.length, 5, 'current, two versions and two audit entries');
+      for (const text of raw) { assert.match(text, /^enc:v1:/); assert.doesNotMatch(text, /Alder|chris|firm\.name/); }
+    });
   });
 }
 
@@ -61,10 +81,13 @@ let dir;
 storeContract('file', () => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-repo-')); return createStore({ dataDir: dir, databaseUrl: '' }, sealer); },
   async id => { const d = path.join(dir, 'households', id);
     return [fs.readFileSync(path.join(d, 'current.json'), 'utf8'), ...fs.readdirSync(path.join(d, 'versions')).map(f => fs.readFileSync(path.join(d, 'versions', f), 'utf8')),
+      ...fs.readFileSync(path.join(d, 'audit.log'), 'utf8').split('\n').filter(Boolean)]; },
+  async () => { const d = path.join(dir, 'households', 'firm');
+    return [fs.readFileSync(path.join(d, 'current.json'), 'utf8'), ...fs.readdirSync(path.join(d, 'versions')).map(f => fs.readFileSync(path.join(d, 'versions', f), 'utf8')),
       ...fs.readFileSync(path.join(d, 'audit.log'), 'utf8').split('\n').filter(Boolean)]; });
 
 test('file store: version files are kept, one per saved version', () => {
-  const [hh] = fs.readdirSync(path.join(dir, 'households'));
+  const [hh] = fs.readdirSync(path.join(dir, 'households')).filter(x => ID_RE.test(x));
   assert.deepEqual(fs.readdirSync(path.join(dir, 'households', hh, 'versions')).sort(), ['000001.json', '000002.json']);
 });
 test('household ids must be UUIDs', () => {
@@ -89,6 +112,13 @@ if (BASE_URL) {
       return [...(await c.query('select doc from households where id = $1', [id])).rows.map(r => r.doc),
         ...(await c.query('select doc from household_versions where household_id = $1', [id])).rows.map(r => r.doc),
         ...(await c.query('select entry as doc from audit_log where household_id = $1', [id])).rows.map(r => r.doc)];
+    } finally { await c.end(); }
+  }, async () => {
+    const c = new Client({ connectionString: URL_ }); await c.connect();
+    try {
+      return [...(await c.query('select doc from firm_settings')).rows.map(r => r.doc),
+        ...(await c.query('select doc from firm_versions')).rows.map(r => r.doc),
+        ...(await c.query('select entry as doc from firm_audit')).rows.map(r => r.doc)];
     } finally { await c.end(); }
   });
 } else {

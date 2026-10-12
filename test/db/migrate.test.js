@@ -39,6 +39,21 @@ test('a database made before migrations were tracked is adopted with its data an
   } finally { await pg.close(); }
 });
 
+test('firm settings: one row, and versions and audit entries can never be changed or deleted', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await migrate(db, { dir: DIR });
+    await pg.query(`insert into firm_settings (version, doc, updated_at) values (1, 'enc:v1:firm', now())`);
+    await pg.query(`insert into firm_versions (version, doc) values (1, 'enc:v1:one')`);
+    await pg.query(`insert into firm_audit (entry) values ('enc:v1:a')`);
+    await assert.rejects(pg.query(`insert into firm_settings (id, version, doc, updated_at) values (false, 1, 'x', now())`), /check/i, 'only the one firm row');
+    await assert.rejects(pg.query(`insert into firm_settings (version, doc, updated_at) values (2, 'x', now())`), /duplicate key/i);
+    await pg.query(`update firm_settings set version = 2, doc = 'enc:v1:two'`); // the current row moves on with each save
+    for (const sql of ['delete from firm_settings', 'truncate firm_settings', 'update firm_versions set doc = $$x$$', 'delete from firm_versions', 'truncate firm_versions', 'update firm_audit set entry = $$x$$', 'delete from firm_audit', 'truncate firm_audit'])
+      await assert.rejects(pg.query(sql), /not allowed: records are kept/, sql);
+  } finally { await pg.close(); }
+});
+
 test('a failed migration leaves nothing behind and is retried next time', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-mig-'));
   const pg = await pglite(), db = adapt(pg);

@@ -166,10 +166,11 @@ profiler.yourfirm.co.uk {
 By default the server stores files under `DATA_DIR`. Set `DATABASE_URL` and it uses
 PostgreSQL 14 or later instead. On start-up it applies any new files in [db/migrations](db/migrations)
 in name order and records each one in `schema_migrations` (tables `households`,
-`household_versions`, `audit_log`). Database triggers refuse any delete or
-rewrite of households, versions and audit entries. Rows are encrypted with `DATA_KEY` just
-like the files, so the database never holds readable client data. Saves lock the household's
-row, so several server processes can share one database safely.
+`household_versions`, `audit_log`, and for the firm settings `firm_settings`, `firm_versions`,
+`firm_audit`). Database triggers refuse any delete or rewrite of households, firm settings,
+versions and audit entries. Rows are encrypted with `DATA_KEY` just like the files, so the
+database never holds readable client data. Saves lock the household's row (or the firm
+settings), so several server processes can share one database safely.
 
 Create a database and a user for the app (run once in `psql` as an administrator):
 
@@ -191,7 +192,8 @@ Run `npm install` and then `npm start`. The start-up line shows where the data i
 Add `?sslmode=require` when the database is on another machine, and URL-encode special
 characters in the password.
 
-To move existing households from the file store, with their versions and audit trail:
+To move existing households and the firm settings from the file store, with their versions and
+audit trail:
 
 ```sh
 node server.js import-files ./data     # households already in the database are skipped
@@ -268,6 +270,17 @@ was agreed and last reviewed. **Mandate check** compares the agreed risk with th
 and the risk profile (a level outside the profile needs a written rationale), and the model's
 target with the value-weighted split of the accounts, flagging any class outside the tolerance.
 The agreement date starts an annual mandate review in Reviews due.
+
+## Fund performance
+
+Firm settings › **Fund library** lists the firm's funds and benchmarks. Price history is imported
+from a CSV download (FT, Trustnet, Morningstar, a provider factsheet, Yahoo): the importer finds
+the date and price columns and keeps month-end prices. For exchange-listed funds the self-hosted
+server can fetch monthly prices from Alpha Vantage if `ALPHAVANTAGE_KEY` is set (free key, 25
+requests a day). **Mandate › Fund performance** shows growth of £10,000, cumulative and annualised
+returns, the five discrete 12-month periods, volatility and worst fall, with the past-performance
+warning and data source required by COBS 4.6. Use accumulation units or total-return indices so
+income is included. The Supabase edition imports CSVs but does not yet fetch prices.
 
 ## Calculations
 

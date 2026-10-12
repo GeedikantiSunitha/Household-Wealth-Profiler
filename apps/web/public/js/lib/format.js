@@ -14,3 +14,4 @@ export const fmtDate = s => { const d = window.HWP.parseDate(s); return d ? d.to
 
 // A save time as 9 Oct 2026, 14:05 (in the viewer's time zone); anything unreadable is shown as it is
 export const fmtTs = s => { const d = new Date(s); return isNaN(d) ? s : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); };
+export const fmtYM=ym=>{const [y,m]=String(ym).split('-');return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]+' '+y};

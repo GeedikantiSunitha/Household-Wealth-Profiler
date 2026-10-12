@@ -11,6 +11,8 @@ const { load } = require('./config');
 const { createSealer } = require('./crypto/seal.js');
 const { createStore } = require('./repositories');
 const { createHouseholdService } = require('./services/households.js');
+const { createFirmService } = require('./services/firm.js');
+const { createPriceService } = require('./services/prices.js');
 const { createAuth } = require('./auth');
 const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
@@ -26,8 +28,10 @@ function main([cmd, ...args] = []) {
   let store;
   try { store = createStore(config, sealer); } catch (e) { console.error(e.message); process.exit(1); }
   const households = createHouseholdService({ store, HWP });
+  const firm = createFirmService({ store, HWP });
+  const prices = createPriceService({ key: config.alphavantageKey });
   const { authenticate } = createAuth(config);
-  const { server } = createApp({ config, households, authenticate });
+  const { server } = createApp({ config, households, firm, prices, authenticate });
 
   if (cmd === 'import-files') {
     importFiles({ dir: args[0] || config.dataDir, databaseUrl: config.databaseUrl, store, sealer })

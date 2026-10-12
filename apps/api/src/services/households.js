@@ -21,7 +21,7 @@ function summarise(HWP, rec) {
   const s = HWP.normalise(rec.state);
   let stage = '', rating = '', nextReview = '', blockers = 0, due = '', overdue = 0;
   try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview; blockers = O.blockerCount; const R = E.reviews(O); due = R.nextDue; overdue = R.overdue; } catch (e) { stage = 'Error'; }
-  return { id: rec.id, name: s.household.name, reference: s.household.reference, stage, rating, nextReview, blockers, due, overdue, version: rec.version, updatedAt: rec.updatedAt, updatedBy: rec.updatedBy };
+  return { id: rec.id, name: s.household.name, reference: s.household.reference, stage, rating, nextReview, blockers, due, overdue, tasks: HWP.openTasks(s), version: rec.version, updatedAt: rec.updatedAt, updatedBy: rec.updatedBy };
 }
 
 function createHouseholdService({ store, HWP, now = () => new Date().toISOString(), newId = () => crypto.randomUUID() }) {

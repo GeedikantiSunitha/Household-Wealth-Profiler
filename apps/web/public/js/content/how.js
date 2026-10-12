@@ -64,9 +64,19 @@ export const HOW={
     'A Review meeting resets the annual suitability review: the next one falls 12 months later.',
     'A Life event (marriage, inheritance, redundancy, retirement, a health change) creates a reassess-suitability item that stays until a review meeting is recorded after it.',
     'Other entries build the contact history for the file. None of them change the figures.']},
-  actions:{feeds:['Reviews due'],pts:[
-    'Open actions with a due date appear in Reviews due, overdue ones first.',
-    'Mark an action Done or Cancelled to clear it; the audit trail keeps the history.']},
+  rtq:{feeds:['Risk profile','People','KYC status','Mandate check'],pts:[
+    'Every answer has a fixed score and every total a fixed band, shown in "How the scores are worked out" below. Two advisers with the same answers get the same result.',
+    'When all 19 questions are answered, the results are written to the person\u2019s record: risk tolerance (1–7), loss reaction, capacity for loss and knowledge and experience. The audit trail records the change.',
+    'The risk profile then combines willingness from the questionnaire with ability from the balance sheet, and the mandate check tests the agreed risk level against it.',
+    'KYC status lists any adult without a completed questionnaire, or whose record no longer matches it.']},
+  loas:{feeds:['Letter','Reviews due'],pts:[
+    'Letter builds a print-ready letter from the firm\u2019s details (Firm settings), the provider\u2019s address (provider directory) and the client\u2019s identity details (People). Anything missing is listed above the letter.',
+    'Reviews due reminds you to get the client\u2019s signature after 14 days, to send a signed letter, and to chase the provider once the chase period has passed.',
+    'Record what arrives against Savings and investments or Defined benefit pensions so the balance sheet uses it.']},
+  actions:{feeds:['Tasks board','Reviews due'],pts:[
+    'Each task is assigned to a team member from Firm settings and appears on the firm-wide Tasks board, filterable by person.',
+    'Open tasks with a due date appear in Reviews due, overdue ones first.',
+    'Mark a task Done or Cancelled to clear it; the audit trail keeps the history.']},
   complaints:{feeds:['Reviews due','Compliance MI'],pts:[
     'DISP requires a final response within 8 weeks of receipt. The deadline appears in Reviews due until the stage is Final response sent, Referred to FOS or Closed.',
     'Outcome and redress are recorded for the complaints register and FCA returns.']},

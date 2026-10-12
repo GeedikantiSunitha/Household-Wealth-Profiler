@@ -21,12 +21,13 @@ It fails if any of these goes wrong:
 | --- | --- |
 | Sign-in | The client list opens, empty, with "Signed in as demo" |
 | New from sample | Creates "Harrington household" |
-| Side rail | 27 sections in this order: household, members, income, expenses, goals, accounts, db, property, other, liabilities, protection, assumptions, compliance, kyc, audit, contacts, actions, complaints, reviews, mandate, models, drift, bs, tax, risk, checks, guide |
+| Side rail | 6 groups (client, wealth, onboarding, relationship, mandate, analysis); opened, 31 sections in this order: household, members, income, expenses, goals, assumptions, accounts, db, property, other, liabilities, protection, compliance, rtq, kyc, audit, contacts, actions, loas, complaints, reviews, mandate, models, drift, perf, bs, scenarios, tax, risk, checks, guide |
 | Rules on screen | Header shows "KYC and AML"; KYC in the rail shows "2 open" |
 | Every section | Renders without a script error, and without "undefined" or "NaN" on screen |
 | Typing and autosave | Typing in a field shows "Unsaved changes" and a note in the live-effect panel, then "All changes saved" |
 | Reload | The change is still there in the client list and in the form |
 | Reviews due | The firm-wide diary renders |
+| Tasks, Firm settings | The firm-wide tasks board and the firm settings screen render |
 | Edit conflict | A save after someone else's shows "Someone else saved this household…" and "Not saved: newer version exists"; "Reload their version" loads theirs |
 | Top bar | "Export JSON" downloads the open household |
 | Phone width | Household, balance sheet and KYC captured at 390 px (page width recorded in the report) |
@@ -41,8 +42,9 @@ git-ignored. The report ends with one of:
 
 The audit trail and the client list show the server's real save times, so they are not compared.
 
-**Baseline:** made once, before the first restructuring step, with
-`npm run screens -- baseline`. Do not remake it for a change that should not alter the screens;
+**Baseline:** made with `npm run screens -- baseline`; first before the restructure, then again (step B24)
+from Umesh's `main` after his grouped navigation and new screens, so the branch is compared with his release.
+To compare with another copy of the app, set `HWP_SCREENS_ROOT` to its folder. Do not remake it for a change that should not alter the screens;
 remake it only after a deliberate, reviewed screen change, and say so in the pull request.
 
 ## 2. By hand (5 minutes)
@@ -55,7 +57,7 @@ Use `npm run dev` (demo / demo, data in `./data-dev`) at http://localhost:8080.
 4. **JSON round trip:** "Export JSON", then import that file: same household, same balance sheet total.
 5. **Add and remove:** in People, "Add person", then remove it; the "Removed … Undo" banner appears and Undo brings it back.
 6. **Assumptions reset:** change a figure in Assumptions, then "Restore defaults"; the toast says 2026/27 defaults.
-7. **PostgreSQL mode:** `npm start` (settings from `.env`): the start-up line says `data in PostgreSQL …`, sign in, open a household, change a field, see "All changes saved".
+7. **PostgreSQL mode:** `npm start` (settings from `.env`): the start-up line says `data in PostgreSQL …`, sign in, open a household, change a field, see "All changes saved"; then in Firm settings change the firm name and see it saved after a reload.
 8. **Browser-only mode:** run `npm run build` and open `dist/wealth-profiler.html` straight from the disk (no server; it has the rules built in): the sample loads, the header shows "Working as", and the save state says "Saved in this browser only".
 
 Excel needs the internet (SheetJS loads from cdnjs) unless `scripts/fetch-xlsx.sh` has been run.

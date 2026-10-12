@@ -1,6 +1,7 @@
 /* node server.js import-files [DIR]: copies households from a file store (DATA_DIR by default) into
    PostgreSQL with every version and the whole audit trail, keeping ids, times and authors.
-   Households already in the database are skipped, so it can be run again safely. */
+   The firm settings, with their versions and audit trail, are copied too unless the database already
+   has firm settings. Households already in the database are skipped, so it can be run again safely. */
 'use strict';
 const path = require('path');
 const { createFileStore } = require('../repositories');
@@ -17,6 +18,10 @@ async function importFiles({ dir, databaseUrl, store, sealer }) {
     if (await store.importHousehold(versions, (await from.audit(id)).reverse())) copied++; else skipped++;
   }
   console.log(`Copied ${copied} household(s) from ${path.resolve(dir)} (${skipped} already in the database).`);
+  const firmVersions = await from.firm.versions();
+  if (!firmVersions.length) { const cur = await from.firm.get(); if (cur) firmVersions.push(cur); }
+  if (firmVersions.length) console.log(await store.firm.importAll(firmVersions, (await from.firm.audit()).reverse())
+    ? `Copied the firm settings (${firmVersions.length} version(s)).` : 'Firm settings not copied: the database already has firm settings.');
   await store.end();
   return 0;
 }

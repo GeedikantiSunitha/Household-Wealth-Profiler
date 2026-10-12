@@ -78,5 +78,13 @@ unchanged from the baseline. Where the result differs from the plan above:
 - **Not yet done:** the `ops/` tools (backup, restore, admin, keys) and `deploy/dcdeploy/` are
   planned in `ops/README.md` and `deploy/README.md` but not built. The Supabase edition and the old deploy files are untouched, pending their own
   retirement decision.
+- **Caught up with Umesh's `main` (B24).** His seven feature commits of 2026-10-11 (grouped
+  navigation, team tasks and firm settings, letters of authority, the risk questionnaire,
+  life-event scenarios, the fund library) were merged and carried into the new structure. Each
+  interface change went into its module unchanged, checked declaration by declaration against
+  his `app.js`; his server changes went into the API layers. The merged branch was compared with
+  his `main`: HTTP replies, stored files, screens and the single-file page all match, apart from the
+  module files themselves. Firm settings also gained PostgreSQL storage (`db/migrations/0002`),
+  because his `main` stores them in files only.
 - **The unit tests run on a fixed clock** (2026-10-10). One of them had hard-coded dates and began
   failing on 2026-10-12; the fix touched only the tests.

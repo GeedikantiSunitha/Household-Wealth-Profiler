@@ -16,6 +16,50 @@
    the Excel template, import, export and the audit trail.
    ========================================================= */
 const YN = 'bool';
+/* Risk questionnaire. Deterministic: every answer has a fixed score and every total a fixed band.
+   Attitude to risk: 9 questions scored 1–5, total 9–45, banded 1–7 (ATR_BANDS). The reaction to a 25% fall is asked
+   separately and sets the loss reaction, which the risk profile already applies to willingness, so it counts once.
+   Capacity for loss: 6 questions scored −1/0/+1, total −6..+6: ≤ −2 low, ≥ +2 high, otherwise medium.
+   Knowledge and experience: 3 questions scored 0–3, total 0–9: 0–1 none, 2–4 basic, 5–7 informed, 8–9 advanced. */
+const A5=o=>o.map((l,i)=>[String(i+1),l]);
+const ATR_Q=[
+  ['atr1','Compared with other people, how willing are you to take financial risk?',A5(['Far less willing','Less willing','About the same','More willing','Far more willing'])],
+  ['atr2','How easily do you adjust when things go wrong financially?',A5(['With great difficulty','With some difficulty','Neither easily nor with difficulty','Fairly easily','Very easily'])],
+  ['atr3','When you hear the word "risk" in a financial context, what comes to mind first?',A5(['Danger','Loss','Uncertainty','Opportunity','Thrill'])],
+  ['atr4','How much of your investable savings would you put into investments that can fall in value?',A5(['Under 10%','10–25%','25–50%','50–75%','Over 75%'])],
+  ['atr5','Which matters more to you?',A5(['Avoiding any loss','Mostly avoiding losses','Both equally','Mostly achieving higher returns','Achieving the highest return'])],
+  ['atr6','How do you feel after making an important financial decision?',A5(['Very anxious','Somewhat anxious','Neutral','Fairly confident','Very confident'])],
+  ['atr7','Which would you choose?',A5(['£1,000 for certain','80% chance of £1,500','50% chance of £2,500','30% chance of £4,500','10% chance of £15,000'])],
+  ['atr8','How would a close friend describe you as a risk-taker?',A5(['Very cautious','Cautious','Balanced','Willing to take risks','A real risk-taker'])],
+  ['atr9','Over 10 years, which range of outcomes for £100,000 would you accept?',A5(['£95k–£130k','£85k–£150k','£75k–£175k','£65k–£210k','£50k–£260k'])]];
+const ATR_BANDS=[[9,13,1],[14,18,2],[19,23,3],[24,29,4],[30,34,5],[35,39,6],[40,45,7]];
+const LOSS_Q=['loss','If your investments fell 25% in a year, what would you most likely do?',[['sellall','Sell everything'],['sellsome','Sell some'],['hold','Hold and wait'],['buy','Invest more']]];
+const C3=(a,b,c)=>[['-1',a],['0',b],['1',c]];
+const CFL_Q=[
+  ['cfl1','Will you rely on this money for day-to-day living costs?',C3('Yes, entirely','Partly','No')],
+  ['cfl2','Outside these investments, how much do you hold in cash for emergencies?',C3('Under 3 months of spending','3–6 months','Over 6 months')],
+  ['cfl3','If these investments fell 30% and took 5 years to recover, how would your plans be affected?',C3('Seriously: goals would fail','Some goals delayed','Little or no effect')],
+  ['cfl4','When will you start drawing on this money?',C3('Within 5 years','In 5–10 years','After 10 years')],
+  ['cfl5','How secure is your income for the next five years?',C3('Insecure or none','Fairly secure','Very secure, or guaranteed pension income')],
+  ['cfl6','Do you have other assets or pensions to fall back on?',C3('None','Some','Substantial')]];
+const K4=(a,b,c,d)=>[['0',a],['1',b],['2',c],['3',d]];
+const KE_Q=[
+  ['ke1','Which investments have you held?',K4('Cash only','Funds, ISAs or pensions chosen by others','Funds and shares I chose myself','Shares, bonds and complex products (structured products, derivatives, private equity)')],
+  ['ke2','How long have you been investing?',K4('Never','Under 3 years','3–10 years','Over 10 years')],
+  ['ke3','Do you have relevant qualifications or work experience in finance?',K4('No','Some general knowledge','Relevant work experience or qualification','Professional in investment or finance')]];
+function rtqResult(r){const sc=rtqScore(r);if(!sc.complete)return null;return {riskTol:String(sc.atr.band),lossReaction:sc.loss,capacity:sc.cfl.level,experience:sc.ke.level}}
+function rtqScore(r){
+  const atrA=ATR_Q.map(([k])=>r[k]).filter(v=>has(v));const atrT=atrA.reduce((t,v)=>t+N(v),0);
+  const atrDone=atrA.length===ATR_Q.length;const band=atrDone?(ATR_BANDS.find(([a,b])=>atrT>=a&&atrT<=b)||[0,0,0])[2]:null;
+  const cflA=CFL_Q.map(([k])=>r[k]).filter(v=>has(v));const cflT=cflA.reduce((t,v)=>t+N(v),0);const cflDone=cflA.length===CFL_Q.length;
+  const cap=cflDone?(cflT<=-2?'low':cflT>=2?'high':'medium'):null;
+  const keA=KE_Q.map(([k])=>r[k]).filter(v=>has(v));const keT=keA.reduce((t,v)=>t+N(v),0);const keDone=keA.length===KE_Q.length;
+  const exp=keDone?(keT<=1?'None':keT<=4?'Basic':keT<=7?'Informed':'Advanced'):null;
+  const answered=atrA.length+cflA.length+keA.length+(has(r.loss)?1:0),total=ATR_Q.length+CFL_Q.length+KE_Q.length+1;
+  return {atr:{answered:atrA.length,of:ATR_Q.length,total:atrT,band},loss:has(r.loss)?r.loss:null,cfl:{answered:cflA.length,of:CFL_Q.length,total:cflT,level:cap},ke:{answered:keA.length,of:KE_Q.length,total:keT,level:exp},answered,of:total,complete:answered===total};
+}
+const TASK_STATUS=['Not started','In progress','Waiting on client','Waiting on provider','Done','Cancelled'];
+const taskOpen=t=>!['Done','Cancelled'].includes(t.status);
 /* Eight UK asset classes for mandates and holdings; each rolls up to the four the balance sheet uses */
 const ASSET_CLASSES=[['ukEq','UK equity','eq'],['glEq','Global developed equity','eq'],['emEq','Emerging market equity','eq'],['gilts','Gilts and index-linked','bd'],['corp','Corporate bonds','bd'],['prop','Property','al'],['alt','Alternatives','al'],['cash','Cash','cs']];
 const ROLLUP=[['eq','Equities'],['bd','Bonds'],['al','Property and alternatives'],['cs','Cash']];
@@ -212,13 +256,15 @@ const SCHEMA = {
     {k:'by',l:'Recorded by',t:'text'},
     {k:'summary',l:'Summary',t:'area',w:1},
   ]},
-  actions:{title:'Actions',sheet:'Actions',item:'action',desc:'Things the firm has agreed to do for this household, with an owner and a due date.',fields:[
+  actions:{title:'Tasks',sheet:'Tasks',item:'task',desc:'Work for this household, assigned to a named team member with a due date and status. Every task also appears on the firm-wide Tasks board.',fields:[
     {k:'created',l:'Raised on',t:'date',d:today},
-    {k:'description',l:'Action',t:'text',w:1},
-    {k:'owner',l:'Owner',t:'text'},
+    {k:'description',l:'Task',t:'text',w:1},
+    {k:'owner',l:'Assigned to',t:'team'},
+    {k:'priority',l:'Priority',t:'sel',o:['High','Normal','Low'],d:'Normal'},
     {k:'due',l:'Due',t:'date'},
-    {k:'status',l:'Status',t:'sel',o:['Open','Done','Cancelled'],d:'Open'},
+    {k:'status',l:'Status',t:'sel',o:TASK_STATUS,d:'Not started'},
     {k:'doneOn',l:'Completed on',t:'date'},
+    {k:'notes',l:'Notes',t:'area',w:1},
   ]},
   complaints:{title:'Complaints',sheet:'Complaints',item:'complaint',desc:'Complaints from this household, handled under the FCA DISP rules: acknowledge promptly and send a final response within 8 weeks.',fields:[
     {k:'received',l:'Received on',t:'date',d:today},
@@ -258,6 +304,100 @@ const SCHEMA = {
       {k:'reviewedOn',l:'Mandate last reviewed',t:'date',h:'The mandate is reviewed at least annually'},
       {k:'notes',l:'Notes',t:'area',w:1},
     ]},
+  ]},
+  loas:{title:'Letters of authority',sheet:'LOAs',item:'letter of authority',desc:'Letters asking a provider to release plan information to the firm. Generate the letter, have the client sign it, send it and track the reply.',groups:[
+    {t:'Plan',fields:[
+      {k:'provider',l:'Provider',t:'provider'},
+      {k:'owner',l:'Client',t:'member'},
+      {k:'planType',l:'Plan type',t:'sel',o:['Personal pension','SIPP','Workplace pension','Defined benefit pension','Stakeholder pension','Annuity','ISA','General investment account','Investment bond','Life or protection policy','Other'],d:'Personal pension'},
+      {k:'policyRef',l:'Policy or plan number',t:'text',h:'Leave blank to ask the provider to identify all plans'},
+      {k:'employer',l:'Employer (workplace schemes)',t:'text'},
+    ]},
+    {t:'Information requested',fields:[
+      {k:'reqValue',l:'Current value',t:YN,d:true},
+      {k:'reqTransfer',l:'Transfer value and any exit penalties',t:YN,d:true},
+      {k:'reqFunds',l:'Funds held and unit holdings',t:YN,d:true},
+      {k:'reqCharges',l:'All charges (product, fund, adviser)',t:YN,d:true},
+      {k:'reqContrib',l:'Contribution history',t:YN,d:true},
+      {k:'reqGuarantees',l:'Guarantees and safeguarded benefits (GAR, GMP, protected tax-free cash)',t:YN,d:true},
+      {k:'reqDeath',l:'Death benefits and nominations',t:YN,d:true},
+      {k:'reqRetire',l:'Retirement date and options',t:YN,d:false},
+      {k:'otherRequest',l:'Anything else',t:'text',w:1},
+    ]},
+    {t:'Progress',fields:[
+      {k:'status',l:'Status',t:'sel',o:['Drafted','With client to sign','Signed','Sent to provider','Information received','Cancelled'],d:'Drafted'},
+      {k:'createdOn',l:'Drafted on',t:'date',d:today},
+      {k:'signedOn',l:'Signed on',t:'date'},
+      {k:'sentOn',l:'Sent to provider on',t:'date'},
+      {k:'sentBy',l:'Sent by',t:'sel',o:['Post','Email','Adviser portal','Origo'],d:'Post'},
+      {k:'chaseDays',l:'Chase provider after (days)',t:'int',d:15,h:'Providers commonly reply within 10–15 working days'},
+      {k:'receivedOn',l:'Information received on',t:'date'},
+      {k:'notes',l:'Notes',t:'area',w:1},
+    ]},
+  ]},
+  rtq:{title:'Risk questionnaire',sheet:'RiskQuestionnaire',item:'questionnaire',desc:'A structured, scored questionnaire for each adult. When complete it sets their risk tolerance, loss reaction, capacity for loss and knowledge and experience.',groups:[
+    {t:'Client and date',fields:[{k:'owner',l:'Client',t:'member'},{k:'completedOn',l:'Completed on',t:'date',d:today},{k:'by',l:'Taken by',t:'text'}]},
+    {t:'Attitude to risk',fields:ATR_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1})).concat([{k:LOSS_Q[0],l:LOSS_Q[1],t:'sel',o:LOSS_Q[2],w:1}])},
+    {t:'Capacity for loss',fields:CFL_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1}))},
+    {t:'Knowledge and experience',fields:KE_Q.map(([k,l,o])=>({k,l,t:'sel',o,w:1}))},
+  ]},
+  scen:{single:true,title:'Scenario assumptions',sheet:'Scenarios',desc:'Assumptions behind the life-event scenarios. Saved with the file so the results can be reproduced.',groups:[
+    {t:'Who and household',fields:[
+      {k:'who',l:'Scenarios apply to',t:'member',h:'Blank = the primary client'},
+      {k:'survivorSpend',l:'Spending after a death, % of today',t:'pct',d:75},
+      {k:'divorceSpend',l:'Spending after separation, % of today',t:'pct',d:65},
+      {k:'divorceCosts',l:'Legal and moving costs on separation £',t:'num',d:25000},
+    ]},
+    {t:'Health and care',fields:[
+      {k:'careStartAge',l:'Care starts at age',t:'int',d:85},
+      {k:'careYears',l:'Years of care',t:'int',d:3},
+      {k:'careCost',l:'Care cost £ per year (today)',t:'num',d:75000},
+      {k:'illnessCost',l:'Extra costs after serious illness £ per year',t:'num',d:10000},
+      {k:'longevityYears',l:'Living longer: extra years',t:'int',d:8},
+    ]},
+    {t:'Work and markets',fields:[
+      {k:'redundancyYears',l:'Years out of work after redundancy',t:'num',d:1},
+      {k:'reEmployPct',l:'Pay on re-employment, % of current',t:'pct',d:80},
+      {k:'redundancyPay',l:'Redundancy payment £',t:'num',d:0},
+      {k:'earlyRetireYears',l:'Retire earlier by (years)',t:'int',d:5},
+      {k:'marketFall',l:'Market fall in equities and alternatives %',t:'pct',d:25},
+      {k:'rateRise',l:'Interest rate rise (percentage points)',t:'num',d:2},
+      {k:'inheritance',l:'Inheritance received £',t:'num',d:250000},
+    ]},
+  ]},
+  firm:{single:true,title:'Firm details',sheet:'Firm',desc:'Used on letters of authority and client documents.',fields:[
+    {k:'name',l:'Firm name',t:'text'},
+    {k:'frn',l:'FCA firm reference number',t:'text',h:'Shown on letters: providers check it against the FCA register'},
+    {k:'address',l:'Address',t:'area',w:1},
+    {k:'phone',l:'Phone',t:'text'},
+    {k:'email',l:'Email for provider correspondence',t:'text'},
+    {k:'website',l:'Website',t:'text'},
+    {k:'signatory',l:'Default signatory on letters',t:'text'},
+  ]},
+  team:{title:'Team members',sheet:'Team',item:'team member',desc:'Everyone tasks can be assigned to. This is the firm\u2019s working team, separate from sign-in accounts.',fields:[
+    {k:'name',l:'Name',t:'text'},
+    {k:'role',l:'Role',t:'sel',o:['Adviser','Paraplanner','Administrator','Compliance','Investment manager','Other'],d:'Adviser'},
+    {k:'email',l:'Email',t:'text'},
+    {k:'active',l:'Active',t:YN,d:true},
+  ]},
+  providers:{title:'Providers',sheet:'Providers',item:'provider',desc:'Pension, investment and insurance providers that letters of authority are sent to. Check each address against the provider\u2019s current adviser guidance.',fields:[
+    {k:'name',l:'Provider',t:'text'},
+    {k:'kind',l:'Type',t:'sel',o:['Pension','Platform','Insurer','Investment manager','Bank','Other'],d:'Pension'},
+    {k:'address',l:'Postal address for letters of authority',t:'area',w:1},
+    {k:'email',l:'Email for letters of authority',t:'text'},
+    {k:'portal',l:'Adviser portal / Origo',t:'text',h:'Many providers accept LOAs through their adviser site or Origo Options'},
+    {k:'notes',l:'Notes',t:'text',w:1},
+  ]},
+  funds:{title:'Fund library',sheet:'Funds',item:'fund',desc:'Funds and benchmarks the firm uses, with monthly price history for performance charts. Import history from a CSV download (FT, Trustnet, Morningstar, the provider\u2019s factsheet, Yahoo).',fields:[
+    {k:'name',l:'Fund or benchmark name',t:'text'},
+    {k:'isin',l:'ISIN',t:'text'},
+    {k:'ticker',l:'Exchange ticker',t:'text',h:'For exchange-listed funds, e.g. VWRL.LON. Used by the optional automatic price fetch.'},
+    {k:'assetClass',l:'Main asset class',t:'sel',o:ASSET_CLASSES.map(([k,l])=>[k,l])},
+    {k:'ocf',l:'Ongoing charge %',t:'pct'},
+    {k:'isBenchmark',l:'This is a benchmark or index',t:YN},
+    {k:'source',l:'Price data source',t:'text',h:'Shown under every chart, e.g. "FT.com, accumulation units, GBP"'},
+    {k:'prices',l:'Monthly prices',t:'series'},
+    {k:'pricesUpdated',l:'Prices last updated',t:'date'},
   ]},
   compliance:{single:true,title:'Onboarding and compliance',sheet:'Compliance',desc:'The relationship, disclosures, enhanced due diligence and the four-eyes sign-off. Identity and screening for each adult are recorded under People.',groups:[
     {t:'The relationship',fields:[
@@ -319,8 +459,8 @@ const SCHEMA = {
       {k:'pensionIHT',l:'Include pensions in estate (from Apr 2027)',t:YN,d:true}]}
   ]}
 };
-const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models'];
-const SINGLES = ['household','mandate','compliance','assumptions'];
+const COLS = ['members','income','expenses','goals','accounts','db','property','other','liabilities','protection','contacts','actions','complaints','models','loas','rtq'];
+const SINGLES = ['household','mandate','compliance','assumptions','scen'];
 /* Default model portfolios: five risk-rated models benchmarked to the ARC Private Client Indices. Firms edit these. */
 const DEFAULT_MODELS=[
   {name:'Defensive',riskMin:1,riskMax:2,benchmark:'ARC Sterling Cautious PCI',ukEq:8,glEq:12,emEq:0,gilts:35,corp:25,prop:5,alt:5,cash:10,description:'Capital preservation with modest growth; short horizons or low capacity for loss'},
@@ -336,12 +476,80 @@ const fieldsOf = s => s.groups ? s.groups.flatMap(g=>g.fields) : s.fields;
    ========================================================= */
 function today(){return new Date().toISOString().slice(0,10)}
 function defaults(key){const o={};for(const f of fieldsOf(SCHEMA[key])){if(f.d!==undefined)o[f.k]=typeof f.d==='function'?f.d():f.d;else o[f.k]=f.t===YN?false:'';}return o}
+const FIRM_SINGLES=['firm'],FIRM_COLS=['team','providers','funds'];
+const DEFAULT_PROVIDERS=[['Aviva','Pension'],['Scottish Widows','Pension'],['Royal London','Pension'],['Legal & General','Pension'],['Aegon','Platform'],['Standard Life','Pension'],['Prudential (M&G)','Pension'],['Phoenix Life','Pension'],['Canada Life','Insurer'],['Zurich','Pension'],['abrdn','Platform'],['Quilter','Platform'],['Transact','Platform'],['Nucleus','Platform'],['Fidelity','Platform'],['AJ Bell','Platform'],['Hargreaves Lansdown','Platform'],['NEST','Pension'],["The People's Pension",'Pension'],['NOW: Pensions','Pension']];
+function firmBlank(){const f={};f.firm=defaults('firm');for(const c of FIRM_COLS)f[c]=[];f.providers=DEFAULT_PROVIDERS.map(([name,kind])=>Object.assign(defaults('providers'),{name,kind}));return f}
+function firmNormalise(x){x=x&&typeof x==='object'?x:{};const out=firmBlank();out.firm=Object.assign(defaults('firm'),pick(x.firm,'firm'));
+  for(const c of FIRM_COLS)if(Array.isArray(x[c]))out[c]=x[c].map(r=>Object.assign(defaults(c),pick(r,c)));return out}
+function firmDiff(a,b){const flat=x=>{const o={};for(const f of fieldsOf(SCHEMA.firm))o['firm.'+f.k]=x.firm[f.k];for(const c of FIRM_COLS)x[c].forEach((r,i)=>{for(const f of fieldsOf(SCHEMA[c]))o[`${c}[${i}].${f.k}`]=f.t==='series'?seriesLabel(r[f.k]):r[f.k]});return o};
+  const A=flat(firmNormalise(a)),B=flat(firmNormalise(b));const ch=[];const e=v=>v===undefined||v===''||v===false?'':v;
+  for(const k of new Set([...Object.keys(A),...Object.keys(B)]))if(String(e(A[k]))!==String(e(B[k])))ch.push({field:k,from:e(A[k]),to:e(B[k])});
+  for(const c of FIRM_COLS){const n=firmNormalise(a)[c].length,m=firmNormalise(b)[c].length;if(n!==m)ch.push({field:c+'.count',from:n,to:m})}
+  return ch}
+/* ---------- price history and performance ----------
+   Prices are stored as "YYYY-MM:price;YYYY-MM:price" (month-end, ascending) so a fund record stays small. */
+function seriesDecode(str){if(!str)return [];return String(str).split(';').map(x=>{const [d,p]=x.split(':');return {d,p:+p}}).filter(x=>/^\d{4}-\d{2}$/.test(x.d)&&x.p>0)}
+function seriesEncode(arr){return arr.map(x=>`${x.d}:${+x.p.toPrecision(8)}`).join(';')}
+function seriesLabel(str){const a=seriesDecode(str);return a.length?`${a.length} monthly prices ${a[0].d} to ${a[a.length-1].d}`:''}
+/* Read a price CSV. Finds a date column and a price column (Adj Close, Close, NAV, Price, Bid, Mid…) by header,
+   accepts ISO, UK (dd/mm/yyyy) and "12 Sep 2025" dates, keeps the last price in each month. */
+function parsePriceCSV(text){
+  const lines=String(text||'').replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());if(lines.length<2)throw new Error('The file has no price rows.');
+  const split=l=>{const out=[];let cur='',q=false;for(const ch of l){if(ch==='"'){q=!q;continue}if(!q&&(ch===','||ch===';'||ch==='\t')){out.push(cur.trim());cur='';continue}cur+=ch}out.push(cur.trim());return out};
+  let hi=lines.findIndex(l=>/date/i.test(l));if(hi<0)hi=0;const head=split(lines[hi]).map(h=>h.toLowerCase());
+  const di=head.findIndex(h=>/date|timestamp/.test(h));
+  const prefs=[/adj(usted)?[ _]?close/,/^close$|closing/,/nav/,/^price$|price \(|mid|bid/,/value|price/];
+  let pi=-1;for(const re of prefs){pi=head.findIndex((h,i)=>i!==di&&re.test(h));if(pi>=0)break}
+  if(di<0||pi<0)throw new Error('Could not find a date column and a price column. Expected headers like "Date" and "Close" or "Price".');
+  const MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  const pd=s=>{s=String(s).trim().replace(/^(mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+/i,'');let m;
+    if((m=/^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s)))return [+m[1],+m[2],+m[3]];
+    if((m=/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/.exec(s)))return [m[3].length===2?2000+ +m[3]:+m[3],+m[2],+m[1]];
+    if((m=/^(\d{1,2})[ -]([A-Za-z]{3})[a-z]*[ -,]*(\d{4})$/.exec(s))&&MON[m[2].toLowerCase()])return [+m[3],MON[m[2].toLowerCase()],+m[1]];
+    if((m=/^([A-Za-z]{3})[a-z]* (\d{1,2}),? (\d{4})$/.exec(s))&&MON[m[1].toLowerCase()])return [+m[3],MON[m[1].toLowerCase()],+m[2]];
+    return null};
+  const byMonth=new Map();let bad=0;
+  for(const l of lines.slice(hi+1)){const c=split(l);const dt=pd(c[di]);const pr=parseFloat(String(c[pi]||'').replace(/[£$€,\s]/g,''));
+    if(!dt||!(pr>0)){bad++;continue}const key=`${dt[0]}-${String(dt[1]).padStart(2,'0')}`;const cur=byMonth.get(key);if(!cur||dt[2]>=cur.day)byMonth.set(key,{day:dt[2],p:pr})}
+  const out=[...byMonth.entries()].map(([d,v])=>({d,p:v.p})).sort((a,b)=>a.d.localeCompare(b.d));
+  if(out.length<2)throw new Error('Fewer than two months of prices were found.');
+  return {series:out,rows:lines.length-hi-1,skipped:bad,column:head[pi]};
+}
+const monthsBetween=(a,b)=>{const [y1,m1]=a.split('-').map(Number),[y2,m2]=b.split('-').map(Number);return (y2-y1)*12+(m2-m1)};
+const addMonthsYM=(ym,n)=>{let [y,m]=ym.split('-').map(Number);m+=n;y+=Math.floor((m-1)/12);m=((m-1)%12+12)%12+1;return `${y}-${String(m).padStart(2,'0')}`};
+/* Performance from monthly prices. All returns are price returns on the series supplied, so use accumulation units or
+   total-return indices. Annualised volatility = monthly standard deviation × √12. */
+function fundPerf(arr){
+  if(arr.length<2)return null;const last=arr[arr.length-1];const at=new Map(arr.map(x=>[x.d,x.p]));
+  const back=n=>at.get(addMonthsYM(last.d,-n));
+  const cum={};for(const [k,n] of [['1y',12],['3y',36],['5y',60],['10y',120]]){const p=back(n);cum[k]=p?last.p/p-1:null}
+  const ann={};for(const [k,n] of [['3y',3],['5y',5],['10y',10]]){const c=cum[k];ann[k]=c==null?null:Math.pow(1+c,1/n)-1}
+  const discrete=[];for(let i=0;i<5;i++){const end=addMonthsYM(last.d,-12*i),start=addMonthsYM(last.d,-12*(i+1));const pe=at.get(end),ps=at.get(start);discrete.push({start,end,r:pe&&ps?pe/ps-1:null})}
+  const rets=[];for(let i=1;i<arr.length;i++)if(monthsBetween(arr[i-1].d,arr[i].d)===1)rets.push(arr[i].p/arr[i-1].p-1);
+  const mean=rets.reduce((a,b)=>a+b,0)/(rets.length||1);const sd=Math.sqrt(rets.reduce((a,b)=>a+(b-mean)**2,0)/Math.max(1,rets.length-1));
+  let peak=arr[0].p,mdd=0;for(const x of arr){peak=Math.max(peak,x.p);mdd=Math.min(mdd,x.p/peak-1)}
+  return {first:arr[0].d,last:last.d,cum,ann,discrete,vol:rets.length>11?sd*Math.sqrt(12):null,maxDD:mdd,since:last.p/arr[0].p-1};
+}
+/* Growth of £10,000 for several series over a common window ending at the latest shared month */
+function growthCompare(list,months){
+  const ok=list.filter(x=>x.series.length>1);if(!ok.length)return null;
+  const end=ok.map(x=>x.series[x.series.length-1].d).sort()[0];
+  let start=ok.map(x=>x.series[0].d).sort().pop();if(months){const s=addMonthsYM(end,-months);if(s>start)start=s}
+  if(start>=end)return null;const n=monthsBetween(start,end);const dates=Array.from({length:n+1},(_,i)=>addMonthsYM(start,i));
+  const lines=ok.map(x=>{const m=new Map(x.series.map(y=>[y.d,y.p]));let b=m.get(start);if(!b)return null;let lastP=b;
+    return {...x,values:dates.map(d=>{const p=m.get(d);if(p)lastP=p;return 10000*lastP/b})}}).filter(Boolean);
+  return {start,end,dates,lines};
+}
+
+/* Open tasks for the firm-wide board, carried in each household's list summary */
+function openTasks(s){return (s.actions||[]).filter(taskOpen).map(t=>({description:t.description||'',owner:t.owner||'',priority:t.priority||'Normal',due:t.due||'',status:t.status||''})).slice(0,200)}
 function blank(){const s={isSample:false};for(const k of SINGLES)s[k]=defaults(k);for(const c of COLS)s[c]=[];s.models=defaultModels();return s}
 function mk(key,o){return Object.assign(defaults(key),o)}
 function normalise(s){
   s=s&&typeof s==='object'?s:{};const out=blank();out.isSample=!!s.isSample;
   for(const k of SINGLES)out[k]=Object.assign(defaults(k),pick(s[k],k));
   for(const c of COLS)out[c]=(Array.isArray(s[c])?s[c]:[]).map(r=>Object.assign(defaults(c),pick(r,c)));
+  for(const t of out.actions)if(t.status==='Open'||!TASK_STATUS.includes(t.status))t.status=t.status==='Done'||t.status==='Cancelled'?t.status:'Not started';
   if(!Array.isArray(s.models))out.models=defaultModels(); // files saved before model portfolios existed
   if(Array.isArray(s.audit))out.audit=s.audit.slice(-2000);
   return out;
@@ -389,9 +597,17 @@ function sample(){
   Object.assign(s.mandate,{basis:'Advisory',model:'Balanced',agreedRisk:4,objective:'Balanced growth and income',horizon:20,restrictions:'No tobacco. Keep the LLP capital account outside the managed portfolio.',rebalance:'On drift',driftTol:5,agreedOn:addDays(today(),-9),agreedBy:'James and Priya Harrington'});
   s.contacts=[
     mk('contacts',{date:addDays(today(),-9),type:'Meeting',with:'James and Priya Harrington',by:'Sam Adviser',summary:'Discovery meeting at the office. Walked through objectives, the LLP income and the plan for the Leeds flat.'})];
+  const ans=(pre,v)=>Object.fromEntries(v.map((x,i)=>[pre+(i+1),String(x)]));
+  s.rtq=[
+    mk('rtq',{owner:'P1',completedOn:addDays(today(),-9),by:'Sam Adviser',...ans('atr',[4,4,4,3,4,3,4,4,3]),loss:'hold',...ans('cfl',[1,0,0,1,-1,0]),...ans('ke',[2,2,1])}),
+    mk('rtq',{owner:'P2',completedOn:addDays(today(),-9),by:'Sam Adviser',...ans('atr',[2,3,3,2,2,3,2,2,2]),loss:'sellsome',...ans('cfl',[0,0,0,0,1,0]),...ans('ke',[1,1,0])})];
+  s.loas=[
+    mk('loas',{provider:'Aviva',owner:'P1',planType:'Personal pension',policyRef:'PP4471209',status:'Sent to provider',createdOn:addDays(today(),-25),signedOn:addDays(today(),-22),sentOn:addDays(today(),-20),sentBy:'Post'}),
+    mk('loas',{provider:'Scottish Widows',owner:'P2',planType:'Workplace pension',employer:'Leeds City Council (AVC)',status:'With client to sign',createdOn:addDays(today(),-3)})];
   s.actions=[
-    mk('actions',{created:addDays(today(),-9),description:'Obtain proof of address for Priya',owner:'Sam Adviser',due:addDays(today(),5)}),
-    mk('actions',{created:addDays(today(),-9),description:'Send ex-ante costs and charges disclosure',owner:'Sam Adviser',due:addDays(today(),-2)})];
+    mk('actions',{created:addDays(today(),-9),description:'Obtain proof of address for Priya',owner:'Alex Paraplanner',priority:'High',status:'Waiting on client',due:addDays(today(),5)}),
+    mk('actions',{created:addDays(today(),-9),description:'Send ex-ante costs and charges disclosure',owner:'Sam Adviser',priority:'High',due:addDays(today(),-2)}),
+    mk('actions',{created:addDays(today(),-9),description:'Request pension values from Aviva and Scottish Widows',owner:'Jordan Administrator',status:'In progress',due:addDays(today(),14)})];
   s.accounts=[
     mk('accounts',{owner:'JOINT',wrapper:'Current account',provider:'High-street bank',value:25000,cs:100,yield:0.5}),
     mk('accounts',{owner:'P1',wrapper:'Cash savings',provider:'Easy-access saver',value:60000,cs:100,yield:4}),
@@ -493,11 +709,11 @@ function incomeTax(nonSav,sav,div,ras){
 }
 function niCalc(emp,self){const a=A();const lo=N(a.pa),hi=N(a.brl);const band=x=>[Math.max(0,Math.min(x,hi)-lo),Math.max(0,x-hi)];const [e1,e2]=band(emp),[s1,s2]=band(self);return e1*N(a.ni1)/100+e2*N(a.ni2)/100+s1*N(a.c41)/100+s2*N(a.c42)/100}
 
-function memberTax(m){
+function memberTax(m,opt){
   const a=A();const inc=S.income.filter(i=>i.owner===m.ref);
   let emp=0,self=0,div=0,nonSavOther=0,sav=0;const age=ageOf(m)||0;
   for(const i of inc){const v=N(i.amount);
-    if(has(i.startAge)&&N(i.startAge)>age)continue; if(has(i.endAge)&&N(i.endAge)<=age)continue;
+    if(has(i.startAge)&&N(i.startAge)>age&&!(opt&&opt.futureEarnings&&HC_TYPES.includes(i.type)))continue; if(has(i.endAge)&&N(i.endAge)<=age)continue;
     if(i.taxable===false||i.taxable==='false')continue;
     if(i.type==='Employment salary'||i.type==='Bonus / commission')emp+=v;else if(i.type==='Self-employment profit')self+=v;else if(i.type==='Director dividends')div+=v;else nonSavOther+=v;}
   let ras=0,netpay=0,er=0,isaUsed=0,lisaUsed=0,jisaUsed=0,unreal=0;
@@ -529,6 +745,8 @@ function compute(){
   const a=A();const rf=N(a.rf)/100,cpi=N(a.cpi)/100;
   const lines=[];const add=(side,group,label,value,alloc,note)=>{if(Math.abs(value)<0.5)return;lines.push({side,group,label,value,alloc,note})};
   const tax={};S.members.forEach(m=>tax[m.ref]=memberTax(m));
+  // Earnings that start later are taxed at the rate that applies once they are being earned, not at today's rate
+  const taxF={};S.members.forEach(m=>{const age=ageOf(m);taxF[m.ref]=S.income.some(i=>i.owner===m.ref&&HC_TYPES.includes(i.type)&&has(i.startAge)&&age!=null&&N(i.startAge)>age)?memberTax(m,{futureEarnings:true}):tax[m.ref]});
   const prem={low:N(a.pLow),medium:N(a.pMed),high:N(a.pHigh),vhigh:N(a.pVhigh)};
   const adl=adults();
   const ages=adl.map(m=>ageOf(m)).filter(x=>x!=null);
@@ -550,7 +768,7 @@ function compute(){
     const startOff=has(i.startAge)?Math.max(0,N(i.startAge)-age):0;
     const n=Math.max(0,Math.round(endAge-age));
     const r=isHC?rf+(prem[m.occRisk]??2)/100:rf;const g=N(i.growth)/100;
-    const tr=(i.taxable===false||i.taxable==='false')?0:isHC?(yes(a.hcAfterTax)?tax[m.ref].hcRate:0):retRate(m);
+    const tr=(i.taxable===false||i.taxable==='false')?0:isHC?(yes(a.hcAfterTax)?(startOff>0?taxF:tax)[m.ref].hcRate:0):retRate(m);
     let pv=0;for(let t=1;t<=n;t++){if(t<=startOff)continue;pv+=N(i.amount)*Math.pow(1+g,t-1)*(1-tr)*surv(m,age,t)/Math.pow(1+r,t)}
     if(isHC){add('A','hc',`${memberName(m.ref)}: ${i.type.toLowerCase()}`,pv,{[m.ref]:1});derived[m.ref].hc+=pv;}
     else add('A','pen',isPen?`${memberName(m.ref)}: ${i.type.replace(' (in payment)','')} in payment`:`${memberName(m.ref)}: ${i.type}`,pv,{[m.ref]:1});
@@ -689,6 +907,84 @@ function mandateCheck(C){
   return {model,target8,classes,tol,breaches,suggested,risk,issues,nextReview,invested,status,benchmark:M.benchmark||(model?model.benchmark:''),profile:R.overall};
 }
 
+/* Life-event scenarios. Each applies a documented change to a copy of the household and re-runs the full model.
+   Results compare economic net worth, funded ratio, the capital needed to be fully funded, IHT and cash runway. */
+function scenarios(){
+  const P=S.scen;const ad=adults();const pick=P.who&&ad.find(m=>m.ref===P.who)||ad.find(m=>m.role==='primary')||ad[0];
+  const other=ad.find(m=>m!==pick);const age=m=>Math.floor(ageOf(m)||50);const nm=m=>memberName(m.ref);
+  const pct=(v,d)=>(has(v)?N(v):d)/100;const num=(v,d)=>has(v)?N(v):d;
+  const metrics=X=>{const C=bind(X).compute();const k=C.kpi,T=C.tot.HH;return {nw:T.A-T.L,funded:T.L?T.A/T.L:Infinity,core:k.coreFunded,gap:Math.max(0,T.L-T.A),iht:k.iht,cash:k.cashMonths}};
+  const clone=()=>JSON.parse(JSON.stringify(S));
+  const cash=(X,owner,v,label)=>X.accounts.push(Object.assign(defaults('accounts'),{owner,wrapper:'Cash savings',provider:label,value:Math.round(v),cs:100,eq:0,bd:0,al:0}));
+  const earn=i=>HC_TYPES.includes(i.type);
+  const death=(X,p,q,notes)=>{const sp=pct(P.survivorSpend,75);const married=['married','civil'].includes(X.household.relationship);
+    const lost=X.income.filter(i=>i.owner===p.ref);X.income=X.income.filter(i=>i.owner!==p.ref);
+    if(lost.length)notes.push(`${nm(p)}’s income stops: ${lost.map(i=>i.type).join(', ')}`);
+    for(const c of X.protection.filter(x=>x.owner===p.ref)){
+      if(/Life cover|Death in service/.test(c.type)&&N(c.sum)>0){cash(X,q.ref,N(c.sum),c.type+' payout');notes.push(`${c.type} pays ${gbpS(N(c.sum))} to ${nm(q)}`)}
+      if(c.type==='Family income benefit'&&N(c.sum)>0){const yrs=has(c.expiryAge)?Math.max(0,N(c.expiryAge)-age(p)):10;X.income.push(Object.assign(defaults('income'),{owner:q.ref,type:'Other income',label:'Family income benefit',amount:N(c.sum),endAge:age(q)+yrs,taxable:false}));notes.push(`Family income benefit pays ${gbpS(N(c.sum))} a year for ${yrs} years`)}}
+    X.protection=X.protection.filter(x=>x.owner!==p.ref);
+    for(const d of X.db.filter(x=>x.owner===p.ref)){if(married&&N(d.spousePct)>0){d.owner=q.ref;d.accrued=N(d.accrued)*N(d.spousePct)/100;notes.push(`${d.scheme||'DB scheme'}: ${d.spousePct}% spouse’s pension to ${nm(q)}`)}else{d.accrued=0;notes.push(`${d.scheme||'DB scheme'}: no survivor pension`)}}
+    for(const c of ['accounts','property','other','liabilities'])for(const r of X[c])if(r.owner===p.ref)r.owner=q.ref;
+    X.members=X.members.filter(m=>m.ref!==p.ref);
+    for(const e of X.expenses)e.amount=N(e.amount)*sp;notes.push(`Household spending falls to ${Math.round(sp*100)}%`);
+    notes.push(`Assets pass to ${nm(q)}; unused nil-rate band transfers for IHT`)};
+  const list=[];
+  const add=(id,title,desc,fn,mit)=>{const X=clone();const notes=[];fn(X,notes);list.push({id,title,desc,notes,mitigations:mit,after:metrics(X)})};
+  if(pick&&other){
+    for(const [p,q] of [[pick,other],[other,pick]])add('death-'+p.ref,`Death of ${nm(p)}`,`${nm(p)} dies now. Income stops, life cover and death-in-service pay out, survivor pensions start and spending falls.`,(X,n)=>death(X,p,q,n),
+      ['Size life cover to the capital needed above, written in trust so it is outside the estate and paid quickly','Check death-in-service and pension nominations are up to date','Make sure wills and lasting powers of attorney are in place']);
+    add('divorce',`Separation: ${nm(pick)}’s position`,`The couple separate. Shown from ${nm(pick)}’s side: joint assets split equally, pensions shared equally, ${nm(other)}’s income and assets leave the household.`,(X,n)=>{
+      const sp=pct(P.divorceSpend,65);const pen=a=>WGROUP[a.wrapper]==='pension';
+      const pool=X.accounts.filter(a=>pen(a)&&[pick.ref,other.ref].includes(a.owner)).reduce((t,a)=>t+N(a.value),0);const mine=X.accounts.filter(a=>pen(a)&&a.owner===pick.ref);const mineV=mine.reduce((t,a)=>t+N(a.value),0);
+      if(pool>0){if(mineV>0)for(const a of mine)a.value=N(a.value)/mineV*pool/2;else X.accounts.push(Object.assign(defaults('accounts'),{owner:pick.ref,wrapper:'SIPP',provider:'Pension sharing order',value:pool/2,eq:60,bd:30,cs:10}));n.push(`Pension sharing: ${nm(pick)} keeps half of the combined pensions, ${gbpS(pool/2)}`)}
+      X.accounts=X.accounts.filter(a=>a.owner!==other.ref||false);for(const a of X.accounts)if(a.owner==='JOINT'&&!pen(a)){a.value=N(a.value)/2;a.owner=pick.ref}
+      for(const pr of X.property){if(pr.owner===other.ref)pr.value=0;if(pr.owner==='JOINT'){pr.share=(has(pr.share)?N(pr.share):100)/2;pr.owner=pick.ref}}
+      for(const l of X.liabilities){if(l.owner===other.ref)l.balance=0;if(l.owner==='JOINT'){l.balance=N(l.balance)/2;l.payment=N(l.payment)/2;l.owner=pick.ref}}
+      X.other=X.other.filter(o=>o.owner!==other.ref);X.income=X.income.filter(i=>i.owner!==other.ref);X.protection=X.protection.filter(c=>c.owner!==other.ref);X.db=X.db.filter(d=>d.owner!==other.ref);
+      X.members=X.members.filter(m=>m.ref!==other.ref);X.household.relationship='single';
+      for(const e of X.expenses)e.amount=N(e.amount)*sp;X.expenses.push(Object.assign(defaults('expenses'),{label:'Legal and moving costs',cat:'essential',amount:num(P.divorceCosts,25000),duration:1}));
+      n.push('Joint savings, property and debts split equally',`${nm(other)}’s own income, assets, debts and cover leave the household`,`Spending ${Math.round(sp*100)}% of today, plus ${gbpS(num(P.divorceCosts,25000))} legal and moving costs`,'One nil-rate band for IHT')},
+      ['Take specialist advice on pension sharing versus offsetting, and on defined benefit pensions, which are kept whole here','Review protection: cover for maintenance and for the children','Update wills, nominations and lasting powers of attorney']);
+  }
+  if(pick){
+    add('care',`Long-term care for ${nm(pick)}`,`Care from age ${num(P.careStartAge,85)} for ${num(P.careYears,3)} years at ${gbpS(num(P.careCost,75000))} a year in today’s money, rising 5% a year.`,(X,n)=>{
+      X.expenses.push(Object.assign(defaults('expenses'),{label:'Long-term care',cat:'care',amount:num(P.careCost,75000),inflation:5,startIn:Math.max(0,num(P.careStartAge,85)-age(pick)),duration:num(P.careYears,3)}));n.push('Care costs added as a future liability')},
+      ['Earmark a care reserve or consider an immediate-needs annuity when care starts','Lasting power of attorney (health and welfare) in place','Check the home’s role: deferred payment agreements and the residence nil-rate band']);
+    add('redundancy',`Redundancy: ${nm(pick)}`,`${nm(pick)} is out of work for ${num(P.redundancyYears,1)} year(s), then earns ${Math.round(pct(P.reEmployPct,80)*100)}% of current pay.`,(X,n)=>{const yrs=num(P.redundancyYears,1),f=pct(P.reEmployPct,80);let k=0;
+      for(const i of X.income)if(i.owner===pick.ref&&earn(i)){i.startAge=Math.max(has(i.startAge)?N(i.startAge):0,age(pick)+Math.ceil(yrs));i.amount=N(i.amount)*f;k++}
+      if(num(P.redundancyPay,0)>0)cash(X,pick.ref,num(P.redundancyPay,0),'Redundancy payment');n.push(k?`${k} earnings line(s) paused for ${yrs} year(s), then at ${Math.round(f*100)}%`:'No earnings recorded for this person')},
+      ['Hold 6–12 months of essential spending in cash','Income protection and any employer redundancy cover','Plan which spending could be paused']);
+    add('illness',`Serious illness: ${nm(pick)}`,`${nm(pick)} stops working permanently. Critical illness cover pays out, income protection pays its benefit, extra costs of ${gbpS(num(P.illnessCost,10000))} a year.`,(X,n)=>{const m=X.members.find(x=>x.ref===pick.ref);m.health='Serious condition';
+      const lost=X.income.filter(i=>i.owner===pick.ref&&earn(i));X.income=X.income.filter(i=>!(i.owner===pick.ref&&earn(i)));if(lost.length)n.push(`Earnings stop: ${lost.map(i=>i.type).join(', ')}`);
+      for(const c of X.protection.filter(x=>x.owner===pick.ref)){if(c.type==='Critical illness'&&N(c.sum)>0){cash(X,pick.ref,N(c.sum),'Critical illness payout');n.push(`Critical illness pays ${gbpS(N(c.sum))}`)}
+        if(c.type==='Income protection'&&N(c.sum)>0){X.income.push(Object.assign(defaults('income'),{owner:pick.ref,type:'Other income',label:'Income protection benefit',amount:N(c.sum),endAge:has(c.expiryAge)?N(c.expiryAge):N(m.retireAge)||65,taxable:false}));n.push(`Income protection pays ${gbpS(N(c.sum))} a year`)}}
+      X.protection=X.protection.filter(c=>!(c.owner===pick.ref&&['Critical illness','Income protection'].includes(c.type)));
+      X.expenses.push(Object.assign(defaults('expenses'),{label:'Extra costs of illness',cat:'essential',amount:num(P.illnessCost,10000)}));n.push('Life expectancy reduced for serious condition')},
+      ['Income protection to cover the earnings gap until retirement','Critical illness cover sized to clear debts or adapt the home','Review whether pensions can be taken early on ill-health terms']);
+    add('early',`Early retirement: ${nm(pick)}`,`${nm(pick)} retires ${num(P.earlyRetireYears,5)} years earlier than planned.`,(X,n)=>{const m=X.members.find(x=>x.ref===pick.ref);const was=N(m.retireAge)||65;m.retireAge=was-num(P.earlyRetireYears,5);
+      for(const i of X.income)if(i.owner===pick.ref&&earn(i)&&has(i.endAge))i.endAge=N(i.endAge)-num(P.earlyRetireYears,5);n.push(`Retirement age ${was} → ${m.retireAge}`)},
+      ['Bridge to State Pension age with pension drawdown or ISAs','Check defined benefit early-retirement reductions','Use remaining working years to maximise pension contributions']);
+  }
+  add('market',`Market fall of ${Math.round(pct(P.marketFall,25)*100)}%`,'Equities and alternatives fall by this amount, bonds by a fifth of it, cash unchanged. Private business values fall by the same amount.',(X,n)=>{const f=pct(P.marketFall,25);let before=0,after=0;
+    for(const a of X.accounts){const v=N(a.value);before+=v;a.value=v*(1-f*(N(a.eq)+N(a.al))/100-f*0.2*N(a.bd)/100);after+=N(a.value)}
+    for(const o of X.other)if(/company|Partnership/i.test(o.type))o.value=N(o.value)*(1-f);n.push(`Investments ${gbpS(before)} → ${gbpS(after)}`)},
+    ['Keep the cash reserve so nothing has to be sold after a fall','Rebalance into the fall in line with the mandate','Check the agreed risk level still matches capacity for loss']);
+  add('rates',`Interest rates up ${num(P.rateRise,2)} points`,'Gilt yields and loan rates rise. Higher discount rates lower the present value of both future earnings and future spending; variable and refixing loans cost more.',(X,n)=>{const r=num(P.rateRise,2);X.assumptions.rf=N(X.assumptions.rf)+r;let extra=0;
+    for(const l of X.liabilities)if(N(l.balance)>0&&!/Student/.test(l.type)){const add=N(l.balance)*r/100/12;l.payment=N(l.payment)+add;extra+=add}n.push(`Gilt rate ${N(S.assumptions.rf)}% → ${N(X.assumptions.rf)}%`,`Loan payments up ${gbpS(extra*12)} a year`)},
+    ['Fix or overpay the largest variable-rate debts','Hold some index-linked gilts against inflation-driven rate rises']);
+  add('business',`Business failure`,'Private company shares and partnership capital lose their value, and income from the business stops.',(X,n)=>{const lost=X.other.filter(o=>/company|Partnership/i.test(o.type)).reduce((t,o)=>t+N(o.value),0);
+    for(const o of X.other)if(/company|Partnership/i.test(o.type))o.value=0;const inc=X.income.filter(i=>['Self-employment profit','Director dividends'].includes(i.type));X.income=X.income.filter(i=>!inc.includes(i));
+    if(lost)n.push(`Business assets written off: ${gbpS(lost)}`);n.push(inc.length?`Business income stops: ${inc.map(i=>i.label||i.type).join(', ')}`:'No business income recorded')},
+    ['Diversify away from the business: avoid personal guarantees and concentration','Key person and shareholder protection','Keep pension and ISA wealth outside the business']);
+  add('inheritance',`Inheritance of ${gbpS(num(P.inheritance,250000))}`,'A lump sum is received and held in cash.',(X,n)=>{cash(X,'JOINT',num(P.inheritance,250000),'Inheritance');n.push('Added to joint cash')},
+    ['Use ISA and pension allowances first','Consider gifting from surplus to reduce the IHT that this creates','Review the mandate and risk level for the larger portfolio']);
+  add('longevity',`Living ${num(P.longevityYears,8)} years longer`,'Everyone lives longer than the mortality tables assume, so spending runs for longer.',(X,n)=>{const y=num(P.longevityYears,8);X.assumptions.gM=N(X.assumptions.gM)+y;X.assumptions.gF=N(X.assumptions.gF)+y;X.assumptions.planAge=N(X.assumptions.planAge)+y;n.push(`Modal age at death +${y}; plan runs to ${X.assumptions.planAge}`)},
+    ['Secure a floor of guaranteed income (State Pension, DB, annuity) for essential spending','Keep a growth allocation for the long horizon']);
+  return {before:metrics(S),list,who:pick?pick.ref:''};
+}
+const gbpS=v=>'£'+Math.round(v).toLocaleString('en-GB');
+
 /* Review diary: every dated obligation for this household, soonest first.
    Annual suitability review (COBS 9A / Consumer Duty): 12 months after approval or the last review meeting.
    KYC refresh on the AML cycle; ID expiry; proof of address and screening within 3 months;
@@ -704,8 +1000,12 @@ function reviews(O){
     if(m.idExpiry)add('Photo ID expires',m.idExpiry,nm,'members',m.idType||'');
     if(m.poaDate)add('Proof of address refresh',addMonths(m.poaDate,3),nm,'members','Must be dated within 3 months');
     if(m.screenDate)add('Screening refresh',addMonths(m.screenDate,3),nm,'members','Sanctions, PEP and adverse media within 3 months')}
+  for(const l of S.loas){const who=l.owner?memberName(l.owner):'';const what=`${l.provider||'Provider'}${l.policyRef?' '+l.policyRef:''}`;
+    if(['Drafted','With client to sign'].includes(l.status)&&l.createdOn)add('Letter of authority: get client signature',addDays(l.createdOn,14),who,'loas',what);
+    if(l.status==='Signed')add('Letter of authority: send to provider',l.signedOn||l.createdOn,who,'loas',what);
+    if(l.status==='Sent to provider'&&l.sentOn)add('Letter of authority: chase provider',addDays(l.sentOn,has(l.chaseDays)?N(l.chaseDays):15),who,'loas',what)}
   {const b=S.mandate.reviewedOn||S.mandate.agreedOn;if(b)add('Mandate review',addYears(b,1),'','mandate','Annual review of the agreed mandate')}
-  for(const a of S.actions)if(a.status==='Open'&&a.due)add('Action: '+(a.description||''),a.due,a.owner,'actions','');
+  for(const a of S.actions)if(taskOpen(a)&&a.due)add('Action: '+(a.description||''),a.due,a.owner,'actions','');
   for(const e of S.contacts)if(e.type==='Life event'&&e.date&&(!lastReview||e.date>lastReview))add('Reassess suitability after life event',e.date,e.with,'contacts',e.summary||'');
   for(const k of S.complaints)if(k.received&&!['Final response sent','Referred to FOS','Closed'].includes(k.stage))add('Complaint: final response due',addDays(k.received,56),'','complaints',(k.summary||'').slice(0,100));
   items.sort((a,b)=>a.due.localeCompare(b.due)||a.type.localeCompare(b.type));
@@ -848,6 +1148,9 @@ function onboarding(C){
   if(!has(c.purpose))add('kyc','warn','Record the purpose and intended nature of the relationship','','compliance');
   // Suitability (household)
   if(!has(S.household.objectives))add('suitability','bad',"Record the client's objectives",'','household');
+  for(const m of S.members.filter(isAdult)){const q=S.rtq.find(x=>x.owner===m.ref);const nm=memberName(m.ref);
+    if(!q||!rtqScore(q).complete)add('suitability','warn',`${nm}: risk questionnaire not completed`,m.ref,'rtq');
+    else{const r=rtqResult(q);const diff=Object.keys(r).filter(k=>String(m[k])!==String(r[k]));if(diff.length)add('suitability','warn',`${nm}: people record differs from the risk questionnaire (${diff.map(k=>fieldLabel('members',k).toLowerCase()).join(', ')})`,m.ref,'rtq')}}
   if(!S.mandate.model||!N(S.mandate.agreedRisk))add('suitability','warn','Mandate: choose a model portfolio and record the agreed risk level','','mandate');
   if(R.ability!==R.willingness&&!has(c.riskNote))add('suitability','bad',`Willingness (${R.willingness.toLowerCase()}) differs from ability (${R.ability.toLowerCase()}): record the rationale for the agreed risk level`,'','compliance');
   if(R.will.length>1&&Math.max(...R.will)-Math.min(...R.will)>=2&&!has(c.riskNote))add('suitability','warn','Partners have different risk attitudes: explain how this is reflected','','compliance');
@@ -890,7 +1193,7 @@ function onboarding(C){
     blockerCount:items.filter(x=>x.lvl==='bad').length,warnCount:items.filter(x=>x.lvl==='warn').length,risk:R};
 }
 
-return {A,compute,memberTax,riskProfile,checks,onboarding,reviews,mandateCheck,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
+return {A,compute,memberTax,riskProfile,checks,onboarding,reviews,mandateCheck,scenarios,incomeTax,niCalc,ageOf,memberName,ownerAlloc,isAdult,adults,surv,lifeExp,spa};
 }
 
 function fieldLabel(key,k){const f=fieldsOf(SCHEMA[key]).find(x=>x.k===k);return f?f.l:k}
@@ -906,7 +1209,7 @@ function diff(before,after){const a=flatten(before||blank()),b=flatten(after);co
   for(const c of COLS){const n=cnt(c);if(n.a!==n.b)ch.push({field:`${c}.count`,from:n.b,to:n.a})}
   return ch}
 
-return {SCHEMA,COLS,SINGLES,YN,ROLES,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
+return {SCHEMA,COLS,SINGLES,YN,ROLES,seriesDecode,seriesEncode,seriesLabel,parsePriceCSV,fundPerf,growthCompare,addMonthsYM,ATR_Q,ATR_BANDS,LOSS_Q,CFL_Q,KE_Q,rtqScore,rtqResult,TASK_STATUS,taskOpen,FIRM_SINGLES,FIRM_COLS,firmBlank,firmNormalise,firmDiff,openTasks,ASSET_CLASSES,ROLLUP,DEFAULT_MODELS,INCOME_TYPES,HC_TYPES,WRAPPERS,WGROUP,ISA_SUBS,CGT_WRAP,EXP_CATS,
   fieldsOf,fieldLabel,defaults,blank,normalise,sample,bind,coerce,optList,today,N,has,yes,
   validNino,validPostcode,validEmail,parseDate,addYears,addMonths,addDays,flatten,diff,normKey};
 });

@@ -30,6 +30,9 @@ const db = {
   createHousehold: async a => (await one(`select create_household($1, $2::jsonb, $3::jsonb, $4, $5) r`, [a.firm, JSON.stringify(a.state), JSON.stringify(a.summary), a.userId, a.user])).r,
   saveHousehold: async a => (await one(`select save_household($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8) r`,
     [a.id, a.firm, a.expected, JSON.stringify(a.state), JSON.stringify(a.summary), JSON.stringify(a.changes), a.userId, a.user])).r,
+  getFirm: firm => one(`select settings, settings_version, settings_updated_at, settings_updated_by from firms where id = $1`, [firm]),
+  firmAudit: (firm, n) => q(`select * from firm_audit where firm_id = $1 order by id desc limit $2`, [firm, n]),
+  saveFirm: async a => (await one(`select save_firm_settings($1, $2, $3::jsonb, $4::jsonb, $5, $6) r`, [a.firm, a.expected, JSON.stringify(a.settings), JSON.stringify(a.changes), a.userId, a.user])).r,
   listMembers: firm => q(`select * from members where firm_id = $1 order by created_at`, [firm]),
   async inviteMember(a) {
     if ((await pg.query(`select 1 from auth.users where email = $1`, [a.email])).rows.length) return { conflict: true };
@@ -185,21 +188,47 @@ test('migrations are tracked: running them again changes nothing', async () => {
   const before = (await pg.query(`select count(*)::int n from households`)).rows[0].n;
   assert.deepEqual(await migrateSupabase(pgl()), []);
   const t = (await pg.query(`select version, name from supabase_migrations.schema_migrations order by version`)).rows;
-  assert.deepEqual(t.map(r => r.name), ['init', 'reviews']);
+  assert.deepEqual(t.map(r => r.name), ['init', 'reviews', 'firm_settings_tasks']);
   assert.equal((await pg.query(`select count(*)::int n from households`)).rows[0].n, before);
 });
 
 test('backfill fills the list columns from saved state and touches nothing else', async () => {
   const { body: { id } } = await call('POST', '/households', { token: 'sam', body: { state: H.sample() } });
-  const snap = async () => (await pg.query(`select h.version, h.state, h.stage, h.review_due, h.review_overdue, h.updated_at,
+  const snap = async () => (await pg.query(`select h.version, h.state, h.stage, h.review_due, h.review_overdue, h.open_tasks, h.updated_at,
     (select count(*)::int from household_versions v where v.household_id = h.id) versions,
     (select count(*)::int from audit_log a where a.household_id = h.id) audit from households h where id = $1`, [id])).rows[0];
   const good = await snap();
   assert.ok(good.stage);
-  // As a row saved before the reviews migration: list columns empty
-  await pg.query(`update households set stage = '', review_due = '', review_overdue = 0 where id = $1`, [id]);
+  assert.ok(good.open_tasks.length, 'the sample has open tasks');
+  // As a row saved before the reviews and tasks migrations: list columns empty
+  await pg.query(`update households set stage = '', review_due = '', review_overdue = 0, open_tasks = '[]' where id = $1`, [id]);
   const r = await backfill(pgl());
   assert.ok(r.updated >= 1);
   assert.deepEqual(await snap(), good);
   assert.equal((await backfill(pgl())).updated, 0, 'a second run finds nothing to do');
+});
+
+test('firm settings: anyone reads, administrators save with version checks and an audit trail; firms are separate', async () => {
+  const r0 = await call('GET', '/firm', { token: 'chris' });
+  assert.equal(r0.status, 200); assert.equal(r0.body.version, 0); assert.equal(r0.body.settings.providers.length, 20);
+  const settings = r0.body.settings;
+  settings.firm.name = 'Alder Wealth LLP'; settings.team.push({ name: 'Sam Adviser', role: 'Adviser', active: true, evil: 'x' });
+  assert.equal((await call('PUT', '/firm', { token: 'chris', body: { version: 0, settings } })).status, 403, 'advisers cannot change firm settings');
+  const s1 = await call('PUT', '/firm', { token: 'sam', body: { version: 0, settings } });
+  assert.deepEqual(s1.body, { version: 1, changes: 5 });
+  assert.equal((await call('PUT', '/firm', { token: 'sam', body: { version: 0, settings } })).status, 409);
+  const r1 = (await call('GET', '/firm', { token: 'chris' })).body;
+  assert.equal(r1.settings.firm.name, 'Alder Wealth LLP'); assert.equal(r1.settings.team[0].evil, undefined); assert.equal(r1.updatedBy, 'Sam Adviser');
+  const audit = (await call('GET', '/firm/audit', { token: 'chris' })).body;
+  assert.ok(audit.some(a => a.field === 'firm.name' && a.to === 'Alder Wealth LLP' && a.user === 'Sam Adviser'));
+  assert.equal((await call('GET', '/firm', { token: 'bea' })).body.settings.firm.name, '', 'another firm sees its own settings');
+  await assert.rejects(q('delete from firm_audit'), /not allowed/);
+});
+
+test('household list summaries carry open tasks for the firm-wide board', async () => {
+  const st = H.sample();
+  const { id } = (await call('POST', '/households', { token: 'sam', body: { state: st } })).body;
+  const row = (await call('GET', '/households', { token: 'sam' })).body.find(x => x.id === id);
+  assert.equal(row.tasks.length, H.openTasks(H.normalise(st)).length);
+  assert.ok(row.tasks.every(t => t.status !== 'Done'));
 });

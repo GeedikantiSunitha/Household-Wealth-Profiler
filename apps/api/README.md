@@ -15,10 +15,10 @@ API does. `server.js` at the project root is now a one-line pointer to `src/main
 | `src/config/` | Reads `.env` (never overriding the environment) and checks every setting; refuses to start when one is missing or wrong |
 | `src/http/` | Security headers, JSON replies and body limits (`respond.js`), static files (`static.js`), the same-site and JSON check on writes (`guards.js`) |
 | `src/auth/` | Sign-in: Basic, under `providers/basic/` (scrypt hashes, lockout after 10 failures for 15 minutes) |
-| `src/routes/` | One file per route group (`me.js`, `households.js`); reads input, calls the service, replies |
-| `src/services/` | The work, using `packages/core`: normalise, diff, summarise, create, save. Knows nothing about HTTP |
+| `src/routes/` | One file per route group (`me.js`, `households.js`, `firm.js`, `prices.js`); reads input, calls the service, replies |
+| `src/services/` | The work, using `packages/core`: households (normalise, diff, summarise, create, save), firm settings (versioned and audited the same way), fund prices from Alpha Vantage when `ALPHAVANTAGE_KEY` is set. Knows nothing about HTTP |
 | `src/crypto/` | Encrypts and decrypts records (AES-256-GCM); the only code that holds `DATA_KEY` |
-| `src/repositories/` | The only storage code: the file store and the PostgreSQL store, behind one interface |
+| `src/repositories/` | The only storage code: the file store and the PostgreSQL store, behind one interface (households and the firm settings) |
 | `src/db/` | The PostgreSQL pool and transactions; applies any new `db/migrations` (via `db/migrate.js`) at start-up |
 | `src/cli/` | `hash-password`, `gen-key`, `import-files` |
 

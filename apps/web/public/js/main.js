@@ -32,6 +32,7 @@ setRenderer(() => render());
   initDownloads();
   try{await Store.init()}catch(e){document.body.classList.add('gated');
     $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p>${Store.cloud?'<div class="addrow"><button class="btn" type="button" data-act="signOut">Sign out</button></div>':''}</div>`;return}
+  await Store.loadFirm();
   if(Store.mode==='server'){setState(H.blank());state.VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}
   resetUI(false);render();

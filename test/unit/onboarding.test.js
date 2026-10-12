@@ -37,13 +37,14 @@ test('a complete, low-risk file is ready for review with no blockers', () => {
 });
 
 test('approval by a different reviewer completes onboarding and sets the next review', () => {
-  const O = run(clean(s => Object.assign(s.compliance, { reviewer: 'Chris Compliance', reviewDate: '2026-10-08', outcome: 'approved' })));
+  const reviewed = ago(0); // on or after the sample's prepared date, which moves with today
+  const O = run(clean(s => Object.assign(s.compliance, { reviewer: 'Chris Compliance', reviewDate: reviewed, outcome: 'approved' })));
   assert.equal(O.stage, 'Approved');
-  assert.equal(O.nextReview, '2029-10-08');
+  assert.equal(O.nextReview, H.addYears(reviewed, 3));
 });
 
 test('four-eyes: the preparer cannot approve their own file', () => {
-  const O = run(clean(s => Object.assign(s.compliance, { reviewer: ' sam adviser ', reviewDate: '2026-10-08', outcome: 'approved' })));
+  const O = run(clean(s => Object.assign(s.compliance, { reviewer: ' sam adviser ', reviewDate: ago(0), outcome: 'approved' })));
   assert.equal(O.stage, 'Approved with open issues');
   assert.ok(has(O, /different person/));
 });

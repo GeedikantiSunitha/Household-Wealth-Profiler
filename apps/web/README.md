@@ -23,7 +23,7 @@ the Docker image and never reaches users).
 | `public/js/components/` | Form fields, banners, the live-effect panel |
 | `public/js/views/` | One file per screen |
 | `public/js/events/` | Typing in the form, every button and link, the top-bar buttons |
-| `public/js/lib/` | Page helpers, number and date formats, people in the household |
+| `public/js/lib/` | Page helpers, number and date formats, people in the household, firm settings look-ups (team and provider lists) |
 | `public/js/io/` | Excel import and export (SheetJS, loaded on demand), saving files to the device |
 
 ## Rules

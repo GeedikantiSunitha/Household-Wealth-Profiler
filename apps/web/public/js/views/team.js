@@ -5,7 +5,7 @@ import { $, esc } from '../lib/dom.js';
 import { state } from '../state.js';
 
 export async function renderTeam(){
-  let h=`<div class="sec-head"><div><h2>Team</h2><p>People at ${esc(Store.firm)} who can sign in. Each person needs their own login so the audit trail shows who did what. Deactivating someone signs them out at once; their past entries stay in the audit trail.</p></div></div>`+bannerHTML(false);
+  let h=`<div class="sec-head"><div><h2>Team</h2><p>People at ${esc(Store.firmName)} who can sign in. Each person needs their own login so the audit trail shows who did what. Deactivating someone signs them out at once; their past entries stay in the audit trail.</p></div></div>`+bannerHTML(false);
   $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
   let list=[];try{list=await Store.api('GET','members')}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>${esc(e.message)}</div></div>`;return}
   if(state.VIEW!=='team')return;

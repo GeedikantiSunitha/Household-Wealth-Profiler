@@ -79,3 +79,26 @@ test('document expiries appear for adults and the diary is sorted soonest first'
   assert.deepEqual(dues, [...dues].sort());
   assert.equal(R.nextDue, dues[0]);
 });
+
+test('letters of authority: signature, send and chase reminders follow the status', () => {
+  const s = approved(); s.loas = [];
+  const loa = { provider: 'Aviva', owner: 'P1', policyRef: 'PP1', status: 'With client to sign', createdOn: d(-20), chaseDays: 15 };
+  s.loas.push(loa);
+  let R = diary(s);
+  const sig = find(R, 'Letter of authority: get client signature')[0];
+  assert.equal(sig.due, d(-6)); assert.equal(sig.status, 'overdue'); assert.match(sig.detail, /Aviva PP1/);
+  Object.assign(loa, { status: 'Signed', signedOn: d(-1) });
+  R = diary(s);
+  assert.equal(find(R, 'Letter of authority: get client signature').length, 0);
+  assert.equal(find(R, 'Letter of authority: send to provider')[0].due, d(-1));
+  Object.assign(loa, { status: 'Sent to provider', sentOn: d(-3) });
+  assert.equal(find(diary(s), 'Letter of authority: chase provider')[0].due, d(12));
+  Object.assign(loa, { status: 'Information received', receivedOn: d(0) });
+  assert.equal(find(diary(s), 'Letter of authority').length, 0);
+});
+
+test('letters of authority are part of the schema with every request ticked except retirement options', () => {
+  const l = H.normalise({ loas: [{ provider: 'Aviva', evil: 1 }] }).loas[0];
+  assert.equal(l.evil, undefined); assert.equal(l.status, 'Drafted'); assert.equal(l.chaseDays, 15);
+  assert.equal(l.reqValue, true); assert.equal(l.reqGuarantees, true); assert.equal(l.reqRetire, false);
+});

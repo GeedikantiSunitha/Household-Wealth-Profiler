@@ -2,9 +2,10 @@
 import { Store, saveStatus } from '../api/store.js';
 import { $, esc } from '../lib/dom.js';
 import { state } from '../state.js';
+import { FIRM_VIEWS } from './nav.js';
 
 export function renderTopbar(){
-  const server=Store.mode==='server';const inHH=!['clients','team','diary'].includes(state.VIEW);
+  const server=Store.mode==='server';const inHH=!FIRM_VIEWS.has(state.VIEW);
   $('#btnClients').hidden=!server||!inHH;
   for(const id of ['#btnImport','#btnExport','#btnJson'])$(id).hidden=!inHH;
   $('#resetWrap').hidden=server||!inHH;

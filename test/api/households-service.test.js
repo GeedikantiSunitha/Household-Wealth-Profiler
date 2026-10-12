@@ -41,7 +41,7 @@ test('list: summaries from core.js, most recently changed first', async () => {
   assert.deepEqual(list.map(x => x.name), ['Newer', 'Older']);
   const E = H.bind(H.normalise(stored(a))); const O = E.onboarding(E.compute()); const R = E.reviews(O);
   assert.deepEqual(json(list[1]), json({ id: '00000000-0000-4000-8000-000000000001', name: 'Older', reference: a.household.reference, stage: O.stage, rating: O.rating,
-    nextReview: O.nextReview, blockers: O.blockerCount, due: R.nextDue, overdue: R.overdue, version: 1, updatedAt: '2026-10-10T10:00:00.000Z', updatedBy: 'sam' }));
+    nextReview: O.nextReview, blockers: O.blockerCount, due: R.nextDue, overdue: R.overdue, tasks: H.openTasks(H.normalise(stored(a))), version: 1, updatedAt: '2026-10-10T10:00:00.000Z', updatedBy: 'sam' }));
 });
 
 test('save: nothing changed means no new version', async () => {

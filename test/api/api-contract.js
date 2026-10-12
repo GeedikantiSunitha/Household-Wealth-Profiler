@@ -22,10 +22,11 @@ function expectedSummary(state) {
   const s = H.normalise(state);
   const E = H.bind(s); const O = E.onboarding(E.compute()); const R = E.reviews(O);
   return json({ name: s.household.name, reference: s.household.reference, stage: O.stage, rating: O.rating,
-    nextReview: O.nextReview, blockers: O.blockerCount, due: R.nextDue, overdue: R.overdue });
+    nextReview: O.nextReview, blockers: O.blockerCount, due: R.nextDue, overdue: R.overdue, tasks: H.openTasks(s) });
 }
 
-const LIST_KEYS = ['blockers', 'due', 'id', 'name', 'nextReview', 'overdue', 'rating', 'reference', 'stage', 'updatedAt', 'updatedBy', 'version'];
+const LIST_KEYS = ['blockers', 'due', 'id', 'name', 'nextReview', 'overdue', 'rating', 'reference', 'stage', 'tasks', 'updatedAt', 'updatedBy', 'version'];
+const FIRM_KEYS = ['settings', 'updatedAt', 'updatedBy', 'version'];
 const RECORD_KEYS = ['createdAt', 'createdBy', 'id', 'state', 'updatedAt', 'updatedBy', 'version'];
 const CONFLICT_KEYS = ['error', 'updatedAt', 'updatedBy', 'version'];
 const CREATED_AUDIT_KEYS = ['field', 'from', 'to', 'ts', 'user'];
@@ -155,6 +156,40 @@ function apiContract(ctx) {
       assert.deepEqual(changes.map(c => c.field).sort(), ['household.reference', 'members[1].poaType']);
       const ref = changes.find(c => c.field === 'household.reference');
       assert.equal(ref.from, 'HH-0001'); assert.equal(ref.to, 'HH-CONTRACT');
+    });
+
+    // Firm settings: works from whatever version is there, so other tests may have saved before
+    test('firm settings: GET, PUT with a version check, 409, no-change save, audit trail', async () => {
+      const f0 = await (await call('GET', '/api/firm', { who: sam })).json();
+      assert.deepEqual(keys(f0), FIRM_KEYS);
+      assert.deepEqual(f0.settings, json(H.firmNormalise(f0.settings)), 'stored settings are normalised');
+      const v = f0.version;
+      const settings = json(f0.settings); const name = 'Contract Firm ' + crypto.randomUUID().slice(0, 8); settings.firm.name = name;
+      const expected = H.firmDiff(f0.settings, H.firmNormalise(settings)).length;
+      assert.equal(expected, 1);
+      let r = await call('PUT', '/api/firm', { who: sam, body: { version: v, settings } });
+      assert.equal(r.status, 200); assert.deepEqual(await r.json(), { version: v + 1, changes: 1 });
+      r = await call('PUT', '/api/firm', { who: chris, body: { version: v + 1, settings } });
+      assert.equal(r.status, 200); assert.deepEqual(await r.json(), { version: v + 1, changes: 0 });
+      r = await call('PUT', '/api/firm', { who: chris, body: { version: v, settings } });
+      assert.equal(r.status, 409);
+      const j = await r.json();
+      assert.deepEqual(keys(j), CONFLICT_KEYS);
+      assert.equal(j.error, 'Firm settings were changed by someone else');
+      assert.equal(j.version, v + 1); assert.equal(j.updatedBy, 'sam'); assert.ok(j.updatedAt);
+      const f1 = await (await call('GET', '/api/firm', { who: chris })).json();
+      assert.equal(f1.version, v + 1); assert.equal(f1.updatedBy, 'sam'); assert.equal(f1.settings.firm.name, name);
+      const audit = await (await call('GET', '/api/firm/audit', { who: chris })).json();
+      assert.deepEqual(keys(audit[0]), CHANGE_AUDIT_KEYS);
+      assert.deepEqual({ field: audit[0].field, to: audit[0].to, user: audit[0].user, version: audit[0].version }, { field: 'firm.name', to: name, user: 'sam', version: v + 1 });
+      const list = await (await call('GET', '/api/households', { who: sam })).json();
+      assert.ok(list.every(h => h.id !== 'firm'), 'firm settings never show in the client list');
+    });
+
+    test('GET /api/prices without a provider key: 501, and the message points to CSV import', async () => {
+      const r = await call('GET', '/api/prices?symbol=VWRL.LON', { who: sam });
+      assert.equal(r.status, 501);
+      assert.deepEqual(await r.json(), { error: 'Automatic prices are not set up. Ask your administrator to add an Alpha Vantage key, or import a CSV.' });
     });
 
     test('unknown households and routes: 404 {error: "Not found"}', async () => {

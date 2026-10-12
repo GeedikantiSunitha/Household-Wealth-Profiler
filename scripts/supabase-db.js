@@ -7,7 +7,7 @@
 // migrate records what it applies in Supabase CLI's own table, so it and `supabase db push` can be
 // mixed. On plain PostgreSQL it first creates stand-ins for Supabase's auth schema and roles
 // (supabase/plain-postgres.sql). backfill rewrites only the derived list columns (stage, rating,
-// review due, ...): saved state, versions and the audit trail are never touched.
+// review due, open tasks, ...): saved state, versions and the audit trail are never touched.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -33,19 +33,24 @@ const migrateSupabase = (db, log) => migrate(db, { dir: MIGRATIONS, tracking: 's
 const COLS = { name: 'name', reference: 'reference', stage: 'stage', rating: 'rating', nextReview: 'next_review',
   blockers: 'blockers', due: 'review_due', overdue: 'review_overdue' };
 
+// open_tasks (jsonb) is compared as canonical JSON: the database keeps its own key order
+const canon = v => JSON.stringify(v, (k, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map(n => [n, x[n]])) : x);
+
 // Returns { checked, updated }. Rows already correct are left alone.
 async function backfill(db) {
   const HWP = require('../packages/core/core.js');
   const { summarise } = await import('../supabase/functions/api/handler.mjs');
-  const rows = await db.query(`select id, state, ${Object.values(COLS).join(', ')} from public.households`);
+  const rows = await db.query(`select id, state, ${Object.values(COLS).join(', ')}, open_tasks from public.households`);
   let updated = 0;
   await db.exec('begin');
   try {
     for (const r of rows) {
       const s = summarise(HWP, typeof r.state === 'string' ? JSON.parse(r.state) : r.state);
-      if (Object.entries(COLS).every(([k, c]) => String(r[c]) === String(s[k]))) continue;
-      await db.query(`update public.households set ${Object.values(COLS).map((c, i) => `${c} = $${i + 2}`).join(', ')} where id = $1`,
-        [r.id, ...Object.keys(COLS).map(k => s[k])]);
+      const tasks = typeof r.open_tasks === 'string' ? JSON.parse(r.open_tasks) : r.open_tasks;
+      if (Object.entries(COLS).every(([k, c]) => String(r[c]) === String(s[k])) && canon(tasks) === canon(s.tasks)) continue;
+      const n = Object.keys(COLS).length;
+      await db.query(`update public.households set ${Object.values(COLS).map((c, i) => `${c} = $${i + 2}`).join(', ')}, open_tasks = $${n + 2}::jsonb where id = $1`,
+        [r.id, ...Object.keys(COLS).map(k => s[k]), JSON.stringify(s.tasks)]);
       updated++;
     }
     await db.exec('commit');

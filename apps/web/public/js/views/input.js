@@ -3,6 +3,7 @@ import { bannerHTML } from '../components/banner.js';
 import { fieldsBlock, summary } from '../components/form.js';
 import { howHTML } from '../components/how.js';
 import { RECORD_ONLY, impactHTML } from '../components/impact.js';
+import { rtqPanel } from '../components/rtq.js';
 import { esc } from '../lib/dom.js';
 import { state } from '../state.js';
 
@@ -17,7 +18,9 @@ export function renderInput(key){
     if(key==='compliance')h+=`<div class="addrow"><button class="btn" type="button" data-nav="kyc">See onboarding status</button></div>`;
     return h}
   if(!state.S[key].length)h+=`<div class="empty">Nothing recorded yet. Use “Add ${esc(s.item)}” or import an Excel file.</div>`;
+  if(key==='rtq')h+=rtqPanel();
+  if(key==='loas'&&state.S.loas.length)h+=`<p class="note" style="margin:0 0 12px">Open a letter, check the details, then use <b>Letter</b> to print it or save it as PDF for the client to sign.</p>`;
   state.S[key].forEach((r,i)=>{const [t,meta,v]=summary(key,r);const open=state.OPEN.has(key+':'+i);
-    h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span><button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
+    h+=`<div class="card" data-open="${open}" data-card="${key}:${i}"><div class="card-h" data-act="toggle" data-col="${key}" data-idx="${i}" role="button" tabindex="0" aria-expanded="${open}"><span class="chev">▸</span><span class="sum"><b>${esc(t)}</b><span class="meta">${esc(meta)}</span></span><span class="val">${esc(v)}</span>${key==='loas'?`<button class="btn" type="button" data-act="loaLetter" data-idx="${i}">Letter</button>`:''}<button class="btn ghost" type="button" data-act="del" data-col="${key}" data-idx="${i}">Remove</button></div><div class="card-b">${fieldsBlock(key,i,r)}</div></div>`});
   return h;
 }

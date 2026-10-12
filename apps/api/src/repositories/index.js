@@ -6,6 +6,9 @@
      update(id, decide)   decide(current) returns { result, next?, audit? }; when next is given it is
                           saved as the new version together with its audit entries, atomically
      audit(id)            audit entries, newest first
+     firm.get()           the firm settings record, or null before the first save
+     firm.update(decide)  as update(), for the firm settings record
+     firm.audit()         the firm settings audit entries, newest first
      init()               prepare storage (create the folder, or apply db/migrations)
      describe             where the data is, for the start-up line */
 'use strict';

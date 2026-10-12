@@ -31,7 +31,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const left = (await db.query(`select count(*)::int n from information_schema.tables where table_schema = 'public' and table_name = 'households'`)).rows[0].n;
     if (left) throw new Error('TEST_DATABASE_URL must point at an empty database');
     KEY = node(['gen-key']);
-    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATA_KEY: KEY,
+    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
       AUTH_USERS: [node(['hash-password', 'sam', 'correct horse']), node(['hash-password', 'chris', 'battery staple'])].join(';') };
     proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: ENV, stdio: 'pipe' });
     for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
@@ -92,11 +92,26 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       const { id: fid } = await (await fetch(FB + '/api/households', { method: 'POST', headers: { ...SAM, ...J }, body: JSON.stringify({ state: st }) })).json();
       st.household.reference = 'IMP-1';
       assert.equal((await fetch(`${FB}/api/households/${fid}`, { method: 'PUT', headers: { ...SAM, ...J }, body: JSON.stringify({ version: 1, state: st }) })).status, 200);
+      // Firm settings saved twice on the file store
+      const firm = (await (await fetch(FB + '/api/firm', { headers: SAM })).json()).settings;
+      firm.firm.name = 'Imported Firm';
+      assert.equal((await fetch(FB + '/api/firm', { method: 'PUT', headers: { ...SAM, ...J }, body: JSON.stringify({ version: 0, settings: firm }) })).status, 200);
+      firm.firm.name = 'Imported Firm LLP';
+      assert.equal((await fetch(FB + '/api/firm', { method: 'PUT', headers: { ...CHRIS, ...J }, body: JSON.stringify({ version: 1, settings: firm }) })).status, 200);
+      const fileFirm = await (await fetch(FB + '/api/firm', { headers: SAM })).json();
+      const fileFirmAudit = await (await fetch(FB + '/api/firm/audit', { headers: SAM })).json();
       fileServer.kill();
 
       const run = () => execFileSync(process.execPath, ['server.js', 'import-files', dir], { cwd: ROOT, env: ENV }).toString();
-      assert.match(run(), /Copied 1 household/);
-      assert.match(run(), /Copied 0 household\(s\) .* \(1 already/);
+      const first = run();
+      assert.match(first, /Copied 1 household/);
+      assert.match(first, /Copied the firm settings \(2 version\(s\)\)/);
+      const second = run();
+      assert.match(second, /Copied 0 household\(s\) .* \(1 already/);
+      assert.match(second, /Firm settings not copied: the database already has firm settings/);
+      assert.deepEqual(await (await fetch(BASE + '/api/firm', { headers: SAM })).json(), fileFirm);
+      assert.deepEqual(await (await fetch(BASE + '/api/firm/audit', { headers: SAM })).json(), fileFirmAudit);
+      assert.equal((await db.query('select count(*)::int n from firm_versions')).rows[0].n, 2);
       const rec = await (await fetch(`${BASE}/api/households/${fid}`, { headers: SAM })).json();
       assert.equal(rec.version, 2); assert.equal(rec.state.household.reference, 'IMP-1');
       const audit = await (await fetch(`${BASE}/api/households/${fid}/audit`, { headers: SAM })).json();

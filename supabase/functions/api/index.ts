@@ -16,7 +16,7 @@ const db = {
     return m && { ...m, firm_name: m.firms.name, firm_status: m.firms.status, seats: m.firms.seats };
   },
   listHouseholds: async (firm: string) => must(await sb.from('households')
-    .select('id, name, reference, stage, rating, next_review, blockers, review_due, review_overdue, version, updated_at, updated_by')
+    .select('id, name, reference, stage, rating, next_review, blockers, review_due, review_overdue, open_tasks, version, updated_at, updated_by')
     .eq('firm_id', firm).order('updated_at', { ascending: false }).limit(10000)),
   getHousehold: async (id: string, firm: string) => must(await sb.from('households').select('*').eq('id', id).eq('firm_id', firm).maybeSingle()),
   audit: async (id: string, firm: string, limit: number) => must(await sb.from('audit_log').select('*')
@@ -24,6 +24,9 @@ const db = {
   createHousehold: async (a: any) => must(await sb.rpc('create_household', { p_firm: a.firm, p_state: a.state, p_summary: a.summary, p_user_id: a.userId, p_user: a.user })),
   saveHousehold: async (a: any) => must(await sb.rpc('save_household', { p_id: a.id, p_firm: a.firm, p_expected: a.expected, p_state: a.state,
     p_summary: a.summary, p_changes: a.changes, p_user_id: a.userId, p_user: a.user })),
+  getFirm: async (firm: string) => must(await sb.from('firms').select('settings, settings_version, settings_updated_at, settings_updated_by').eq('id', firm).single()),
+  firmAudit: async (firm: string, limit: number) => must(await sb.from('firm_audit').select('*').eq('firm_id', firm).order('id', { ascending: false }).limit(limit)),
+  saveFirm: async (a: any) => must(await sb.rpc('save_firm_settings', { p_firm: a.firm, p_expected: a.expected, p_settings: a.settings, p_changes: a.changes, p_user_id: a.userId, p_user: a.user })),
   listMembers: async (firm: string) => must(await sb.from('members').select('*').eq('firm_id', firm).order('created_at')),
   async inviteMember(a: any) {
     const { data, error } = await sb.auth.admin.inviteUserByEmail(a.email, { redirectTo: a.redirectTo, data: { name: a.name } });

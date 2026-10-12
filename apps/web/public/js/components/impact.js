@@ -3,7 +3,7 @@ import { $, esc } from '../lib/dom.js';
 import { gbpK, pct } from '../lib/format.js';
 import { state } from '../state.js';
 
-export const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models']);
+export const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models','loas','rtq']);
 export const sgn=n=>n>0?'+':'−';
 export const DELTA={
   money:(a,b)=>{const d=b-a;return !isFinite(d)||Math.abs(d)<0.5?null:[sgn(d)+gbpK(Math.abs(d)),Math.sign(d)]},

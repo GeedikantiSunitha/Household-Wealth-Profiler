@@ -52,6 +52,8 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     // Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
     // to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.
     clientIpHeader: (env.CLIENT_IP_HEADER || '').toLowerCase(),
+    // Optional: Alpha Vantage key for automatic monthly fund prices (services/prices.js)
+    alphavantageKey: env.ALPHAVANTAGE_KEY || '',
     users,
     key,
     hsts: env.HSTS !== '0',

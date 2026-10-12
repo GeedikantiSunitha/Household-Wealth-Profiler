@@ -14,15 +14,19 @@ const { createStatic } = require('./http/static.js');
 const { checkWrite } = require('./http/guards.js');
 const { createMeRoute } = require('./routes/me.js');
 const { createHouseholdRoutes } = require('./routes/households.js');
+const { createFirmRoutes } = require('./routes/firm.js');
+const { createPriceRoute } = require('./routes/prices.js');
 const { ID_RE } = require('./repositories/ids.js');
 
 const CHALLENGE = { 'WWW-Authenticate': 'Basic realm="Household Wealth Profiler", charset="UTF-8"' };
 
-function createApp({ config, households, authenticate }) {
+function createApp({ config, households, firm, prices, authenticate }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
     createMeRoute({ send, encrypted: !!config.key }),
+    createFirmRoutes({ firm, send, readBody }),
+    createPriceRoute({ prices, send }),
     createHouseholdRoutes({ households, ID_RE, send, readBody }),
   ];
 
