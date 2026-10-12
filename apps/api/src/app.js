@@ -33,7 +33,7 @@ function createApp({ config, households, firm, prices, authenticate, ready = asy
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
-    createMeRoute({ send, encrypted: !!config.key }),
+    createMeRoute({ send, encrypted: !!config.key, production: !!config.production }),
     createFirmRoutes({ firm, send, readBody }),
     createPriceRoute({ prices, send }),
     createHouseholdRoutes({ households, ID_RE, send, readBody }),

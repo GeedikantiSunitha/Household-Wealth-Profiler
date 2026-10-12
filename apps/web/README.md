@@ -15,7 +15,7 @@ the Docker image and never reaches users).
 
 | Path | Holds |
 | --- | --- |
-| `public/` | `index.html`, `styles.css`, `config.js` (non-secret settings only), `cloud.js`, `vendor/` |
+| `public/` | `index.html`, `styles.css`, `config.js` (non-secret settings only), `cloud.js`, `vendor/` (SheetJS 0.20.3, pinned by hash in `scripts/vendor.js`) |
 | `public/js/main.js` | Start-up only: signs in or finds the server, then draws the first screen |
 | `public/js/state.js` | The open household, the current screen, open sections, the banner (shared by every screen) |
 | `public/js/api/store.js` | The only code that calls the backend: autosave, edit conflicts, the save status |

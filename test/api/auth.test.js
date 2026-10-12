@@ -92,10 +92,15 @@ test('failures older than 15 minutes no longer count towards the lock', () => {
 test('an unknown name takes as long to refuse as a wrong password, so replies do not reveal which names exist', () => {
   const { auth } = setup();
   const ms = fn => { const s = process.hrtime.bigint(); fn(); return Number(process.hrtime.bigint() - s) / 1e6; };
-  const median = a => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
-  const wrong = median([...Array(7)].map((_, i) => ms(() => auth(req(basic('sam', 'wrong' + i), '10.0.1.' + i)))));
-  const unknown = median([...Array(7)].map((_, i) => ms(() => auth(req(basic('nobody' + i, 'x'), '10.0.2.' + i)))));
-  assert.ok(unknown > wrong * 0.5, `unknown name ${unknown.toFixed(1)} ms, wrong password ${wrong.toFixed(1)} ms`);
+  // Interleaved, and the fastest of each: the fastest run is the cost of the work itself, whatever
+  // else the machine is doing (a median can be skewed when the suite runs alongside other processes)
+  const wrong = [], unknown = [];
+  for (let i = 0; i < 7; i++) {
+    wrong.push(ms(() => auth(req(basic('sam', 'wrong' + i), '10.0.1.' + i))));
+    unknown.push(ms(() => auth(req(basic('nobody' + i, 'x'), '10.0.2.' + i))));
+  }
+  const best = a => Math.min(...a);
+  assert.ok(best(unknown) > best(wrong) * 0.5, `unknown name ${best(unknown).toFixed(1)} ms, wrong password ${best(wrong).toFixed(1)} ms`);
 });
 
 test('old failures and expired logins are pruned, so the maps never grow for ever', () => {

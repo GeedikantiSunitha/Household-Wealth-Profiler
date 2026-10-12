@@ -55,6 +55,7 @@ function apiContract(ctx) {
     test('every reply carries the security headers', async () => {
       for (const r of [await call('GET', '/healthz'), await call('GET', '/api/me', { who: sam }), await call('GET', '/', { who: sam })]) {
         assert.match(r.headers.get('content-security-policy'), /default-src 'self'/);
+        assert.match(r.headers.get('content-security-policy'), /script-src 'self';/, 'no script from any other site');
         assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
         assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
         assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
@@ -75,12 +76,12 @@ function apiContract(ctx) {
       }
     });
 
-    test('GET /api/me: exactly {user, encrypted}', async () => {
+    test('GET /api/me: exactly {user, encrypted, production}', async () => {
       const r = await call('GET', '/api/me', { who: sam });
       assert.equal(r.status, 200);
       const j = await r.json();
-      assert.deepEqual(keys(j), ['encrypted', 'user']);
-      assert.equal(j.user, 'sam'); assert.equal(typeof j.encrypted, 'boolean');
+      assert.deepEqual(keys(j), ['encrypted', 'production', 'user']);
+      assert.equal(j.user, 'sam'); assert.equal(typeof j.encrypted, 'boolean'); assert.equal(j.production, false);
     });
 
     test('POST /api/households: 201 {id, version: 1}', async () => {
@@ -244,7 +245,7 @@ function apiContract(ctx) {
 
     test('the app files are served with their types', async () => {
       const files = { '/': /^text\/html/, '/index.html': /^text\/html/, '/js/main.js': /^text\/javascript/, '/core.js': /^text\/javascript/,
-        '/cloud.js': /^text\/javascript/, '/config.js': /^text\/javascript/, '/styles.css': /^text\/css/ };
+        '/cloud.js': /^text\/javascript/, '/config.js': /^text\/javascript/, '/styles.css': /^text\/css/, '/vendor/xlsx.full.min.js': /^text\/javascript/ };
       for (const [p, type] of Object.entries(files)) {
         const r = await call('GET', p, { who: sam });
         assert.equal(r.status, 200, p);

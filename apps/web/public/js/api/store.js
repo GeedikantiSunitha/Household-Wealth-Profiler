@@ -20,7 +20,7 @@ export function setRenderer(fn) { rerender = fn; }
 
 const LS='hwp-draft-v2',LS_USER='hwp-user';
 const CFG=window.HWP_CONFIG||{};
-const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,cloud:null,role:'',firm:'',seats:0,
+const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,cloud:null,role:'',firm:'',seats:0,
   async init(){
     if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');
       Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firmName:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
@@ -31,7 +31,7 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     let j=null;
     try{const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});
       if(r.ok&&(r.headers.get('content-type')||'').includes('json'))j=await r.json()}catch(e){}
-    if(j&&j.user){this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;return}
+    if(j&&j.user){this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;this.production=!!j.production;return}
     throw new Error(NO_SERVER);
   },
   loadLocal(){try{const r=localStorage.getItem(LS);return r?window.HWP.normalise(JSON.parse(r)):null}catch(e){return null}},
@@ -44,7 +44,10 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     if(!r.ok){const err=new Error((j&&j.error)||('Request failed ('+r.status+')'));err.status=r.status;err.body=j;throw err}return j},
   async list(){return this.api('GET','households')},
   firm:{version:0,settings:null,dirty:false,saving:false,err:null},
-  async loadFirm(){if(this.mode==='server'){try{const j=await this.api('GET','firm');this.firm.version=j.version;this.firm.settings=H.firmNormalise(j.settings);return}catch(e){}}
+  // Served by a server: the firm settings come from it or the app does not open (never from this browser)
+  async loadFirm(){if(this.mode==='server'){let j;try{j=await this.api('GET','firm')}catch(e){throw new Error('The firm settings could not be loaded from the server, so nothing you enter would be saved correctly. Check your connection, then reload this page.')}
+      this.firm.version=j.version;this.firm.settings=H.firmNormalise(j.settings);return}
+    // The standalone demo file only
     let x=null;try{x=JSON.parse(localStorage.getItem('hwp-firm')||'null')}catch(e){}this.firm.settings=H.firmNormalise(x)},
   touchFirm(){if(this.mode!=='server'){try{localStorage.setItem('hwp-firm',JSON.stringify(this.firm.settings))}catch(e){}return}
     this.firm.dirty=true;saveStatus();clearTimeout(this.ft);this.ft=setTimeout(()=>this.flushFirm(),1000)},

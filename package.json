@@ -19,7 +19,8 @@
     "build": "node scripts/build.js",
     "sync:supabase": "node -e \"require('fs').copyFileSync('packages/core/core.js','supabase/functions/_shared/core.js')\"",
     "build:web": "node scripts/build-web.js",
-    "check": "node scripts/ci/check-migrations.js db/migrations && node scripts/ci/check-licences.js"
+    "check": "node scripts/ci/check-migrations.js db/migrations && node scripts/ci/check-licences.js",
+    "vendor": "node scripts/vendor.js"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",

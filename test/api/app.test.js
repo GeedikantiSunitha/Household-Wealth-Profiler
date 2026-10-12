@@ -82,7 +82,7 @@ test('4. writes: the same-site check comes before the JSON check', async () => {
 });
 
 test('5. API routes, then 404 for everything else', async () => {
-  assert.deepEqual(await (await call('GET', '/api/me')).json(), { user: 'sam', encrypted: true });
+  assert.deepEqual(await (await call('GET', '/api/me')).json(), { user: 'sam', encrypted: true, production: false });
   assert.equal((await call('POST', '/api/households', { headers: J, body: '{"state":{}}' })).status, 201);
   assert.deepEqual(calls, [['create', 'sam', undefined]], 'the signed-in user is passed to the service');
   calls = [];
@@ -119,6 +119,7 @@ test('errors: 400 keeps its message; anything unexpected is "Server error" with 
 test('every reply carries the security headers, with HSTS when switched on', async () => {
   for (const r of [await call('GET', '/healthz'), await call('GET', '/'), await call('GET', '/api/nope')]) {
     assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    assert.match(r.headers.get('content-security-policy'), /script-src 'self';/, 'scripts come only from this server, never a CDN');
     assert.equal(r.headers.get('x-frame-options'), 'DENY');
     assert.match(r.headers.get('strict-transport-security'), /max-age=31536000/);
   }

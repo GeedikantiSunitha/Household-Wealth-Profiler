@@ -53,7 +53,7 @@ function main([cmd, ...args] = []) {
   const sealer = createSealer(config.key);
   let store;
   try { store = createStore(config, sealer); } catch (e) { console.error(e.message); process.exit(1); }
-  const households = createHouseholdService({ store, HWP });
+  const households = createHouseholdService({ store, HWP, production: config.production });
   const firm = createFirmService({ store, HWP });
   const prices = createPriceService({ key: config.alphavantageKey });
   const { authenticate } = createAuth(config);

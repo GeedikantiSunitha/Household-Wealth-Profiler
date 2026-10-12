@@ -20,7 +20,6 @@ import { $, esc } from './lib/dom.js';
 import { Store, setRenderer } from './api/store.js';
 import { render } from './views/render.js';
 import { resetUI } from './events/actions.js';
-import { initDownloads } from './io/download.js';
 // Loaded for what they do, not for a name: they listen for typing and wire the top-bar buttons
 import './events/editing.js';
 import './events/toolbar.js';
@@ -29,10 +28,9 @@ const H = window.HWP;
 setRenderer(() => render());
 
 (async()=>{
-  initDownloads();
-  try{await Store.init()}catch(e){document.body.classList.add('gated');
+  // Sign in (or find the server), then the firm settings: if either fails, the app does not open
+  try{await Store.init();await Store.loadFirm()}catch(e){document.body.classList.add('gated');
     $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p>${Store.cloud?'<div class="addrow"><button class="btn" type="button" data-act="signOut">Sign out</button></div>':''}</div>`;return}
-  await Store.loadFirm();
   if(Store.mode==='server'){setState(H.blank());state.VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}
   resetUI(false);render();

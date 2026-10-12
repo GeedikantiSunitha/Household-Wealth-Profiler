@@ -1,4 +1,4 @@
-/* Excel workbooks: the import reader (one sheet per data type, matched by sheet name and column title) and the template / export builder. SheetJS is loaded only when a workbook is needed: the self-hosted copy first (scripts/fetch-xlsx.sh), else cdnjs. */
+/* Excel workbooks: the import reader (one sheet per data type, matched by sheet name and column title) and the template / export builder. SheetJS is loaded only when a workbook is needed, from this app's own copy (apps/web/public/vendor, pinned by hash; see scripts/vendor.js). Only the standalone demo file, opened from disk with no server, may fetch it from SheetJS's CDN instead. */
 import { Store } from '../api/store.js';
 import { memberName } from '../lib/people.js';
 import { state } from '../state.js';
@@ -9,7 +9,7 @@ const H = window.HWP; const { SCHEMA, COLS, SINGLES, YN, fieldsOf, optList, yes 
 export let xlsxP=null;
 export function loadXLSX(){if(window.XLSX)return Promise.resolve(window.XLSX);if(xlsxP)return xlsxP;
   const tryLoad=src=>new Promise((res,rej)=>{const s=document.createElement('script');s.src=src;s.onload=()=>window.XLSX?res(window.XLSX):rej();s.onerror=rej;document.head.appendChild(s)});
-  xlsxP=tryLoad('vendor/xlsx.full.min.js').catch(()=>tryLoad('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')).catch(()=>{xlsxP=null;throw new Error('The spreadsheet reader could not be loaded. Check your connection and try again.')});
+  xlsxP=tryLoad('vendor/xlsx.full.min.js').catch(()=>window.HWP_STANDALONE===true?tryLoad('https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'):Promise.reject()).catch(()=>{xlsxP=null;throw new Error('The spreadsheet reader could not be loaded. Check your connection and try again.')});
   return xlsxP}
 export function readSheet(XLSX,ws){const rows=[];if(!ws||!ws['!ref'])return rows;const R=XLSX.utils.decode_range(ws['!ref']);
   for(let r=R.s.r;r<=Math.min(R.e.r,R.s.r+5000);r++){const row=[];for(let c=R.s.c;c<=Math.min(R.e.c,R.s.c+80);c++){const cell=ws[XLSX.utils.encode_cell({r,c})];row.push(cell?{v:cell.v,z:cell.z}:null)}rows.push(row)}return rows}

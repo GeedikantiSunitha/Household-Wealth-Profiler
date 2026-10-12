@@ -10,6 +10,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { checkMigrations } = require('../../scripts/ci/check-migrations.js');
 const { checkLicences, fromNpm } = require('../../scripts/ci/check-licences.js');
+const { verify, vendor, XLSX } = require('../../scripts/vendor.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const write = (dir, files) => { for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text); return dir; };
@@ -59,6 +60,31 @@ test.describe('migrations may only add', () => {
       e => e.status === 1 && /0001_a\.sql/.test(String(e.stderr)));
     const ok = execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'ci', 'check-migrations.js'), path.join(ROOT, 'db', 'migrations')]).toString();
     assert.match(ok, /migration file\(s\) only add/);
+  });
+});
+
+test.describe('the spreadsheet library is vendored at a pinned version', () => {
+  const VENDOR = path.join(ROOT, 'apps', 'web', 'public', 'vendor');
+  test('apps/web/public/vendor/xlsx.full.min.js is SheetJS 0.20.3 (sha256 pinned), with its licence beside it', () => {
+    assert.equal(XLSX.version, '0.20.3');
+    const r = verify(path.join(VENDOR, 'xlsx.full.min.js'));
+    assert.equal(r.ok, true, `sha256 is ${r.sha256}`);
+    assert.match(fs.readFileSync(path.join(VENDOR, 'LICENSE-xlsx.txt'), 'utf8'), /Apache License/);
+  });
+  test('vendor() refuses a download whose hash does not match, and writes nothing', async () => {
+    const dir = tmp();
+    const fakeFetch = async () => ({ ok: true, arrayBuffer: async () => Buffer.from('not the library') });
+    await assert.rejects(vendor({ dir, fetch: fakeFetch }), /sha256/);
+    assert.ok(!fs.existsSync(path.join(dir, 'xlsx.full.min.js')));
+  });
+  test('vendor() writes a download that matches, with the licence', async () => {
+    const dir = tmp();
+    const real = fs.readFileSync(path.join(VENDOR, 'xlsx.full.min.js'));
+    const fakeFetch = async url => ({ ok: true, arrayBuffer: async () => (/LICENSE$/.test(url) ? Buffer.from('Apache License\n') : real) });
+    const r = await vendor({ dir, fetch: fakeFetch });
+    assert.equal(r.sha256, XLSX.sha256);
+    assert.equal(verify(path.join(dir, 'xlsx.full.min.js')).ok, true);
+    assert.match(fs.readFileSync(path.join(dir, 'LICENSE-xlsx.txt'), 'utf8'), /Apache/);
   });
 });
 

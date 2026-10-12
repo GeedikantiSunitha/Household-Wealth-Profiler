@@ -22,7 +22,7 @@ if (fs.existsSync(path.join(root, 'apps', 'web', 'public', 'vendor'))) fs.cpSync
 const config = { supabaseUrl: url, supabaseKey: key, requireMfa: process.env.REQUIRE_MFA !== '0', firmHint: process.env.FIRM_HINT || '' };
 fs.writeFileSync(path.join(out, 'config.js'), `window.HWP_CONFIG=${JSON.stringify(config)};\n`);
 
-const csp = ["default-src 'self'", "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+const csp = ["default-src 'self'", "script-src 'self' https://cdn.jsdelivr.net", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com", "img-src 'self' data:", `connect-src 'self' ${url}`, "frame-ancestors 'none'", "base-uri 'none'", "form-action 'self'", "object-src 'none'"].join('; ');
 // _headers is read by Cloudflare Pages and Netlify
 fs.writeFileSync(path.join(out, '_headers'), `/*

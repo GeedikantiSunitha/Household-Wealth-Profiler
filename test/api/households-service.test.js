@@ -123,6 +123,19 @@ test('unknown household: get null, audit null, save not found', async () => {
   assert.deepEqual(await svc.save(id, { version: 1, state: H.sample() }, 'sam'), { notFound: true });
 });
 
+test('in production a sample household is refused on create and on save (400); elsewhere it is allowed', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-svc-'));
+  const store = createFileStore(dir, createSealer(null));
+  const prod = createHouseholdService({ store, HWP: H, production: true });
+  await assert.rejects(prod.create(H.sample(), 'sam'), { status: 400, message: 'Sample households are not allowed in production' });
+  const { id } = await prod.create(H.blank(), 'sam');
+  await assert.rejects(prod.save(id, { version: 1, state: H.sample() }, 'sam'), { status: 400, message: 'Sample households are not allowed in production' });
+  assert.equal((await prod.get(id)).version, 1, 'nothing was saved');
+  assert.equal((await prod.list()).length, 1);
+  const dev = createHouseholdService({ store, HWP: H });
+  assert.equal(typeof (await dev.create(H.sample(), 'sam')).id, 'string');
+});
+
 test('audit is capped at 5000 entries, newest first', async () => {
   assert.equal(AUDIT_LIMIT, 5000);
   const audit = Array.from({ length: 5003 }, (_, i) => ({ i }));

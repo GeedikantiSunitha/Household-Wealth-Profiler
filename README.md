@@ -212,12 +212,13 @@ deletes anyway. Databases created before migrations were tracked are adopted as 
 To run the PostgreSQL tests, point them at an empty scratch database:
 `TEST_DATABASE_URL=postgres://... node --test test/api/postgres.test.js`.
 
-### 5. Optional: host the spreadsheet library yourself
+### 5. The spreadsheet library
 
-Excel import and export use SheetJS. By default the app loads version 0.18.5 from
-cdnjs. That version has two published vulnerabilities in file parsing
-(CVE-2023-30533, CVE-2024-22363). Run `scripts/fetch-xlsx.sh` before building to
-serve the patched 0.20.3 from your own server; the app uses it automatically.
+Excel import and export use SheetJS 0.20.3, served by the app itself from
+`apps/web/public/vendor/` and never from a CDN: the Content Security Policy allows scripts from
+this server only. The copy is pinned by hash; `npm run vendor` downloads it again from SheetJS
+and refuses anything that does not match, and a test checks the committed file. Only the
+single-file demo build, opened from disk, fetches it from SheetJS's own CDN.
 
 ## What the server does
 

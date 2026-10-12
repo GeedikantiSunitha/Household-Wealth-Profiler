@@ -58,7 +58,7 @@ test('everything except the health check needs a login', async () => {
   assert.equal((await fetch(BASE + '/api/households')).status, 401);
   assert.equal((await fetch(BASE + '/api/me', { headers: auth('sam', 'wrong') })).status, 401);
   const r = await fetch(BASE + '/api/me', { headers: SAM });
-  assert.deepEqual(await r.json(), { user: 'sam', encrypted: true });
+  assert.deepEqual(await r.json(), { user: 'sam', encrypted: true, production: false });
   assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
 });
 

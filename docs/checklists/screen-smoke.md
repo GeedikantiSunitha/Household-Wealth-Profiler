@@ -61,7 +61,7 @@ Use `npm run dev` (demo / demo, data in `./data-dev`) at http://localhost:8080.
 7. **PostgreSQL mode:** `npm start` (settings from `.env`): the start-up line says `data in PostgreSQL …`, sign in, open a household, change a field, see "All changes saved"; then in Firm settings change the firm name and see it saved after a reload.
 8. **Browser-only mode:** run `npm run build` and open `dist/wealth-profiler.html` straight from the disk (no server; it has the rules built in): the sample loads, the header shows "Working as", and the save state says "Saved in this browser only".
 
-Excel needs the internet (SheetJS loads from cdnjs) unless `scripts/fetch-xlsx.sh` has been run.
+Excel import and export use the spreadsheet library the app serves itself (`apps/web/public/vendor/`); no internet is needed.
 
 ## 3. Record the result
 

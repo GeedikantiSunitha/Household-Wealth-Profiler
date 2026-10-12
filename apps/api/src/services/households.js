@@ -27,7 +27,9 @@ function summarise(HWP, rec) {
   return { id: rec.id, name: s.household.name, reference: s.household.reference, stage, rating, nextReview, blockers, due, overdue, tasks: HWP.openTasks(s), version: rec.version, updatedAt: rec.updatedAt, updatedBy: rec.updatedBy };
 }
 
-function createHouseholdService({ store, HWP, now = () => new Date().toISOString(), newId = () => crypto.randomUUID(), log = (...a) => console.error(new Date().toISOString(), ...a) }) {
+function createHouseholdService({ store, HWP, now = () => new Date().toISOString(), newId = () => crypto.randomUUID(), log = (...a) => console.error(new Date().toISOString(), ...a), production = false }) {
+  // The sample household is for trying the app; a production server keeps real client files only
+  const refuseSample = s => { if (production && s.isSample) throw Object.assign(new Error('Sample households are not allowed in production'), { status: 400 }); };
   // One write at a time per household
   const locks = new Map();
   function withLock(id, fn) {
@@ -47,8 +49,9 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
       return list;
     },
 
-    create(state, user, { idempotencyKey } = {}) {
+    async create(state, user, { idempotencyKey } = {}) {
       const s = clean(state);
+      refuseSample(s);
       const ts = now();
       const rec = { id: newId(), version: 1, state: s, createdAt: ts, createdBy: user, updatedAt: ts, updatedBy: user };
       const idem = idempotencyKey ? { user, key: idempotencyKey } : null;
@@ -63,11 +66,12 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
       return (await store.audit(id)).slice(0, AUDIT_LIMIT);
     },
 
-    save(id, { version, state } = {}, user) {
+    async save(id, { version, state } = {}, user) {
+      const s = clean(state);
+      refuseSample(s);
       return withLock(id, () => store.update(id, rec => {
         if (!rec) return { result: { notFound: true } };
         if (+version !== rec.version) return { result: { conflict: { version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt } } };
-        const s = clean(state);
         const ts = now();
         const changes = HWP.diff(rec.state, s).map(c => ({ ts, user, ...c, version: rec.version + 1 }));
         if (!changes.length) return { result: { version: rec.version, changes: 0 } };

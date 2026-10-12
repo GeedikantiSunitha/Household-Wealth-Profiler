@@ -33,7 +33,7 @@ by setting the repository variable `CODEQL` to `1`.
 - **Tests:** `npm test` runs the rules (`test/unit`), the API in both storage modes (`test/api`), database migrations (`test/db`) and the Supabase edition. Set `TEST_DATABASE_URL` to an empty scratch database to include the PostgreSQL tests; never point it at a real database. Add a test with every fix.
 - **Dependencies:** the only runtime dependency is `pg` (used only when `DATABASE_URL` is set). Development dependencies are PGlite (tests) and esbuild (bundles the interface's modules for `npm run build`; never shipped). Keep it that way unless agreed.
 - **Tax year:** the bands and allowances in `packages/core/core.js` (`assumptions` defaults) need checking against HMRC each April.
-- **Spreadsheet library:** see the README (step 5 under Deploy) for the patched SheetJS version.
+- **Spreadsheet library:** SheetJS is vendored in `apps/web/public/vendor/` and pinned by hash. To upgrade, change the version, URL and hash in `scripts/vendor.js`, run `npm run vendor`, and commit the result; a test checks the committed file.
 - **Secrets:** never commit `.env`, `AUTH_USERS`, `DATA_KEY` or Supabase keys. `.gitignore` covers the usual files, but check `git status` before committing.
 - **Client data:** never put real client data in the repository, in tests, or in the sample household.
 
