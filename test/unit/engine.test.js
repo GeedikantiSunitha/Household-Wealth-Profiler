@@ -5,6 +5,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const H = require('../../packages/core/core.js');
 
+// The rules depend on today's date (reviews, expiries, the sample household's own dates). Every test
+// runs on the same fixed day, so results never change with the calendar.
+test.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-10T10:00:00Z') });
+
 const VAL = '2026-10-08';
 // A household where survival is effectively certain (modal age 200),
 // so present values can be checked against simple annuity formulas.
