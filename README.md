@@ -230,6 +230,7 @@ serve the patched 0.20.3 from your own server; the app uses it automatically.
 | Audit trail | The server compares each save with the previous version and logs who changed which field, when, from what and to what |
 | Retention | There is no delete endpoint. The Money Laundering Regulations require records for 5 years after the relationship ends. Handle erasure requests through an admin process |
 | Web security | Content Security Policy, no framing, same-origin check on writes, 2 MB request limit, input is filtered to known fields |
+| Operations | `/healthz` (the process is up) and `/readyz` (storage answers) for the host's checks; on SIGTERM requests in flight finish before the process exits. With `NODE_ENV=production` the server refuses to start with files instead of PostgreSQL, without encryption, without HTTPS, or with Basic sign-in |
 
 ## Onboarding rules
 

@@ -46,6 +46,12 @@ function apiContract(ctx) {
       assert.match(r.headers.get('content-type'), /^application\/json/);
     });
 
+    test('readiness: /readyz is 200 {ok:true} without signing in when storage answers', async () => {
+      const r = await call('GET', '/readyz');
+      assert.equal(r.status, 200);
+      assert.deepEqual(await r.json(), { ok: true });
+    });
+
     test('every reply carries the security headers', async () => {
       for (const r of [await call('GET', '/healthz'), await call('GET', '/api/me', { who: sam }), await call('GET', '/', { who: sam })]) {
         assert.match(r.headers.get('content-security-policy'), /default-src 'self'/);
@@ -213,6 +219,12 @@ function apiContract(ctx) {
       assert.equal(r.status, 403); assert.deepEqual(await r.json(), { error: 'Cross-site request refused' });
       r = await call('POST', '/api/households', { who: sam, body: '{not json' });
       assert.equal(r.status, 400); assert.deepEqual(await r.json(), { error: 'Invalid JSON' });
+      r = await call('POST', '/api/households', { who: sam, body: { state: sent }, headers: { Origin: 'null' } });
+      assert.equal(r.status, 403); assert.deepEqual(await r.json(), { error: 'Cross-site request refused' });
+      for (const p of ['//', '/%E0%A4%A']) {
+        r = await call('GET', p, { who: sam });
+        assert.equal(r.status, 400, p); assert.deepEqual(await r.json(), { error: 'Bad request' });
+      }
     });
 
     test('the app files are served with their types', async () => {

@@ -10,9 +10,9 @@ API does. `server.js` at the project root is now a one-line pointer to `src/main
 
 | Path | Holds |
 | --- | --- |
-| `src/main.js` | Start-up: loads the settings, builds each layer, starts listening; runs the commands |
-| `src/app.js` | The request pipeline, in order: `/healthz`, sign-in, static files, the write check, routes, 404 |
-| `src/config/` | Reads `.env` (never overriding the environment) and checks every setting; refuses to start when one is missing or wrong |
+| `src/main.js` | Start-up: loads the settings, builds each layer, starts listening; runs the commands. On SIGTERM it lets requests in flight finish, then exits |
+| `src/app.js` | The request pipeline, in order: `/healthz` and `/readyz` (storage answers), sign-in, static files, the write check, routes, 404 |
+| `src/config/` | Reads `.env` (never overriding the environment) and checks every setting; refuses to start when one is missing or wrong. With `NODE_ENV=production` it also refuses the file store, plaintext storage, plain HTTP and Basic sign-in |
 | `src/http/` | Security headers, JSON replies and body limits (`respond.js`), static files (`static.js`), the same-site and JSON check on writes (`guards.js`) |
 | `src/auth/` | Sign-in: Basic, under `providers/basic/` (scrypt hashes, lockout after 10 failures for 15 minutes) |
 | `src/routes/` | One file per route group (`me.js`, `households.js`, `firm.js`, `prices.js`); reads input, calls the service, replies |

@@ -56,6 +56,29 @@ test('start-up refusals keep their exact messages', () => {
     { message: 'DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.' });
 });
 
+test('NODE_ENV=production refuses files, plaintext, plain HTTP and Basic sign-in', () => {
+  const prod = extra => load({ env: { NODE_ENV: 'production', DATA_KEY: KEY, DATABASE_URL: 'postgres://x', ...extra }, root: root() });
+  assert.throws(() => prod({ DATABASE_URL: '' }),
+    { message: 'NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.' });
+  assert.throws(() => prod({ DATA_KEY: '', ALLOW_PLAINTEXT: '1' }),
+    { message: 'NODE_ENV=production: ALLOW_PLAINTEXT is not accepted. Set DATA_KEY so client records are encrypted.' });
+  assert.throws(() => prod({ HSTS: '0' }),
+    { message: 'NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.' });
+  assert.throws(() => prod({ AUTH_USERS: USER }),
+    { message: "NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in." });
+  // Until the app's own sign-in exists (Phase 2) there is no way to sign in to a production server
+  assert.throws(() => prod({}), /No users configured/);
+  assert.equal(ok().production, false, 'NODE_ENV unset is not production');
+  assert.equal(ok({ NODE_ENV: 'development', ALLOW_PLAINTEXT: '1', DATA_KEY: '' }).production, false);
+});
+
+test('a malformed AUTH_USERS entry is refused at start-up, not as a server error at sign-in', () => {
+  for (const bad of [`sam:${'ab'.repeat(16)}:${'cd'.repeat(63)}`, `sam:${'ab'.repeat(15)}:${'cd'.repeat(64)}`, `sam:${'zz'.repeat(16)}:${'cd'.repeat(64)}`]) {
+    assert.throws(() => parseUsers(bad), { message: 'AUTH_USERS entry for "sam" is malformed: expected name:salt:hash exactly as printed by node server.js hash-password.' }, bad);
+  }
+  assert.throws(() => load({ env: { AUTH_USERS: `sam:${'ab'.repeat(16)}:${'cd'.repeat(63)}`, DATA_KEY: KEY }, root: root() }), /malformed/);
+});
+
 test('ALLOW_PLAINTEXT=1 runs without a key; import-files runs without users', () => {
   assert.equal(load({ env: { AUTH_USERS: USER, ALLOW_PLAINTEXT: '1' }, root: root() }).key, null);
   assert.equal(load({ env: { DATA_KEY: KEY }, root: root(), command: 'import-files' }).users.size, 0);

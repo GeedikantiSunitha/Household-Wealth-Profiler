@@ -66,6 +66,8 @@ function createFileStore(dir, { seal, open }) {
   return {
     describe: 'data in ' + dir,
     async init() { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); },
+    // For /readyz: the data folder is there and writable
+    async ready() { await fsp.access(dir, fs.constants.W_OK); },
     ids,
     async list() { const out = []; for (const id of await ids()) { const rec = await readRecord(id); if (rec) out.push(rec); } return out; },
     get: readRecord,

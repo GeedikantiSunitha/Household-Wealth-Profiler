@@ -32,6 +32,8 @@ function createPgStore(url, { seal, open, poolMax, migrationsDir }) {
   return {
     describe: 'data in ' + where,
     init: () => runMigrations(pool, migrationsDir),
+    // For /readyz: the database answers
+    ready: async () => { await pool.query('select 1'); },
     async list() { return (await pool.query('select doc from households')).rows.map(r => JSON.parse(open(r.doc))); },
     async get(id) { const r = (await pool.query('select doc from households where id = $1', [id])).rows[0]; return r ? JSON.parse(open(r.doc)) : null; },
     async create(rec, audit) {

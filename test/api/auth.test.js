@@ -11,7 +11,8 @@ const basic = (name, pass) => 'Basic ' + Buffer.from(`${name}:${pass}`, 'utf8').
 const req = (authorization, ip = '10.0.0.1', headers = {}) => ({ headers: { ...(authorization ? { authorization } : {}), ...headers }, socket: { remoteAddress: ip } });
 function setup(clientIpHeader = '') {
   const clock = { t: Date.parse('2026-10-10T10:00:00Z') };
-  return { clock, auth: createBasicAuth({ users: USERS, clientIpHeader, now: () => clock.t }).authenticate };
+  const a = createBasicAuth({ users: USERS, clientIpHeader, now: () => clock.t });
+  return { clock, auth: a.authenticate, stats: a.stats };
 }
 const fail = (auth, ip, n) => { for (let i = 0; i < n; i++) assert.equal(auth(req(basic('sam', 'nope' + i), ip)), null); };
 
@@ -78,6 +79,33 @@ test('after a lock runs out, the count starts again from one', () => {
   clock.t += LOCK_MS;
   fail(auth, '10.0.0.1', 9);
   assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam' }, '9 new failures are not enough');
+});
+
+test('failures older than 15 minutes no longer count towards the lock', () => {
+  const { auth, clock } = setup();
+  fail(auth, '10.0.0.1', 9);
+  clock.t += LOCK_MS + 1;
+  fail(auth, '10.0.0.1', 9);
+  assert.deepEqual(auth(req(basic('sam', 'correct horse'))), { user: 'sam' }, '9 old and 9 recent failures are not 10 recent ones');
+});
+
+test('an unknown name takes as long to refuse as a wrong password, so replies do not reveal which names exist', () => {
+  const { auth } = setup();
+  const ms = fn => { const s = process.hrtime.bigint(); fn(); return Number(process.hrtime.bigint() - s) / 1e6; };
+  const median = a => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const wrong = median([...Array(7)].map((_, i) => ms(() => auth(req(basic('sam', 'wrong' + i), '10.0.1.' + i)))));
+  const unknown = median([...Array(7)].map((_, i) => ms(() => auth(req(basic('nobody' + i, 'x'), '10.0.2.' + i)))));
+  assert.ok(unknown > wrong * 0.5, `unknown name ${unknown.toFixed(1)} ms, wrong password ${wrong.toFixed(1)} ms`);
+});
+
+test('old failures and expired logins are pruned, so the maps never grow for ever', () => {
+  const { auth, clock, stats } = setup();
+  for (let i = 0; i < 50; i++) auth(req(basic('sam', 'nope'), '10.1.0.' + i));
+  auth(req(basic('sam', 'correct horse'), '10.2.0.1')); auth(req(basic('chris', 'pa:ss:word'), '10.2.0.2')); auth(req(basic('zoë', 'ünïcode ✓'), '10.2.0.3'));
+  assert.deepEqual(stats(), { failures: 50, cached: 3 });
+  clock.t += LOCK_MS + 1; // nothing has been touched for over 15 minutes
+  auth(req());
+  assert.deepEqual(stats(), { failures: 0, cached: 0 });
 });
 
 test('behind a proxy: the configured header is the address; without the setting it is ignored', () => {

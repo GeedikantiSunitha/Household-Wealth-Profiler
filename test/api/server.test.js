@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn, execFileSync } = require('node:child_process');
+const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -28,6 +29,29 @@ test.before(async () => {
   throw new Error('server did not start');
 });
 test.after(() => { proc.kill(); fs.rmSync(DATA, { recursive: true, force: true }); });
+
+// Windows delivers no signals (process.kill ends the process outright), so this runs on Linux and macOS, including CI
+test('SIGTERM: no new connections, the request in flight finishes, then the process exits 0', { skip: process.platform === 'win32' && 'no signals on Windows' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-stop-'));
+  const port = PORT + 7, env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', ALPHAVANTAGE_KEY: '', AUTH_USERS: user('sam', 'correct horse') };
+  const p = spawn(process.execPath, ['server.js'], { cwd: ROOT, env, stdio: 'pipe' });
+  try {
+    for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+    const body = JSON.stringify({ state: H.sample() });
+    const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/api/households', headers: { ...SAM, ...J, 'Content-Length': Buffer.byteLength(body) } });
+    const reply = new Promise(ok => req.on('response', res => { let t = ''; res.on('data', d => t += d); res.on('end', () => ok({ status: res.statusCode, body: t })); }));
+    req.write(body.slice(0, 200)); // an upload that is still in progress when the signal arrives
+    await new Promise(r => setTimeout(r, 200));
+    const exited = new Promise(ok => p.on('exit', ok));
+    p.kill('SIGTERM');
+    await new Promise(r => setTimeout(r, 300));
+    await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`), 'a new connection is refused while stopping');
+    req.end(body.slice(200));
+    const r = await reply;
+    assert.equal(r.status, 201, 'the request in flight was answered: ' + r.body);
+    assert.equal(await exited, 0, 'exit code 0 after a clean stop');
+  } finally { p.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('everything except the health check needs a login', async () => {
   assert.equal((await fetch(BASE + '/')).status, 401);

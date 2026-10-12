@@ -1,5 +1,6 @@
 /* The app's own files from public/, plus /core.js from packages/core (the one copy of the rules).
-   Nothing outside public/ can be read: such paths, like missing files, are 404. */
+   Nothing outside public/ can be read: such paths, like missing files, are 404. A path whose
+   percent-encoding is broken is 400. */
 'use strict';
 const fsp = require('fs').promises;
 const path = require('path');
@@ -8,7 +9,9 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 
 function createStatic({ publicDir, coreFile, send }) {
   return async function serveStatic(req, res, pathname) {
-    const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+    let decoded;
+    try { decoded = decodeURIComponent(pathname); } catch (e) { return send(res, 400, { error: 'Bad request' }); }
+    const rel = pathname === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
     const file = rel === 'core.js' ? coreFile : path.resolve(publicDir, rel);
     if (file !== coreFile && !file.startsWith(publicDir + path.sep)) return send(res, 404, { error: 'Not found' });
     try {
