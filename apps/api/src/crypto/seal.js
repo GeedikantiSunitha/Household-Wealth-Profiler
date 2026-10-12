@@ -3,9 +3,12 @@
    - AES-256-GCM with a random 12-byte IV per write, stored as base64(IV, 16-byte tag, ciphertext).
    - "enc:v1:" records are sealed with the master key (DATA_KEY) directly: everything written before
      tenancy. They still open as they are.
-   - "enc:v2:" records are sealed with a firm's own data key. Each firm's key is random and stored
-     wrapped by the master key ("wk:v1:", envelope encryption): the master never touches records,
-     one firm's key opens nothing of another firm's, and a firm's key can be retired on its own.
+   - "enc:v2:" records are sealed with a key derived from the firm's own data key. Each firm's key
+     is random and stored wrapped by the master key ("wk:v1:", envelope encryption): the master
+     never touches records, one firm's key opens nothing of another firm's, and a firm's key can
+     be retired on its own. Two keys are derived from it with distinct labels (HKDF-SHA256):
+     "hwp record key v1" for sealing records and "hwp reference index v1" for the reference index,
+     so neither use can learn anything about the other. The labels are part of the stored format.
    - Without a key (ALLOW_PLAINTEXT, local testing only) text is stored as it is, and text that was
      stored that way always opens as it is.
    The reference index: a keyed hash (HMAC-SHA256) of a client reference in its normalised form,
@@ -44,11 +47,16 @@ function createSealer(key) {
   return { seal, open, key };
 }
 
-// A firm's sealer: seals v2 with the firm key; opens v2 (firm key), v1 (master) and plain text
+const derive = (firmKey, label) => Buffer.from(crypto.hkdfSync('sha256', firmKey, '', label, 32));
+const recordKeyFor = firmKey => derive(firmKey, 'hwp record key v1');
+const indexKeyFor = firmKey => derive(firmKey, 'hwp reference index v1');
+
+// A firm's sealer: seals v2 with the firm's record key; opens v2, v1 (master) and plain text
 function createFirmSealer({ master, firmKey }) {
-  function seal(text) { return firmKey ? PREFIX_V2 + encrypt(firmKey, Buffer.from(text, 'utf8')) : text; }
+  const recordKey = firmKey ? recordKeyFor(firmKey) : null;
+  function seal(text) { return recordKey ? PREFIX_V2 + encrypt(recordKey, Buffer.from(text, 'utf8')) : text; }
   function open(text) {
-    if (text.startsWith(PREFIX_V2)) { if (!firmKey) throw new Error(NO_KEY); return decrypt(firmKey, text.slice(PREFIX_V2.length)).toString('utf8'); }
+    if (text.startsWith(PREFIX_V2)) { if (!recordKey) throw new Error(NO_KEY); return decrypt(recordKey, text.slice(PREFIX_V2.length)).toString('utf8'); }
     if (text.startsWith(PREFIX)) { if (!master) throw new Error(NO_KEY); return decrypt(master, text.slice(PREFIX.length)).toString('utf8'); }
     return text;
   }
@@ -71,10 +79,9 @@ function normaliseReference(ref) {
   const s = String(ref).normalize('NFKC').trim().replace(/\s+/g, ' ').toUpperCase();
   return s || null;
 }
-const indexKeyFor = firmKey => Buffer.from(crypto.hkdfSync('sha256', firmKey, '', 'hwp reference index', 32));
 function referenceIndex(indexKey, ref) {
   const n = normaliseReference(ref);
   return n === null ? null : crypto.createHmac('sha256', indexKey).update(n, 'utf8').digest('hex');
 }
 
-module.exports = { createSealer, createFirmSealer, newDataKey, wrapKey, unwrapKey, normaliseReference, referenceIndex, indexKeyFor, PREFIX, PREFIX_V2 };
+module.exports = { createSealer, createFirmSealer, newDataKey, wrapKey, unwrapKey, normaliseReference, referenceIndex, indexKeyFor, recordKeyFor, PREFIX, PREFIX_V2 };

@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createSealer, createFirmSealer, newDataKey, wrapKey, unwrapKey, normaliseReference, referenceIndex, indexKeyFor, PREFIX, PREFIX_V2 } = require('../../apps/api/src/crypto/seal.js');
+const { createSealer, createFirmSealer, newDataKey, wrapKey, unwrapKey, normaliseReference, referenceIndex, indexKeyFor, recordKeyFor, PREFIX, PREFIX_V2 } = require('../../apps/api/src/crypto/seal.js');
 
 const KEY = Buffer.alloc(32, 7); // test key only
 const PLAIN = '{"id":"vector","name":"Harrington household","ni":"QQ123456C"}';
@@ -78,6 +78,23 @@ test('firm sealer: seals as enc:v2 with the firm key; opens enc:v1 with the mast
   const none = createFirmSealer({ master: null, firmKey: null });
   assert.equal(none.seal(PLAIN), PLAIN); assert.equal(none.open(PLAIN), PLAIN);
   assert.throws(() => none.open(s), { message: 'Data is encrypted but DATA_KEY is not set' });
+});
+
+test("the record key and the index key are derived from the firm's key with distinct labels; neither is the firm key", () => {
+  const firmKey = Buffer.alloc(32, 1);
+  const record = recordKeyFor(firmKey), index = indexKeyFor(firmKey);
+  assert.equal(record.length, 32); assert.equal(index.length, 32);
+  assert.notEqual(record.toString('hex'), firmKey.toString('hex'));
+  assert.notEqual(index.toString('hex'), firmKey.toString('hex'));
+  assert.notEqual(record.toString('hex'), index.toString('hex'));
+  // The labels are part of the stored-data format: a change would make every record unreadable
+  assert.equal(record.toString('hex'), Buffer.from(crypto.hkdfSync('sha256', firmKey, '', 'hwp record key v1', 32)).toString('hex'));
+  assert.equal(index.toString('hex'), Buffer.from(crypto.hkdfSync('sha256', firmKey, '', 'hwp reference index v1', 32)).toString('hex'));
+  // A record sealed by the firm sealer is sealed with the derived record key, not the firm key itself
+  const f = createFirmSealer({ master: KEY, firmKey });
+  const sealed = f.seal(PLAIN);
+  assert.equal(createFirmSealer({ master: KEY, firmKey }).open(sealed), PLAIN);
+  assert.throws(() => createSealer(firmKey).open(PREFIX + sealed.slice(PREFIX_V2.length)), 'the raw firm key does not open it');
 });
 
 test('reference index: the same reference in any spelling gives one index per firm, different per firm; empty has none', () => {
