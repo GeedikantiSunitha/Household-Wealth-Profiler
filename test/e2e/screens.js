@@ -260,6 +260,17 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       }
     });
     // Data entered while served by the server must never fall back to this browser's storage
+    await step('a double-click on "New household" creates one household, not two', async () => {
+      await click('#btnClients');
+      await until(`document.querySelector('#main h2')?.textContent === 'Households' && !!document.querySelector('.clients')`, 'the client list');
+      const before = await js(`document.querySelectorAll('.clients tbody tr').length`);
+      await js(`(() => { const b = document.querySelector('[data-act="newBlank"]'); b.click(); b.click(); return true; })()`);
+      await until(`document.querySelector('[data-nav="household"]')?.getAttribute('aria-current') === 'true'`, 'the new household');
+      await click('#btnClients');
+      await until(`document.querySelectorAll('.clients tbody tr').length > ${before}`, 'the list to grow');
+      const after = await js(`document.querySelectorAll('.clients tbody tr').length`);
+      if (after !== before + 1) throw new Error(`${after - before} households were created`);
+    });
     for (const [how, label] of [['down', 'the server is unreachable'], ['html', 'something other than the server answers']]) {
       await step(`when ${label} at start-up: an error, and no browser-only saving`, async () => {
         breakMe = how;

@@ -94,6 +94,21 @@ function apiContract(ctx) {
       id = j.id;
     });
 
+    test('POST with the same Idempotency-Key twice: the same reply, one household; a bad key is 400', async () => {
+      const key = 'contract-' + crypto.randomUUID();
+      const st = H.blank(); st.household.name = 'Once only ' + key.slice(-6);
+      const before = (await (await call('GET', '/api/households', { who: sam })).json()).length;
+      const a = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });
+      const b = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } });
+      assert.equal(a.status, 201); assert.equal(b.status, 201);
+      assert.deepEqual(await b.json(), await a.json());
+      const after = (await (await call('GET', '/api/households', { who: sam })).json()).length;
+      assert.equal(after, before + 1);
+      const bad = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': 'no spaces allowed' } });
+      assert.equal(bad.status, 400);
+      assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' });
+    });
+
     test('GET /api/households/:id: the record with the normalised state', async () => {
       const r = await call('GET', '/api/households/' + id, { who: sam });
       assert.equal(r.status, 200);

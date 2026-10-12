@@ -30,6 +30,7 @@ It fails if any of these goes wrong:
 | Tasks, Firm settings | The firm-wide tasks board and the firm settings screen render |
 | Edit conflict | A save after someone else's shows "Someone else saved this household…" and "Not saved: newer version exists"; "Reload their version" loads theirs |
 | Top bar | "Export JSON" downloads the open household |
+| Double-click | Two quick clicks on "New household" create one household, not two |
 | Phone width | Household, balance sheet and KYC captured at 390 px (page width recorded in the report) |
 | Server unreachable at start-up | When the start-up call fails, or something other than the server answers, the app shows "Cannot open the profiler" and no data-entry field: it never falls back to saving in the browser |
 

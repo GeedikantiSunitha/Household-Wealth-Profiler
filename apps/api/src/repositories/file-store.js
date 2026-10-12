@@ -4,6 +4,7 @@
      households/<id>/audit.log           one sealed audit entry per line, oldest first
      households/firm/...                 the firm settings, in the same three forms (the list only
                                          reads folders named by a household id, so it never shows)
+     idempotency/<sha256(user:key)>.json the reply to a create, kept a day so a repeat returns it
    Records and audit entries are sealed (encrypted when DATA_KEY is set) before they are written.
    Writes go to a temporary file first and are then renamed, so a crash never leaves half a file. */
 'use strict';
@@ -13,8 +14,27 @@ const path = require('path');
 const crypto = require('crypto');
 const { ID_RE } = require('./ids.js');
 
+const IDEM_TTL_MS = 24 * 3600e3;
+
 function createFileStore(dir, { seal, open }) {
   const hhDir = id => path.join(dir, 'households', id);
+  const idemDir = path.join(dir, 'idempotency');
+  const idemFile = (user, key) => path.join(idemDir, crypto.createHash('sha256').update(`${user}:${key}`).digest('hex') + '.json');
+  // The reply stored for this user and key within the last day, else null
+  async function recallIdem(user, key) {
+    const f = idemFile(user, key);
+    try {
+      const st = await fsp.stat(f);
+      if (Date.now() - st.mtimeMs > IDEM_TTL_MS) return null;
+      return JSON.parse(await fsp.readFile(f, 'utf8'));
+    } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  }
+  async function rememberIdem(user, key, reply) {
+    await writeAtomic(idemFile(user, key), JSON.stringify(reply));
+    for (const f of await fsp.readdir(idemDir)) { // keys past their day go
+      try { const st = await fsp.stat(path.join(idemDir, f)); if (Date.now() - st.mtimeMs > IDEM_TTL_MS) await fsp.unlink(path.join(idemDir, f)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    }
+  }
   async function writeAtomic(file, text) {
     await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     const tmp = file + '.' + crypto.randomBytes(4).toString('hex') + '.tmp';
@@ -69,10 +89,25 @@ function createFileStore(dir, { seal, open }) {
     // For /readyz: the data folder is there and writable
     async ready() { await fsp.access(dir, fs.constants.W_OK); },
     ids,
-    async list() { const out = []; for (const id of await ids()) { const rec = await readRecord(id); if (rec) out.push(rec); } return out; },
+    // A record that cannot be read (a wrong key, a damaged file) is left out and reported, so one
+    // bad record does not hide every other household
+    async list({ onUnreadable = (id, e) => console.error(new Date().toISOString(), `unreadable household ${id}:`, e.message) } = {}) {
+      const out = [];
+      for (const id of await ids()) {
+        try { const rec = await readRecord(id); if (rec) out.push(rec); } catch (e) { onUnreadable(id, e); }
+      }
+      return out;
+    },
     get: readRecord,
     versions: readVersions,
-    async create(rec, audit) { await writeRecord(rec); await appendAudit(rec.id, audit); },
+    async create(rec, audit, idem) {
+      if (idem) { const prev = await recallIdem(idem.user, idem.key); if (prev) return prev; }
+      await writeRecord(rec);
+      await appendAudit(rec.id, audit);
+      const reply = { id: rec.id, version: rec.version };
+      if (idem) await rememberIdem(idem.user, idem.key, reply);
+      return reply;
+    },
     async update(id, decide) {
       const out = await decide(await readRecord(id));
       if (out.next) { await writeRecord(out.next); await appendAudit(id, out.audit || []); }

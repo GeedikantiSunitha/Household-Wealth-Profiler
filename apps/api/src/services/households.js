@@ -1,8 +1,11 @@
 /* Households: the work behind the API, independent of HTTP. Uses packages/core for every rule
    (normalising what is saved, the field-level diff for the audit trail, the client-list summary)
    and a store from repositories/ for keeping it.
-     list()                       client-list summaries, most recently changed first
-     create(state, user)          { id, version: 1 }
+     list()                       client-list summaries, most recently changed first; a record that
+                                  cannot be read is logged with its id and left out
+     create(state, user, { idempotencyKey })
+                                  { id, version: 1 }; the same user and key again within a day
+                                  (a double-click, a retried request) returns the first reply
      get(id)                      the record, or null
      audit(id)                    audit entries newest first (at most 5000), or null if no household
      save(id, { version, state }, user)
@@ -24,7 +27,7 @@ function summarise(HWP, rec) {
   return { id: rec.id, name: s.household.name, reference: s.household.reference, stage, rating, nextReview, blockers, due, overdue, tasks: HWP.openTasks(s), version: rec.version, updatedAt: rec.updatedAt, updatedBy: rec.updatedBy };
 }
 
-function createHouseholdService({ store, HWP, now = () => new Date().toISOString(), newId = () => crypto.randomUUID() }) {
+function createHouseholdService({ store, HWP, now = () => new Date().toISOString(), newId = () => crypto.randomUUID(), log = (...a) => console.error(new Date().toISOString(), ...a) }) {
   // One write at a time per household
   const locks = new Map();
   function withLock(id, fn) {
@@ -38,17 +41,19 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
 
   return {
     async list() {
-      const list = (await store.list()).map(rec => summarise(HWP, rec));
+      const records = await store.list({ onUnreadable: (id, e) => log(`unreadable household ${id}: ${e.message}`) });
+      const list = records.map(rec => summarise(HWP, rec));
       list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
       return list;
     },
 
-    async create(state, user) {
+    create(state, user, { idempotencyKey } = {}) {
       const s = clean(state);
       const ts = now();
       const rec = { id: newId(), version: 1, state: s, createdAt: ts, createdBy: user, updatedAt: ts, updatedBy: user };
-      await withLock(rec.id, () => store.create(rec, [{ ts, user, field: 'created', from: '', to: s.household.name || '' }]));
-      return { id: rec.id, version: rec.version };
+      const idem = idempotencyKey ? { user, key: idempotencyKey } : null;
+      // Repeats with the same key queue behind each other, so the second sees the first's reply
+      return withLock(idem ? `create:${user}:${idempotencyKey}` : rec.id, () => store.create(rec, [{ ts, user, field: 'created', from: '', to: s.household.name || '' }], idem));
     },
 
     get: id => store.get(id),

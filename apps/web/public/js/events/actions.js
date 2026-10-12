@@ -14,6 +14,7 @@ import { TASKF } from '../views/tasks.js';
 
 const H = window.HWP; const { SCHEMA, fieldsOf } = H;
 
+let creating=false; // a create in flight (see newBlank / newSample)
 export function resetUI(confirming){$('#resetWrap').innerHTML=confirming?`<span class="confirm"><span class="muted" style="font-size:12.5px">Clear all data?</span><button class="btn primary" type="button" data-act="confirmReset">Clear</button><button class="btn" type="button" data-act="loadSample">Load sample</button><button class="btn ghost" type="button" data-act="cancelReset">Cancel</button></span>`:`<button class="btn ghost" id="btnReset" type="button">Start blank</button>`;
   if(!confirming)$('#btnReset').onclick=()=>resetUI(true)}
 document.addEventListener('click',async e=>{
@@ -59,7 +60,9 @@ document.addEventListener('click',async e=>{
   if(act==='loadSample'){setState(H.sample());Store.saveLocal();resetUI(false);render();toast('Sample household loaded');return}
   if(act==='cancelReset'){resetUI(false);return}
   if(act==='openHousehold'){try{await Store.open(b.dataset.id);state.banner=null;state.VIEW=b.dataset.view||'kyc';state.OPEN.clear();state.OPEN.add('members:0');render()}catch(err){toast('Could not open the household: '+err.message)}return}
-  if(act==='newBlank'||act==='newSample'){try{const st=act==='newSample'?H.sample():H.blank();st.isSample=act==='newSample';await Store.create(st);setState(H.normalise(st));state.VIEW='household';state.banner=null;render()}catch(err){toast('Could not create the household: '+err.message)}return}
+  if(act==='newBlank'||act==='newSample'){if(creating)return;creating=true;b.disabled=true; // a second click while the first create is in flight does nothing
+    try{const st=act==='newSample'?H.sample():H.blank();st.isSample=act==='newSample';await Store.create(st);setState(H.normalise(st));state.VIEW='household';state.banner=null;render()}catch(err){toast('Could not create the household: '+err.message)}
+    finally{creating=false;b.disabled=false}return}
   if(act==='reloadHousehold'){try{await Store.open(Store.id);Store.err=null;state.banner=null;render();toast('Loaded the latest version')}catch(err){toast(err.message)}return}
 });
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.card-h')){e.preventDefault();e.target.click()}});

@@ -36,7 +36,7 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
   },
   loadLocal(){try{const r=localStorage.getItem(LS);return r?window.HWP.normalise(JSON.parse(r)):null}catch(e){return null}},
   saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state.S))}catch(e){}},
-  async api(method,path,body){const headers={'Accept':'application/json'};if(body)headers['Content-Type']='application/json';
+  async api(method,path,body,extraHeaders){const headers={'Accept':'application/json',...(extraHeaders||{})};if(body)headers['Content-Type']='application/json';
     if(this.cloud){headers.Authorization='Bearer '+await this.cloud.token();headers.apikey=CFG.supabaseKey}
     const r=await fetch(this.cloud?CFG.supabaseUrl.replace(/\/+$/,'')+'/functions/v1/api/'+path:'api/'+path,{method,credentials:this.cloud?'omit':'same-origin',headers,body:body?JSON.stringify(body):undefined});
     let j=null;try{j=await r.json()}catch(e){}
@@ -54,7 +54,9 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
       state.banner={cls:'bad',sticky:F.err!=='failed',html:F.err==='conflict'?'<b>Someone else changed the firm settings.</b> Your latest change was not saved. <button class="btn" type="button" data-act="reloadFirm">Reload</button>':F.err==='forbidden'?'Only a firm administrator can change firm settings.':'Firm settings not saved. Retrying when you edit.'};rerender()}
     finally{F.saving=false;saveStatus()}},
   async open(id){const j=await this.api('GET','households/'+encodeURIComponent(id));this.id=j.id;this.version=j.version;setState(window.HWP.normalise(j.state));this.dirty=false;return j},
-  async create(household){const j=await this.api('POST','households',{state:household});this.id=j.id;this.version=j.version;return j},
+  // Each create carries a fresh key, so a double-click or a retried request cannot make a second household
+  async create(household){const key=crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2);
+    const j=await this.api('POST','households',{state:household},{'Idempotency-Key':key});this.id=j.id;this.version=j.version;return j},
   async audit(){return this.mode==='server'&&this.id?this.api('GET','households/'+encodeURIComponent(this.id)+'/audit'):(state.S.audit||[]).slice().reverse()},
   touch(){if(this.mode==='local'){clearTimeout(this.t);this.t=setTimeout(()=>this.saveLocal(),300);return}
     if(!this.id)return;this.dirty=true;saveStatus();clearTimeout(this.t);this.t=setTimeout(()=>this.flush(),1200)},

@@ -13,7 +13,7 @@ const ID = '00000000-0000-4000-8000-000000000001';
 let base, server, calls, logged;
 const households = {
   list: async () => { calls.push('list'); return [{ id: ID }]; },
-  create: async (state, user) => { calls.push(['create', user]); return { id: ID, version: 1 }; },
+  create: async (state, user, opts) => { calls.push(['create', user, opts && opts.idempotencyKey]); return { id: ID, version: 1 }; },
   get: async id => id === ID ? { id: ID, version: 1 } : null,
   audit: async id => id === ID ? [{ field: 'created' }] : null,
   save: async (id, body) => id !== ID ? { notFound: true } : body.version !== 1 ? { conflict: { version: 1, updatedBy: 'x', updatedAt: 't' } } : body.boom ? (() => { throw new Error('secret detail'); })() : { version: 2, changes: 1 },
@@ -84,7 +84,14 @@ test('4. writes: the same-site check comes before the JSON check', async () => {
 test('5. API routes, then 404 for everything else', async () => {
   assert.deepEqual(await (await call('GET', '/api/me')).json(), { user: 'sam', encrypted: true });
   assert.equal((await call('POST', '/api/households', { headers: J, body: '{"state":{}}' })).status, 201);
-  assert.deepEqual(calls, [['create', 'sam']], 'the signed-in user is passed to the service');
+  assert.deepEqual(calls, [['create', 'sam', undefined]], 'the signed-in user is passed to the service');
+  calls = [];
+  assert.equal((await call('POST', '/api/households', { headers: { ...J, 'Idempotency-Key': 'abc-12345' }, body: '{"state":{}}' })).status, 201);
+  assert.deepEqual(calls, [['create', 'sam', 'abc-12345']], 'the Idempotency-Key header reaches the service');
+  calls = [];
+  const bad = await call('POST', '/api/households', { headers: { ...J, 'Idempotency-Key': 'short' }, body: '{"state":{}}' });
+  assert.equal(bad.status, 400); assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' });
+  assert.deepEqual(calls, [], 'a bad key never reaches the service');
   for (const [m, p] of [['GET', '/api/nope'], ['GET', '/api/households/not-a-uuid'], ['GET', `/api/households/${ID.replace('1', '2')}`], ['DELETE', `/api/households/${ID}`]])
     assert.equal((await call(m, p, { headers: J, body: m === 'GET' ? undefined : '{}' })).status, 404, `${m} ${p}`);
 });
