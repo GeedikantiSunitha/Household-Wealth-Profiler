@@ -163,21 +163,29 @@ profiler.yourfirm.co.uk {
 
 ### 4. Optional: keep the data in PostgreSQL
 
-By default the server stores files under `DATA_DIR`. Set `DATABASE_URL` and it uses
-PostgreSQL 14 or later instead. On start-up it applies any new files in [db/migrations](db/migrations)
-in name order and records each one in `schema_migrations` (tables `households`,
-`household_versions`, `audit_log`, and for the firm settings `firm_settings`, `firm_versions`,
-`firm_audit`; `idempotency_keys` holds a day of create keys and no client data). Database triggers refuse any delete or rewrite of households, firm settings,
-versions and audit entries. Rows are encrypted with `DATA_KEY` just like the files, so the
-database never holds readable client data. Saves lock the household's row (or the firm
-settings), so several server processes can share one database safely.
+By default the server stores files under `DATA_DIR` (development only). Set `DATABASE_URL` and
+it uses PostgreSQL 14 or later instead, which production requires. Several firms share one
+database: every row carries its `firm_id`, and row-level security policies in the database show
+a connection only the firm it has set for its transaction, so one firm's data is unreachable
+from another even if application code has a bug. The tables, from [db/migrations](db/migrations):
+`firms`, `users`, `memberships`, `households`, `household_versions`, `audit_log`, the firm
+settings in `firm_records`, `firm_record_versions` and `firm_audit`, `idempotency_keys` (a day of
+create keys, no client data) and `schema_migrations`. Database triggers refuse any delete or
+rewrite of households, firm settings, versions and audit entries. Each firm's records are
+encrypted with the firm's own key, itself stored wrapped by `DATA_KEY`, so the database never
+holds readable client data and the master key never touches a record. Saves lock the household's
+row, so several server processes can share one database safely.
 
-Create a database and a user for the app (run once in `psql` as an administrator):
+Two database roles (run once in `psql` as an administrator):
 
 ```sql
-create user hwp_app with password 'a long random password';
-create database wealth_profiler owner hwp_app;
+create user hwp_owner with password 'a long random password';    -- owns the tables, runs migrations
+create user hwp_app with password 'another long random password'; -- runs the server: owns nothing, cannot bypass row-level security
+create database wealth_profiler owner hwp_owner;
 ```
+
+A database made before these roles existed belongs to the user that created it; hand its tables
+over once, as an administrator: `psql -d wealth_profiler -f db/handover-owner.sql` (ownership only, no data touched).
 
 Then put the settings in `.env` next to `server.js` (copy [.env.example](.env.example)):
 
@@ -185,9 +193,19 @@ Then put the settings in `.env` next to `server.js` (copy [.env.example](.env.ex
 AUTH_USERS=sam:...                 # node server.js hash-password sam 'a long passphrase'
 DATA_KEY=...                       # node server.js gen-key
 DATABASE_URL=postgres://hwp_app:PASSWORD@localhost:5432/wealth_profiler
+DATABASE_OWNER_URL=postgres://hwp_owner:PASSWORD@localhost:5432/wealth_profiler
 ```
 
-Run `npm install` and then `npm start`. The start-up line shows where the data is kept.
+Apply the migrations as the owner, then start the server as the app role:
+
+```sh
+node server.js migrate      # any new db/migrations file, as hwp_owner
+npm start                   # as hwp_app
+```
+
+In development `npm start` applies migrations itself (with `DATABASE_OWNER_URL` when set, else
+`DATABASE_URL`). With `NODE_ENV=production` it never does: it refuses to start while a migration
+is pending, so a schema change is always a deliberate deploy step. The start-up line shows where the data is kept.
 `.env` belongs on the server only, never in `apps/web/public/`: everything there is sent to browsers.
 Add `?sslmode=require` when the database is on another machine, and URL-encode special
 characters in the password.
@@ -198,6 +216,10 @@ audit trail:
 ```sh
 node server.js import-files ./data     # households already in the database are skipped
 ```
+
+A new household whose client reference another household in the firm already has (in any
+spelling) is refused. The index behind that check is a keyed hash, filled in for households saved
+before it existed with `node server.js index-references`.
 
 Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
 keep `DATA_KEY` in a different place from the backups.

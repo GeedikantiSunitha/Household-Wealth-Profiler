@@ -4,7 +4,7 @@
    connection, 15 s per statement, and idle connections are dropped after 30 s. TLS comes from the
    URL (sslmode=verify-full&sslrootcert=... when the database is on another machine). */
 'use strict';
-const { migrate, pgClient } = require('../../../../db/migrate.js');
+const { migrate, pending, pgClient } = require('../../../../db/migrate.js');
 
 const POOL_OPTIONS = { connectionTimeoutMillis: 5000, idleTimeoutMillis: 30000, statement_timeout: 15000, application_name: 'household-wealth-profiler' };
 
@@ -24,11 +24,36 @@ async function tx(pool, fn) {
   finally { c.release(); }
 }
 
-// Applies any new migration files; several processes starting at once take turns
+const logLine = m => console.log(new Date().toISOString(), m);
+
+// Applies any new migration files; several processes starting at once take turns. Nothing is
+// touched when none is pending, so the app role (which may not create tables) starts fine.
 async function runMigrations(pool, dir) {
   const c = await pool.connect();
-  try { await migrate(pgClient(c), { dir, log: m => console.log(new Date().toISOString(), m) }); }
+  try {
+    const db = pgClient(c);
+    if (!(await pending(db, { dir })).length) return [];
+    return await migrate(db, { dir, log: logLine });
+  } catch (e) {
+    if (e.code === '42501') e.message = `${e.message}. Migrations are pending and DATABASE_URL cannot apply them: set DATABASE_OWNER_URL, or run node server.js migrate as the owner.`;
+    throw e;
+  } finally { c.release(); }
+}
+
+// The same, on a separate connection as the owner (DATABASE_OWNER_URL)
+async function migrateWith(url, dir) {
+  const pg = require('pg');
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  try { return await migrate(pgClient(c), { dir, log: logLine }); }
+  finally { await c.end(); }
+}
+
+// The migration files not yet applied, changing nothing
+async function pendingWith(pool, dir) {
+  const c = await pool.connect();
+  try { return await pending(pgClient(c), { dir }); }
   finally { c.release(); }
 }
 
-module.exports = { createPool, tx, runMigrations, POOL_OPTIONS };
+module.exports = { createPool, tx, runMigrations, migrateWith, pendingWith, POOL_OPTIONS };

@@ -50,8 +50,8 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     if (env.AUTH_USERS) throw new Error("NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in.");
   }
   const users = parseUsers(env.AUTH_USERS);
-  // import-files only copies data, so it runs without sign-in users
-  if (!users.size && command !== 'import-files') throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
+  // The data commands run without sign-in users
+  if (!users.size && !['import-files', 'migrate', 'index-references'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
   if (!key && env.ALLOW_PLAINTEXT !== '1') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
@@ -61,6 +61,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     host: env.HOST || '0.0.0.0',
     dataDir: path.resolve(env.DATA_DIR || path.join(root, 'data')),
     databaseUrl: env.DATABASE_URL || '',
+    // The owner connection for migrations (node server.js migrate); the server itself runs as the
+    // app role in DATABASE_URL, which cannot change the schema or bypass row-level security
+    databaseOwnerUrl: env.DATABASE_OWNER_URL || '',
     databasePoolMax: +env.DATABASE_POOL_MAX || 10,
     // Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
     // to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.

@@ -3,16 +3,21 @@
      1. commands that need no settings (hash-password, gen-key)
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
-     4. import-files, or prepare storage (apply migrations) and start listening
+     4. a data command (import-files, migrate, index-references), or prepare storage and start
+        listening. Development applies new migrations itself; production only checks none is
+        pending and refuses to start otherwise (migrations are run as the owner: node server.js
+        migrate with DATABASE_OWNER_URL).
    Any other first argument starts the server, as before.
    On SIGTERM or SIGINT (the host stopping the container, Ctrl-C) the server stops taking new
    connections, lets requests in flight finish, closes storage and exits 0; if that takes longer
    than 10 seconds it exits 1. */
 'use strict';
+const path = require('path');
 const HWP = require('../../../packages/core/core.js');
 const { load } = require('./config');
 const { createSealer } = require('./crypto/seal.js');
-const { createStore } = require('./repositories');
+const { createStore, DEFAULT_FIRM_ID } = require('./repositories');
+const { migrateWith } = require('./db/pool.js');
 const { createHouseholdService } = require('./services/households.js');
 const { createFirmService } = require('./services/firm.js');
 const { createPriceService } = require('./services/prices.js');
@@ -50,6 +55,13 @@ function main([cmd, ...args] = []) {
 
   let config;
   try { config = load({ command: cmd }); } catch (e) { console.error(e.message); process.exit(1); }
+  if (cmd === 'migrate') {
+    const url = config.databaseOwnerUrl || config.databaseUrl;
+    if (!url) { console.error('Set DATABASE_OWNER_URL (or DATABASE_URL) to the database to migrate.'); process.exit(1); }
+    migrateWith(url, path.join(config.root, 'db', 'migrations'))
+      .then(done => { console.log(done.length ? `Applied ${done.length} migration(s): ${done.join(', ')}` : 'No migrations pending.'); }, e => { console.error(e.message); process.exit(1); });
+    return;
+  }
   const sealer = createSealer(config.key);
   let store;
   try { store = createStore(config, sealer); } catch (e) { console.error(e.message); process.exit(1); }
@@ -62,6 +74,13 @@ function main([cmd, ...args] = []) {
   if (cmd === 'import-files') {
     importFiles({ dir: args[0] || config.dataDir, databaseUrl: config.databaseUrl, store, sealer })
       .then(code => { if (code) process.exit(code); }, e => { console.error(e.message); process.exit(1); });
+    return;
+  }
+  if (cmd === 'index-references') {
+    if (!config.databaseUrl) { console.error('Set DATABASE_URL to the database whose reference index to fill.'); process.exit(1); }
+    const firmId = args[0] || DEFAULT_FIRM_ID;
+    store.forFirm(firmId).reindexReferences()
+      .then(async n => { console.log(`${n} household(s) indexed for firm ${firmId}.`); await store.end(); }, async e => { console.error(e.message); await store.end().catch(() => {}); process.exit(1); });
     return;
   }
   store.init().then(() => {

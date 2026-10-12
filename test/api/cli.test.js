@@ -7,6 +7,7 @@ const { spawnSync } = require('node:child_process');
 const { hashPasswordCommand, genKeyCommand } = require('../../apps/api/src/cli');
 const { parseUsers } = require('../../apps/api/src/config');
 const { createBasicAuth } = require('../../apps/api/src/auth/providers/basic');
+const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const USAGE = 'Usage: node server.js hash-password NAME PASSWORD (name without : or ;)';
@@ -17,7 +18,15 @@ test('hash-password prints an AUTH_USERS entry that signs in', t => {
   assert.equal(code, 0); assert.deepEqual(err, []);
   assert.match(out[0], /^dana:[0-9a-f]{32}:[0-9a-f]{128}$/);
   const signIn = createBasicAuth({ users: parseUsers(out[0]) }).authenticate;
-  assert.deepEqual(signIn({ headers: { authorization: 'Basic ' + Buffer.from('dana:s3cret:with colon').toString('base64') }, socket: { remoteAddress: 'x' } }), { user: 'dana' });
+  assert.deepEqual(signIn({ headers: { authorization: 'Basic ' + Buffer.from('dana:s3cret:with colon').toString('base64') }, socket: { remoteAddress: 'x' } }), { user: 'dana', firmId: DEFAULT_FIRM_ID });
+});
+
+test('migrate and index-references need a database setting', () => {
+  const run = args => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, encoding: 'utf8', timeout: 15000, env: { ...process.env, DATABASE_URL: '', DATABASE_OWNER_URL: '', AUTH_USERS: 'x', DATA_KEY: '', ALLOW_PLAINTEXT: '1' } });
+  const m = run(['migrate']);
+  assert.equal(m.status, 1); assert.match(m.stderr, /Set DATABASE_OWNER_URL \(or DATABASE_URL\) to the database to migrate/);
+  const i = run(['index-references']);
+  assert.equal(i.status, 1); assert.match(i.stderr, /Set DATABASE_URL/);
 });
 
 test('hash-password refuses a missing password or a name with ":" or ";"', t => {
