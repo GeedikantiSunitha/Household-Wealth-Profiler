@@ -97,11 +97,18 @@ function apiContract(ctx) {
       id = j.id;
     });
 
-    test('POST with a client reference another household in the firm already has: 409, in any spelling', async () => {
+    test('a client reference another household in the firm already has: 409 on create and on save, in any spelling', async () => {
       const again = H.blank(); again.household.reference = ' ' + REF.toLowerCase() + ' ';
       const r = await call('POST', '/api/households', { who: chris, body: { state: again } });
       assert.equal(r.status, 409);
       assert.deepEqual(await r.json(), { error: `A household with reference "${REF}" already exists` });
+      const other = H.blank(); other.household.reference = REF + '-B';
+      const { id: oid } = await (await call('POST', '/api/households', { who: chris, body: { state: other } })).json();
+      other.household.reference = REF.toLowerCase();
+      const s = await call('PUT', '/api/households/' + oid, { who: chris, body: { version: 1, state: other } });
+      assert.equal(s.status, 409);
+      assert.deepEqual(await s.json(), { error: `A household with reference "${REF}" already exists` });
+      assert.equal((await (await call('GET', '/api/households/' + oid, { who: chris })).json()).version, 1, 'nothing saved');
     });
 
     test('POST with the same Idempotency-Key twice: the same reply, one household; a bad key is 400', async () => {

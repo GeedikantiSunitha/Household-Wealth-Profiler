@@ -63,9 +63,8 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
       const idem = idempotencyKey ? { user: ctx.user, key: idempotencyKey } : null;
       // Repeats with the same key queue behind each other, so the second sees the first's reply
       return withLock(`${ctx.firmId}:` + (idem ? `create:${ctx.user}:${idempotencyKey}` : rec.id), async () => {
-        const hmac = await scoped.indexReference(s.household.reference);
-        if (hmac && await scoped.findByReference(hmac)) throw Object.assign(new Error(`A household with reference "${normaliseReference(s.household.reference)}" already exists`), { status: 409 });
-        return scoped.create(rec, [{ ts, user: ctx.user, field: 'created', from: '', to: s.household.name || '' }], idem);
+        await refuseTakenReference(scoped, s, null);
+        return asDuplicate(s, scoped.create(rec, [{ ts, user: ctx.user, field: 'created', from: '', to: s.household.name || '' }], idem));
       });
     },
 
@@ -80,7 +79,9 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
     async save(ctx, id, { version, state } = {}) {
       const s = clean(state);
       refuseSample(s);
-      return withLock(`${ctx.firmId}:${id}`, () => forFirm(ctx).update(id, rec => {
+      const scoped = forFirm(ctx);
+      await refuseTakenReference(scoped, s, id);
+      return withLock(`${ctx.firmId}:${id}`, () => asDuplicate(s, scoped.update(id, rec => {
         if (!rec) return { result: { notFound: true } };
         if (+version !== rec.version) return { result: { conflict: { version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt } } };
         const ts = now();
@@ -88,9 +89,22 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
         if (!changes.length) return { result: { version: rec.version, changes: 0 } };
         const next = { ...rec, version: rec.version + 1, state: s, updatedAt: ts, updatedBy: ctx.user };
         return { next, audit: changes, result: { version: next.version, changes: changes.length } };
-      }));
+      })));
     },
   };
+}
+
+// A client reference may exist once per firm. The check looks before writing (a clear 409); the
+// database's unique index catches the race between two writes, which is answered the same way.
+const taken = s => Object.assign(new Error(`A household with reference "${normaliseReference(s.household.reference)}" already exists`), { status: 409 });
+async function refuseTakenReference(scoped, s, ownId) {
+  const hmac = await scoped.indexReference(s.household.reference);
+  if (!hmac) return;
+  const owner = await scoped.findByReference(hmac);
+  if (owner && owner !== ownId) throw taken(s);
+}
+async function asDuplicate(s, write) {
+  try { return await write; } catch (e) { if (e.code === '23505' && /households_reference_unique/.test(e.message + (e.constraint || ''))) throw taken(s); throw e; }
 }
 
 module.exports = { createHouseholdService, summarise, AUDIT_LIMIT };

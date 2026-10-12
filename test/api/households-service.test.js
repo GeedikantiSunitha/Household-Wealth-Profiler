@@ -64,9 +64,13 @@ test('create refuses a client reference that another household in the firm alrea
   assert.equal(typeof (await svc.create(SAM, withRef(H.blank(), 'HH-0002'))).id, 'string', 'another reference is fine');
   assert.equal(typeof (await svc.create(SAM, H.blank())).id, 'string', 'no reference is fine');
   assert.equal(typeof (await svc.create(OTHER_FIRM, H.sample())).id, 'string', 'another firm may use the same reference');
-  // A save that leaves a reference in place is allowed; a save that would make a duplicate is not refused yet (the rule for existing duplicates is pending)
+  // A save keeping its own reference is fine; a save that would take another household's reference is refused
   const st = json((await svc.get(SAM, id)).state); st.household.name = 'Renamed';
   assert.deepEqual(await svc.save(SAM, id, { version: 1, state: st }), { version: 2, changes: 1 });
+  const { id: two } = await svc.create(SAM, withRef(H.blank(), 'HH-0003'));
+  const taken = json((await svc.get(SAM, two)).state); taken.household.reference = 'hh-0001';
+  await assert.rejects(svc.save(SAM, two, { version: 1, state: taken }), { status: 409, message: 'A household with reference "HH-0001" already exists' });
+  assert.equal((await svc.get(SAM, two)).version, 1, 'nothing saved');
 });
 
 test('list: a household that cannot be read is skipped and logged with its id; the rest still list', async () => {
