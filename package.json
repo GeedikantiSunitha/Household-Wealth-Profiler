@@ -5,18 +5,26 @@
   "private": true,
   "license": "UNLICENSED",
   "main": "server.js",
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
-    "node": ">=18.17"
+    "node": ">=22"
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "ALLOW_PLAINTEXT=1 HSTS=0 AUTH_USERS=\"$(node server.js hash-password demo demo)\" DATA_DIR=./data-dev node server.js",
-    "test": "node --test test/*.test.js",
+    "dev": "node deploy/local/dev.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "screens": "node test/e2e/screens.js",
     "build": "node scripts/build.js",
-    "sync:supabase": "node -e \"require('fs').copyFileSync('public/core.js','supabase/functions/_shared/core.js')\"",
+    "sync:supabase": "node -e \"require('fs').copyFileSync('packages/core/core.js','supabase/functions/_shared/core.js')\"",
     "build:web": "node scripts/build-web.js"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8"
+    "@electric-sql/pglite": "0.5.8",
+    "esbuild": "0.28.2"
+  },
+  "dependencies": {
+    "pg": "8.23.1"
   }
 }

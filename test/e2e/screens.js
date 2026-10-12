@@ -1,0 +1,301 @@
+#!/usr/bin/env node
+// Screen check: runs the real app and drives headless Chrome through every screen, the way an
+// adviser would. Saves a full-page screenshot of each screen and fails on any script error, a
+// screen that does not render, an autosave that does not finish, data lost on reload, or a
+// missing edit-conflict warning. Uses only Node and an installed Chrome (no packages).
+//
+//   npm run screens                 screenshots in docs/checklists/screens/<date-time>/
+//   npm run screens -- baseline     screenshots in docs/checklists/screens/baseline/
+//   CHROME=/path/to/chrome npm run screens
+//
+// The app runs on a temporary data folder with a demo login, never on data-dev or a database.
+// The browser clock is fixed at 2026-10-10 so the sample household's dates, and so the
+// screenshots, are the same on every run. Compare a run with baseline by eye (docs/checklists/screen-smoke.md).
+'use strict';
+const { spawn, execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const net = require('node:net');
+
+// HWP_SCREENS_ROOT runs the same check against another copy of the app (for example a release being
+// compared with this one); by default it is this project.
+const ROOT = process.env.HWP_SCREENS_ROOT ? path.resolve(process.env.HWP_SCREENS_ROOT) : path.join(__dirname, '..', '..');
+const LABEL = process.argv[2] || new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+const OUT = path.join(ROOT, 'docs', 'checklists', 'screens', LABEL);
+const FROZEN = '2026-10-10T10:00:00Z';
+const CHROME = process.env.CHROME || [
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+].find(p => fs.existsSync(p));
+// The side rail: six collapsible groups and their sections, in order. A change here is a change to
+// the app's navigation.
+const GROUPS = [
+  ['client', ['household', 'members', 'income', 'expenses', 'goals', 'assumptions']],
+  ['wealth', ['accounts', 'db', 'property', 'other', 'liabilities', 'protection']],
+  ['onboarding', ['compliance', 'rtq', 'kyc', 'audit']],
+  ['relationship', ['contacts', 'actions', 'loas', 'complaints', 'reviews']],
+  ['mandate', ['mandate', 'models', 'drift', 'perf']],
+  ['analysis', ['bs', 'scenarios', 'tax', 'risk', 'checks', 'guide']],
+];
+const NAV = GROUPS.flatMap(([, ids]) => ids);
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const freePort = () => new Promise((ok, fail) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); s.on('error', fail); });
+async function waitHttp(url, ms = 15000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { try { const r = await fetch(url); if (r.ok) return r; } catch (e) {} await sleep(150); }
+  throw new Error('No answer from ' + url);
+}
+
+/* Minimal Chrome DevTools Protocol client over Node's built-in WebSocket */
+function cdp(wsUrl) {
+  const ws = new WebSocket(wsUrl); let seq = 0; const waiting = new Map(); const handlers = [];
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.id && waiting.has(m.id)) { const { ok, fail } = waiting.get(m.id); waiting.delete(m.id); m.error ? fail(new Error(m.error.message)) : ok(m.result); }
+    else if (m.method) for (const h of handlers) h(m.method, m.params);
+  };
+  return new Promise((ok, fail) => {
+    ws.onerror = () => fail(new Error('Could not connect to Chrome'));
+    ws.onopen = () => ok({
+      send: (method, params = {}) => new Promise((res, rej) => { const id = ++seq; waiting.set(id, { ok: res, fail: rej }); ws.send(JSON.stringify({ id, method, params })); }),
+      on: h => handlers.push(h),
+      close: () => ws.close(),
+    });
+  });
+}
+
+const results = []; const problems = [];
+const pass = msg => { results.push('PASS  ' + msg); console.log('  ✔ ' + msg); };
+const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.log('  ✖ ' + msg); };
+
+(async () => {
+  if (!CHROME) throw new Error('Chrome or Edge not found. Set CHROME to its path.');
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-screens-data-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-screens-chrome-'));
+  const appPort = await freePort(), debugPort = await freePort();
+  const BASE = `http://127.0.0.1:${appPort}/`;
+  let app, chrome, page;
+  try {
+    const demo = execFileSync(process.execPath, ['server.js', 'hash-password', 'demo', 'demo'], { cwd: ROOT }).toString().trim();
+    app = spawn(process.execPath, ['server.js'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PORT: String(appPort), HOST: '127.0.0.1',
+      DATA_DIR: data, DATABASE_URL: '', DATA_KEY: '', ALLOW_PLAINTEXT: '1', HSTS: '0', AUTH_USERS: demo } });
+    await waitHttp(BASE + 'healthz');
+    chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
+      `--remote-debugging-port=${debugPort}`, '--remote-allow-origins=*', `--user-data-dir=${profile}`, '--window-size=1366,900', 'about:blank'], { stdio: 'ignore' });
+    await waitHttp(`http://127.0.0.1:${debugPort}/json/version`);
+    const target = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find(t => t.type === 'page');
+    page = await cdp(target.webSocketDebuggerUrl);
+
+    // Script errors anywhere fail the run. The missing self-hosted SheetJS file is expected (the
+    // app falls back to cdnjs), and so is the 409 in the conflict step (expect409), and the failed
+    // start-up call in the "server unreachable" steps (breakMe: 'down' fails it, 'html' answers a
+    // non-JSON page).
+    let expect409 = false, breakMe = null;
+    page.on((method, p) => {
+      if (method === 'Runtime.exceptionThrown') problems.push('Script error: ' + (p.exceptionDetails.exception?.description || p.exceptionDetails.text));
+      if (method === 'Runtime.consoleAPICalled' && p.type === 'error') problems.push('console.error: ' + p.args.map(a => a.value ?? a.description).join(' '));
+      if (method === 'Log.entryAdded' && p.entry.level === 'error' && !/vendor\/xlsx/.test(p.entry.url || '') && !(expect409 && /status of 409/.test(p.entry.text)) && !(breakMe && /\/api\/me/.test(p.entry.url || ''))) problems.push('Browser error: ' + p.entry.text + ' ' + (p.entry.url || ''));
+    });
+    for (const d of ['Page', 'Runtime', 'Log']) await page.send(d + '.enable');
+    // Sign in as a browser does: the Basic header goes to the app's own address only
+    const AUTH = 'Basic ' + Buffer.from('demo:demo').toString('base64');
+    page.on((method, p) => {
+      if (method !== 'Fetch.requestPaused') return;
+      if (breakMe && /\/api\/me$/.test(p.request.url)) {
+        if (breakMe === 'down') page.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'ConnectionFailed' }).catch(() => {});
+        else page.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/html' }], body: Buffer.from('<html>proxy error</html>').toString('base64') }).catch(() => {});
+        return;
+      }
+      const headers = Object.entries(p.request.headers).map(([name, value]) => ({ name, value })).concat({ name: 'Authorization', value: AUTH });
+      page.send('Fetch.continueRequest', { requestId: p.requestId, headers }).catch(() => {});
+    });
+    await page.send('Fetch.enable', { patterns: [{ urlPattern: BASE + '*', requestStage: 'Request' }] });
+    // Steady screenshots: the app's CSS turns its fades off for reduced motion
+    await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const Real = Date, FIXED = Real.parse('${FROZEN}');
+      class FrozenDate extends Real { constructor(...a) { super(...(a.length ? a : [FIXED])); } static now() { return FIXED; } }
+      globalThis.Date = FrozenDate; })();` });
+
+    const js = async expr => { const r = await page.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value; };
+    const until = async (expr, what, ms = 8000) => { const end = Date.now() + ms;
+      while (Date.now() < end) { if (await js(expr).catch(() => false)) return true; await sleep(100); }
+      throw new Error('Timed out waiting for ' + what); };
+    const click = sel => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('No element ${sel.replace(/'/g, '')}'); el.click(); return true; })()`);
+    // Opens a section from the side rail, first opening its group when that is collapsed
+    const nav = async id => {
+      const [g] = GROUPS.find(([, ids]) => ids.includes(id));
+      if (!(await js(`!!document.querySelector('[data-nav="${id}"]')`))) await click(`[data-act="navGroup"][data-g="${g}"]`);
+      await click(`[data-nav="${id}"]`);
+    };
+    const type = (sel, value) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    const text = sel => js(`document.querySelector(${JSON.stringify(sel)})?.textContent.trim() || ''`);
+    // 30 s: a cold Chrome also fetches the Google fonts before the page counts as loaded
+    const go = async () => { await page.send('Page.navigate', { url: BASE }); await until(`document.readyState === 'complete' && !!document.querySelector('#main h2')`, 'the app to start', 30000); };
+    fs.mkdirSync(OUT, { recursive: true });
+    let n = 0;
+    async function shot(name, width = 1366) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 600 });
+      await js('document.fonts.ready.then(() => true)');
+      // Pop-up messages ("Loaded the latest version") fade after 2.8 s; wait so they never land in a shot
+      await until(`document.querySelector('#toast').hidden`, 'the pop-up message to close', 6000);
+      await sleep(250);
+      const h =Math.min(await js('Math.ceil(document.documentElement.scrollHeight)'), 16000);
+      await page.send('Emulation.setDeviceMetricsOverride', { width, height: h, deviceScaleFactor: 1, mobile: width < 600 });
+      await sleep(150);
+      const { data: png } = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
+      const file = `${String(++n).padStart(2, '0')}-${name}.png`;
+      fs.writeFileSync(path.join(OUT, file), Buffer.from(png, 'base64'));
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 900, deviceScaleFactor: 1, mobile: false });
+      return file;
+    }
+    const step = async (msg, fn) => { const before = problems.length; try { await fn(); problems.length === before ? pass(msg) : fail(msg + ' (' + problems.slice(before).join('; ') + ')'); } catch (e) { fail(msg + ': ' + e.message); } };
+
+    console.log(`Screens → ${path.relative(ROOT, OUT)}`);
+    await step('sign in opens the client list (empty)', async () => {
+      await go();
+      if (await text('#main h2') !== 'Households') throw new Error('first screen is ' + await text('#main h2'));
+      await until(`/No households yet/.test(document.querySelector('#main').textContent)`, 'the empty list');
+      if (!/Signed in as/.test(await text('#who'))) throw new Error('no signed-in name');
+      await shot('clients-empty');
+    });
+    await step('"New from sample" creates the Harrington household', async () => {
+      await click('[data-act="newSample"]');
+      await until(`/Harrington household/.test(document.querySelector('#hhName').textContent)`, 'the new household');
+    });
+    await step(`the side rail has ${GROUPS.length} groups; opened, they list the ${NAV.length} sections in order`, async () => {
+      const groups = await js(`[...document.querySelectorAll('[data-act="navGroup"]')].map(b => b.dataset.g)`);
+      if (JSON.stringify(groups) !== JSON.stringify(GROUPS.map(([g]) => g))) throw new Error('groups: ' + groups.join(','));
+      for (const [g] of GROUPS) if (await js(`document.querySelector('[data-act="navGroup"][data-g="${g}"]').getAttribute('aria-expanded')`) !== 'true') await click(`[data-act="navGroup"][data-g="${g}"]`);
+      const ids = await js(`[...document.querySelectorAll('[data-nav]')].map(b => b.dataset.nav)`);
+      if (JSON.stringify(ids) !== JSON.stringify(NAV)) throw new Error('got ' + ids.join(','));
+      await shot('rail-open');
+    });
+    await step('the header and rail show what core.js works out (KYC and AML, 2 open)', async () => {
+      if (!/KYC and AML/.test(await text('#hhName'))) throw new Error('header: ' + await text('#hhName'));
+      const kyc = await text('[data-nav="kyc"] .ct');
+      if (kyc !== '2 open') throw new Error('KYC count: ' + kyc);
+    });
+    for (const id of NAV) {
+      await step(`section renders: ${id}`, async () => {
+        await nav(id);
+        await until(`document.querySelector('[data-nav="${id}"]').getAttribute('aria-current') === 'true' && document.querySelector('#main').children.length > 0`, id);
+        if (id === 'audit') await until(`!/Loading/.test(document.querySelector('#main').textContent)`, 'the audit trail');
+        if (/Something went wrong|undefined|NaN/.test(await text('#main'))) throw new Error('suspicious text on screen');
+        await shot(id);
+      });
+    }
+    await step('typing a change is picked up, then autosaved ("Unsaved changes", then "All changes saved")', async () => {
+      await nav('household');
+      await until(`!!document.querySelector('#f-household-0-reference')`, 'the reference field');
+      await type('#f-household-0-reference', 'HH-SCREEN');
+      // A freshly opened household already says "All changes saved", so first prove the typing registered
+      await until(`document.querySelector('#saveState').textContent === 'Unsaved changes'`, 'the edit to be picked up', 3000);
+      await until(`/Client reference/.test(document.querySelector('#impactWhy')?.textContent || '')`, 'the live-effect panel to note the edit', 3000);
+      await until(`document.querySelector('#saveState').textContent === 'All changes saved'`, 'autosave', 10000);
+    });
+    await step('after a reload the change is still there', async () => {
+      await go();
+      await until(`/HH-SCREEN/.test(document.querySelector('#main').textContent)`, 'the saved reference in the client list');
+      await shot('clients-one-household');
+      await click('[data-act="openHousehold"]');
+      await until(`/Harrington household/.test(document.querySelector('#hhName').textContent)`, 'the household to open');
+      await nav('household');
+      await until(`document.querySelector('#f-household-0-reference')?.value === 'HH-SCREEN'`, 'the saved value in the form');
+    });
+    await step('"Reviews due" across households renders', async () => {
+      await click('#btnClients');
+      await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list');
+      await click('[data-act="diary"]');
+      await until(`document.querySelector('#main h2')?.textContent === 'Reviews due' && !/Loading/.test(document.querySelector('#main').textContent)`, 'the diary');
+      await shot('diary');
+    });
+    await step('"Tasks" and "Firm settings" across the firm render', async () => {
+      await click('[data-act="tasks"]');
+      await until(`document.querySelector('[data-act="tasks"]').getAttribute('aria-current') === 'true' && document.querySelector('#main').children.length > 0`, 'the tasks board');
+      if (/Something went wrong|undefined|NaN/.test(await text('#main'))) throw new Error('suspicious text on the tasks board');
+      await shot('tasks');
+      await click('[data-act="firmSettings"]');
+      await until(`document.querySelector('[data-act="firmSettings"]').getAttribute('aria-current') === 'true' && document.querySelector('#main').children.length > 0`, 'firm settings');
+      if (/Something went wrong|undefined|NaN/.test(await text('#main'))) throw new Error('suspicious text in firm settings');
+      await shot('firm-settings');
+    });
+    await step('a save after someone else\'s save shows the conflict warning', async () => {
+      await click('[data-act="goClients"]');
+      await until(`!!document.querySelector('[data-act="openHousehold"]')`, 'the client list');
+      await click('[data-act="openHousehold"]');
+      await until(`/Harrington household/.test(document.querySelector('#hhName').textContent)`, 'the household');
+      await nav('household');
+      await until(`!!document.querySelector('#f-household-0-reference')`, 'the form');
+      // Another adviser saves first, straight through the API
+      await js(`(async () => { const [h] = await (await fetch('api/households')).json(); const rec = await (await fetch('api/households/' + h.id)).json();
+        rec.state.household.reference = 'HH-OTHER';
+        const r = await fetch('api/households/' + h.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: rec.version, state: rec.state }) });
+        if (!r.ok) throw new Error('other save failed ' + r.status); return true; })()`);
+      expect409 = true;
+      await type('#f-household-0-reference', 'HH-MINE');
+      await until(`/Someone else saved this household/.test(document.body.textContent)`, 'the conflict banner', 10000);
+      expect409 = false;
+      if (await text('#saveState') !== 'Not saved: newer version exists') throw new Error('save state: ' + await text('#saveState'));
+      await shot('conflict-warning');
+      await click('[data-act="reloadHousehold"]');
+      await until(`document.querySelector('#f-household-0-reference')?.value === 'HH-OTHER'`, 'their version to load');
+    });
+    await step('top-bar Export JSON saves the open household (the toolbar is wired)', async () => {
+      await click('#btnJson');
+      await until(`/^Downloaded .+-profile\\.json$/.test(document.querySelector('#toast').textContent)`, 'the download message', 5000);
+    });
+    await step('phone width (390 px): household, balance sheet, KYC', async () => {
+      for (const id of ['household', 'bs', 'kyc']) {
+        await nav(id);
+        await page.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 900, deviceScaleFactor: 1, mobile: true });
+        await sleep(250);
+        // Recorded, not judged: today's layout is the baseline to compare against
+        results.push(`INFO  ${id} at 390 px: page is ${await js('document.documentElement.scrollWidth')} px wide`);
+        await shot(id + '-phone', 390);
+      }
+    });
+    // Data entered while served by the server must never fall back to this browser's storage
+    for (const [how, label] of [['down', 'the server is unreachable'], ['html', 'something other than the server answers']]) {
+      await step(`when ${label} at start-up: an error, and no browser-only saving`, async () => {
+        breakMe = how;
+        await page.send('Page.navigate', { url: BASE });
+        await until(`document.readyState === 'complete' && /Cannot open the profiler/.test(document.querySelector('#main').textContent)`, 'the error', 30000);
+        if (!/The server could not be reached, so nothing you enter would be saved/.test(await text('#main'))) throw new Error('message: ' + await text('#main'));
+        if (await text('#saveState') === 'Saved in this browser only') throw new Error('fell back to browser-only saving');
+        if (await js(`!!document.querySelector('[data-k]')`)) throw new Error('a data-entry field is on screen');
+        breakMe = null;
+      });
+    }
+  } catch (e) { fail('run stopped: ' + e.message); }
+  finally {
+    try { page && page.close(); } catch (e) {}
+    try { chrome && chrome.kill(); } catch (e) {}
+    try { app && app.kill(); } catch (e) {}
+    await sleep(400);
+    for (const d of [data, profile]) try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (e) {}
+  }
+  fs.mkdirSync(OUT, { recursive: true });
+  // Compare with the baseline run. With the clock fixed, screens are byte-identical between runs
+  // except those showing the server's own save times (audit trail, client list). Any other change
+  // is listed for a person to look at; it does not fail the run.
+  const BASELINE = path.join(ROOT, 'docs', 'checklists', 'screens', 'baseline');
+  const TIMED = /-(audit|clients-one-household)\.png$/;
+  if (LABEL !== 'baseline' && fs.existsSync(BASELINE)) {
+    const mine = fs.readdirSync(OUT).filter(f => f.endsWith('.png')), theirs = fs.readdirSync(BASELINE).filter(f => f.endsWith('.png'));
+    const changed = mine.filter(f => theirs.includes(f) && !TIMED.test(f) && !fs.readFileSync(path.join(OUT, f)).equals(fs.readFileSync(path.join(BASELINE, f))));
+    const added = mine.filter(f => !theirs.includes(f)), missing = theirs.filter(f => !mine.includes(f));
+    results.push(changed.length || added.length || missing.length
+      ? `LOOK  differs from baseline: ${[...changed, ...added.map(f => f + ' (new)'), ...missing.map(f => f + ' (missing)')].join(', ')}`
+      : 'SAME  every screen matches baseline (audit trail and client list show live save times and are not compared)');
+    console.log('  ' + results.at(-1));
+  }
+  fs.writeFileSync(path.join(OUT, 'report.txt'), `Screen check ${LABEL}\nApp: server.js, file storage, demo login; browser clock ${FROZEN}\nBrowser: ${CHROME}\n\n${results.join('\n')}\n`);
+  const failed = results.filter(r => r.startsWith('FAIL')).length;
+  console.log(`\n${results.length - failed} passed, ${failed} failed. Report: ${path.relative(ROOT, path.join(OUT, 'report.txt'))}`);
+  process.exit(failed ? 1 : 0);
+})();

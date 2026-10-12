@@ -1,0 +1,8 @@
+{
+  "name": "@hwp/core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Household Wealth Profiler business rules: UK tax, IHT, economic balance sheet, risk profile, KYC/AML onboarding, reviews, mandate checks and the audit diff",
+  "main": "core.js",
+  "license": "UNLICENSED"
+}

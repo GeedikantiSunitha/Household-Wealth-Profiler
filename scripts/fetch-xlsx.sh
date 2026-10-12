@@ -4,6 +4,6 @@
 # 0.18.5 build on cdnjs that the app falls back to when this file is missing.
 set -e
 cd "$(dirname "$0")/.."
-mkdir -p public/vendor
-curl -fsSL -o public/vendor/xlsx.full.min.js https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
-echo "Saved public/vendor/xlsx.full.min.js"
+mkdir -p apps/web/public/vendor
+curl -fsSL -o apps/web/public/vendor/xlsx.full.min.js https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
+echo "Saved apps/web/public/vendor/xlsx.full.min.js"

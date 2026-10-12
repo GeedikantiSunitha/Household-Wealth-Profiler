@@ -14,8 +14,11 @@ if (/^sb_secret_/.test(key) || /service_role/.test(Buffer.from(key.split('.')[1]
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
-for (const f of ['index.html', 'core.js', 'app.js', 'cloud.js', 'styles.css']) fs.copyFileSync(path.join(root, 'public', f), path.join(out, f));
-if (fs.existsSync(path.join(root, 'public', 'vendor'))) fs.cpSync(path.join(root, 'public', 'vendor'), path.join(out, 'vendor'), { recursive: true });
+for (const f of ['index.html', 'cloud.js', 'styles.css']) fs.copyFileSync(path.join(root, 'apps', 'web', 'public', f), path.join(out, f));
+// The interface's modules (js/main.js and what it imports)
+fs.cpSync(path.join(root, 'apps', 'web', 'public', 'js'), path.join(out, 'js'), { recursive: true });
+fs.copyFileSync(path.join(root, 'packages', 'core', 'core.js'), path.join(out, 'core.js'));
+if (fs.existsSync(path.join(root, 'apps', 'web', 'public', 'vendor'))) fs.cpSync(path.join(root, 'apps', 'web', 'public', 'vendor'), path.join(out, 'vendor'), { recursive: true });
 const config = { supabaseUrl: url, supabaseKey: key, requireMfa: process.env.REQUIRE_MFA !== '0', firmHint: process.env.FIRM_HINT || '' };
 fs.writeFileSync(path.join(out, 'config.js'), `window.HWP_CONFIG=${JSON.stringify(config)};\n`);
 

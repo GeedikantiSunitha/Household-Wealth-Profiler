@@ -2,7 +2,7 @@
 // Platform-neutral: index.ts wires it to Supabase on Deno; the tests wire it to PGlite on Node.
 //   deps.HWP      core.js
 //   deps.verify   async (token) -> { userId, email, aal } | null
-//   deps.db       data access (see index.ts / test/supabase.test.js)
+//   deps.db       data access (see index.ts / test/supabase/supabase.test.js)
 //   deps.origins  allowed browser origins for CORS
 //   deps.requireMfa  refuse sessions that have not passed a second factor
 //   deps.inviteRedirect  where invite emails send people to choose a password
@@ -28,7 +28,7 @@ async function readBody(req) {
   try { return text ? JSON.parse(text) : {}; } catch (e) { throw new HttpError(400, 'Invalid JSON'); }
 }
 
-function summarise(HWP, state) {
+export function summarise(HWP, state) {
   const s = HWP.normalise(state);
   let stage = '', rating = '', nextReview = '', blockers = 0, due = '', overdue = 0;
   try { const E = HWP.bind(s); const O = E.onboarding(E.compute()); stage = O.stage; rating = O.rating; nextReview = O.nextReview || ''; blockers = O.blockerCount; const R = E.reviews(O); due = R.nextDue; overdue = R.overdue; } catch (e) { stage = 'Error'; }

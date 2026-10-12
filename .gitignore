@@ -3,3 +3,4 @@ data/
 data-dev/
 .env
 dist/
+docs/checklists/screens/

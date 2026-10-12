@@ -5,12 +5,14 @@ clients, couples with one or two earners, children), runs KYC and AML checks, an
 produces a CFA-style economic balance sheet, a tax and allowances view, a risk
 profile with an investment policy statement, and an audit trail.
 
-There are no runtime dependencies. You need Node.js 18.17 or later.
+You need Node.js 22 or later (Node 18 and 20 are past end-of-life). The only runtime
+package is `pg`, and it is used only when the data is kept in PostgreSQL.
 
 ## Quick start (your own machine)
 
 ```sh
-npm test          # tax, balance sheet, IHT, KYC rules, server security, Supabase edition
+npm install
+npm test          # rules (tax, balance sheet, IHT, KYC), the API, migrations, Supabase edition
 npm run dev       # http://localhost:8080, sign in as demo / demo, data in ./data-dev
 ```
 
@@ -48,6 +50,23 @@ export PAGES_PROJECT=wealth-profiler
 scripts/deploy-supabase.sh
 ```
 
+### The database on other PostgreSQL servers
+
+`supabase db push` (in the deploy script) applies `supabase/migrations`. The same migrations
+also run on self-hosted Supabase or on plain PostgreSQL 14+ with:
+
+```sh
+DATABASE_URL=postgres://... node scripts/supabase-db.js migrate    # new migrations only
+DATABASE_URL=postgres://... node scripts/supabase-db.js backfill   # recompute client-list columns
+```
+
+It records migrations in the Supabase CLI's own table, so it and `supabase db push` can be
+mixed. On plain PostgreSQL it first creates stand-ins for Supabase's `auth` schema and roles
+([supabase/plain-postgres.sql](supabase/plain-postgres.sql)); run that first time as a
+superuser. `backfill` fills columns added by later migrations (such as review due dates) for
+households saved before them. It changes only those list columns, never saved data, versions
+or the audit trail. Sign-in and the API still need Supabase Auth and Edge Functions.
+
 ### Running the service
 
 ```sh
@@ -63,7 +82,7 @@ the same actions as `firms.js`. Before selling, you will also need a data proces
 with each customer, Supabase's DPA, a privacy notice, ICO registration, and usually Cyber
 Essentials and a penetration test. Regulated firms will ask for these in their supplier due diligence.
 
-After changing `public/core.js`, run `npm run sync:supabase`. A test fails until you do.
+After changing `packages/core/core.js`, run `npm run sync:supabase`. A test fails until you do.
 
 ## Deploy (self-hosted, one firm)
 
@@ -142,7 +161,58 @@ profiler.yourfirm.co.uk {
 }
 ```
 
-### 4. Optional: host the spreadsheet library yourself
+### 4. Optional: keep the data in PostgreSQL
+
+By default the server stores files under `DATA_DIR`. Set `DATABASE_URL` and it uses
+PostgreSQL 14 or later instead. On start-up it applies any new files in [db/migrations](db/migrations)
+in name order and records each one in `schema_migrations` (tables `households`,
+`household_versions`, `audit_log`, and for the firm settings `firm_settings`, `firm_versions`,
+`firm_audit`). Database triggers refuse any delete or rewrite of households, firm settings,
+versions and audit entries. Rows are encrypted with `DATA_KEY` just like the files, so the
+database never holds readable client data. Saves lock the household's row (or the firm
+settings), so several server processes can share one database safely.
+
+Create a database and a user for the app (run once in `psql` as an administrator):
+
+```sql
+create user hwp_app with password 'a long random password';
+create database wealth_profiler owner hwp_app;
+```
+
+Then put the settings in `.env` next to `server.js` (copy [.env.example](.env.example)):
+
+```ini
+AUTH_USERS=sam:...                 # node server.js hash-password sam 'a long passphrase'
+DATA_KEY=...                       # node server.js gen-key
+DATABASE_URL=postgres://hwp_app:PASSWORD@localhost:5432/wealth_profiler
+```
+
+Run `npm install` and then `npm start`. The start-up line shows where the data is kept.
+`.env` belongs on the server only, never in `apps/web/public/`: everything there is sent to browsers.
+Add `?sslmode=require` when the database is on another machine, and URL-encode special
+characters in the password.
+
+To move existing households and the firm settings from the file store, with their versions and
+audit trail:
+
+```sh
+node server.js import-files ./data     # households already in the database are skipped
+```
+
+Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
+keep `DATA_KEY` in a different place from the backups.
+
+**Changing the database.** Add a new file such as `db/migrations/0002_add_x.sql`; never edit
+one that has been applied (the server refuses to start if an applied file changes). Each file
+runs once, in a transaction with its tracking row, so a failed migration leaves nothing behind
+and is retried on the next start. Several servers starting together take turns. Migrations
+should only add (tables, columns with defaults, indexes): the retention triggers refuse
+deletes anyway. Databases created before migrations were tracked are adopted as they are.
+
+To run the PostgreSQL tests, point them at an empty scratch database:
+`TEST_DATABASE_URL=postgres://... node --test test/api/postgres.test.js`.
+
+### 5. Optional: host the spreadsheet library yourself
 
 Excel import and export use SheetJS. By default the app loads version 0.18.5 from
 cdnjs. That version has two published vulnerabilities in file parsing
@@ -154,9 +224,9 @@ serve the patched 0.20.3 from your own server; the app uses it automatically.
 | Area | How |
 |---|---|
 | Sign-in | Named users, passwords hashed with scrypt, 10 failed attempts lock the address out for 15 minutes. Behind a proxy, set `CLIENT_IP_HEADER` to the header carrying the real client address (Fly.io: `fly-client-ip`) |
-| Storage | One folder per household under `DATA_DIR/households/<id>/` |
-| Encryption at rest | AES-256-GCM on every file, including the audit log |
-| Versions | Every save is kept in `versions/`. Two people editing at once cannot overwrite each other: the second save is refused and they reload |
+| Storage | One folder per household under `DATA_DIR/households/<id>/`, or PostgreSQL when `DATABASE_URL` is set |
+| Encryption at rest | AES-256-GCM on every file or database row, including the audit log |
+| Versions | Every save is kept in `versions/` (or `household_versions`). Two people editing at once cannot overwrite each other: the second save is refused and they reload |
 | Audit trail | The server compares each save with the previous version and logs who changed which field, when, from what and to what |
 | Retention | There is no delete endpoint. The Money Laundering Regulations require records for 5 years after the relationship ends. Handle erasure requests through an admin process |
 | Web security | Content Security Policy, no framing, same-origin check on writes, 2 MB request limit, input is filtered to known fields |
@@ -224,21 +294,27 @@ income is included. The Supabase edition imports CSVs but does not yet fetch pri
 ## Project layout
 
 ```
-public/core.js      schema, tax engine, balance sheet, KYC/AML rules (browser and Node)
-public/app.js       the interface
-public/index.html   page shell
-public/styles.css   styles
-public/cloud.js     sign-in and two-step verification for the Supabase edition
-server.js           API, sign-in, encryption, versions, audit trail (self-hosted)
-supabase/           database migration and the `api` Edge Function (Supabase edition)
+packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
+apps/api/src/       the self-hosted API: settings, sign-in, encryption, storage, versions, audit trail, routes
+apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js)
+apps/web/public/cloud.js  sign-in and two-step verification for the Supabase edition
+server.js           starts the API (npm start) and runs its commands (hash-password, gen-key, import-files)
+db/                 PostgreSQL migrations and the migration runner for the self-hosted API
+deploy/             how the app runs: deploy/local/dev.js is npm run dev
+ops/                operating a deployment: backups, restores, data migrations (being filled in)
+docs/               decision records and the manual screen checklist
+supabase/           database migrations and the `api` Edge Function (Supabase edition)
 scripts/firms.js    create and manage customer firms (Supabase edition)
+scripts/supabase-db.js  apply Supabase migrations to any PostgreSQL 14+, backfill list columns
 scripts/build.js    builds dist/wealth-profiler.html, a single file that runs without a server
-test/               node:test suites
+test/               unit (rules), api, db, supabase and e2e (npm run screens) tests
 ```
+
+Each of `apps/api`, `apps/web` and `packages/core` has its own README with the detail.
 
 ### Adding a field
 
-Add it to `SCHEMA` in `public/core.js`. It then appears in the form, the Excel
+Add it to `SCHEMA` in `packages/core/core.js`. It then appears in the form, the Excel
 template, import, export and the audit trail. Add a rule in `onboarding()` if it
 should block onboarding.
 
