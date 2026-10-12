@@ -1,0 +1,28 @@
+# Static code scanning with CodeQL. GitHub runs it free on public repositories; on a private
+# repository it needs GitHub Advanced Security, so there the job runs only when the repository
+# variable CODEQL is set to 1 (Settings > Secrets and variables > Actions > Variables).
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  schedule:
+    - cron: '30 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    if: ${{ !github.event.repository.private || vars.CODEQL == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@v3

@@ -12,11 +12,13 @@ const { createFileStore } = require('../../apps/api/src/repositories');
 const { createSealer } = require('../../apps/api/src/crypto/seal.js');
 
 function setup() {
-  const store = createFileStore(fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-svc-')), createSealer(null));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-svc-'));
+  const store = createFileStore(dir, createSealer(null));
   let t = 0, n = 0;
   const now = () => `2026-10-10T10:00:${String(t++).padStart(2, '0')}.000Z`;
   const newId = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
-  return { store, svc: createHouseholdService({ store, HWP: H, now, newId }) };
+  const logged = [];
+  return { store, dir, logged, svc: createHouseholdService({ store, HWP: H, now, newId, log: (...a) => logged.push(a.join(' ')) }) };
 }
 const json = v => JSON.parse(JSON.stringify(v));
 const stored = st => { const s = H.normalise(json(st)); delete s.audit; return json(s); };
@@ -30,6 +32,33 @@ test('create: version 1, cleaned state, author and a "created" audit entry', asy
     createdAt: '2026-10-10T10:00:00.000Z', createdBy: 'sam', updatedAt: '2026-10-10T10:00:00.000Z', updatedBy: 'sam' });
   assert.equal(rec.state.extra, undefined); assert.equal(rec.state.audit, undefined);
   assert.deepEqual(await svc.audit(rec.id), [{ ts: '2026-10-10T10:00:00.000Z', user: 'sam', field: 'created', from: '', to: 'Harrington household' }]);
+});
+
+test('create with an idempotency key: the same user and key again returns the first reply and makes no second household', async () => {
+  const { svc } = setup();
+  const first = await svc.create(H.sample(), 'sam', { idempotencyKey: 'click-0001' });
+  assert.deepEqual(first, { id: '00000000-0000-4000-8000-000000000001', version: 1 });
+  assert.deepEqual(await svc.create(H.sample(), 'sam', { idempotencyKey: 'click-0001' }), first, 'a repeat (double-click, retried request) replays');
+  assert.notEqual((await svc.create(H.sample(), 'sam', { idempotencyKey: 'click-0002' })).id, first.id, 'another key is another household');
+  assert.notEqual((await svc.create(H.sample(), 'chris', { idempotencyKey: 'click-0001' })).id, first.id, 'keys are per user');
+  assert.equal((await svc.list()).length, 3);
+  // Two identical requests at the same moment: still one household
+  const { svc: svc2 } = setup();
+  const both = await Promise.all([svc2.create(H.sample(), 'sam', { idempotencyKey: 'same-key-1' }), svc2.create(H.sample(), 'sam', { idempotencyKey: 'same-key-1' })]);
+  assert.equal(both[0].id, both[1].id);
+  assert.equal((await svc2.list()).length, 1);
+});
+
+test('list: a household that cannot be read is skipped and logged with its id; the rest still list', async () => {
+  const { svc, dir, logged } = setup();
+  const a = H.sample(); a.household.name = 'Readable';
+  const { id: good } = await svc.create(a, 'sam');
+  const { id: bad } = await svc.create(H.blank(), 'sam');
+  fs.writeFileSync(path.join(dir, 'households', bad, 'current.json'), '{not json');
+  const list = await svc.list();
+  assert.deepEqual(list.map(x => x.id), [good]);
+  assert.equal(logged.length, 1);
+  assert.match(logged[0], new RegExp(`unreadable household ${bad}`));
 });
 
 test('list: summaries from core.js, most recently changed first', async () => {
@@ -92,6 +121,19 @@ test('unknown household: get null, audit null, save not found', async () => {
   assert.equal(await svc.get(id), null);
   assert.equal(await svc.audit(id), null);
   assert.deepEqual(await svc.save(id, { version: 1, state: H.sample() }, 'sam'), { notFound: true });
+});
+
+test('in production a sample household is refused on create and on save (400); elsewhere it is allowed', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-svc-'));
+  const store = createFileStore(dir, createSealer(null));
+  const prod = createHouseholdService({ store, HWP: H, production: true });
+  await assert.rejects(prod.create(H.sample(), 'sam'), { status: 400, message: 'Sample households are not allowed in production' });
+  const { id } = await prod.create(H.blank(), 'sam');
+  await assert.rejects(prod.save(id, { version: 1, state: H.sample() }, 'sam'), { status: 400, message: 'Sample households are not allowed in production' });
+  assert.equal((await prod.get(id)).version, 1, 'nothing was saved');
+  assert.equal((await prod.list()).length, 1);
+  const dev = createHouseholdService({ store, HWP: H });
+  assert.equal(typeof (await dev.create(H.sample(), 'sam')).id, 'string');
 });
 
 test('audit is capped at 5000 entries, newest first', async () => {

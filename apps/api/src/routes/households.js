@@ -2,18 +2,24 @@
    into a reply. There is deliberately no DELETE: records are kept for regulatory retention.
      GET  /api/households              client list
      POST /api/households              create            201 {id, version}
+                                       with an Idempotency-Key header, a repeat within a day gets
+                                       the first reply (no second household); a bad key is 400
      GET  /api/households/:id          the record        404 if unknown
      PUT  /api/households/:id          save {version, state}   200 {version, changes} | 404 | 409
      GET  /api/households/:id/audit    audit trail, newest first   404 if unknown
    Returns a promise of true when it handled the request, false when the path is not one of these. */
 'use strict';
 
+const IDEM_KEY = /^[A-Za-z0-9_-]{8,200}$/;
+
 function createHouseholdRoutes({ households, ID_RE, send, readBody }) {
   return async function householdRoutes(req, res, p, user) {
     if (p === '/api/households' && req.method === 'GET') { send(res, 200, await households.list()); return true; }
     if (p === '/api/households' && req.method === 'POST') {
+      const key = req.headers['idempotency-key'];
+      if (key !== undefined && !IDEM_KEY.test(key)) { send(res, 400, { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' }); return true; }
       const body = await readBody(req);
-      send(res, 201, await households.create(body.state, user));
+      send(res, 201, await households.create(body.state, user, key ? { idempotencyKey: key } : undefined));
       return true;
     }
     const m = /^\/api\/households\/([^/]+)(\/audit)?$/.exec(p);

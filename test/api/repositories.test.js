@@ -15,7 +15,8 @@ const ROOT = path.join(__dirname, '..', '..');
 const sealer = createSealer(crypto.randomBytes(32));
 const rec = (id, version, name, by = 'sam') => ({ id, version, state: { household: { name } }, createdAt: '2026-10-10T09:00:00.000Z', createdBy: 'sam', updatedAt: `2026-10-10T09:0${version}:00.000Z`, updatedBy: by });
 
-function storeContract(label, makeStore, rawRows, rawFirm) {
+// hooks: corrupt(id) makes a stored record unreadable; ageKeys(hours) backdates every idempotency key
+function storeContract(label, makeStore, rawRows, rawFirm, hooks) {
   test.describe(`${label} store`, () => {
     let store; const id = crypto.randomUUID();
     test.before(async () => { store = await makeStore(); await store.init(); });
@@ -27,9 +28,33 @@ function storeContract(label, makeStore, rawRows, rawFirm) {
       assert.deepEqual(await store.audit(crypto.randomUUID()), []);
     });
     test('create, then get and list return it', async () => {
-      await store.create(rec(id, 1, 'Alpha'), [{ ts: 't1', user: 'sam', field: 'created', from: '', to: 'Alpha' }]);
+      assert.deepEqual(await store.create(rec(id, 1, 'Alpha'), [{ ts: 't1', user: 'sam', field: 'created', from: '', to: 'Alpha' }]), { id, version: 1 });
       assert.deepEqual(await store.get(id), rec(id, 1, 'Alpha'));
       assert.ok((await store.list()).some(r => r.id === id && r.version === 1));
+    });
+    test('create with an idempotency key: the same user and key again returns the first reply and stores nothing new', async () => {
+      const a = crypto.randomUUID(), b = crypto.randomUUID();
+      assert.deepEqual(await store.create(rec(a, 1, 'Once'), [], { user: 'sam', key: 'key-000001' }), { id: a, version: 1 });
+      assert.deepEqual(await store.create(rec(b, 1, 'Twice'), [], { user: 'sam', key: 'key-000001' }), { id: a, version: 1 }, 'the first reply again');
+      assert.equal(await store.get(b), null, 'no second household');
+      assert.equal((await store.create(rec(b, 1, 'Other user'), [], { user: 'chris', key: 'key-000001' })).id, b, 'keys are per user');
+    });
+    test('an idempotency key older than 24 hours no longer replays', async () => {
+      const a = crypto.randomUUID(), b = crypto.randomUUID();
+      await store.create(rec(a, 1, 'Old'), [], { user: 'sam', key: 'key-000002' });
+      await hooks.ageKeys(25);
+      assert.equal((await store.create(rec(b, 1, 'New'), [], { user: 'sam', key: 'key-000002' })).id, b);
+    });
+    test('list skips a record that cannot be read and reports its id; get on it fails', async () => {
+      const bad = crypto.randomUUID();
+      await store.create(rec(bad, 1, 'Soon unreadable'), []);
+      await hooks.corrupt(bad);
+      const seen = [];
+      const list = await store.list({ onUnreadable: (rid, e) => seen.push([rid, e instanceof Error]) });
+      assert.ok(list.some(r => r.id === id), 'the readable record is still listed');
+      assert.ok(!list.some(r => r.id === bad), 'the unreadable one is left out');
+      assert.deepEqual(seen, [[bad, true]]);
+      await assert.rejects(store.get(bad));
     });
     test('update without "next" saves nothing and returns the result', async () => {
       let seen;
@@ -84,11 +109,14 @@ storeContract('file', () => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-r
       ...fs.readFileSync(path.join(d, 'audit.log'), 'utf8').split('\n').filter(Boolean)]; },
   async () => { const d = path.join(dir, 'households', 'firm');
     return [fs.readFileSync(path.join(d, 'current.json'), 'utf8'), ...fs.readdirSync(path.join(d, 'versions')).map(f => fs.readFileSync(path.join(d, 'versions', f), 'utf8')),
-      ...fs.readFileSync(path.join(d, 'audit.log'), 'utf8').split('\n').filter(Boolean)]; });
+      ...fs.readFileSync(path.join(d, 'audit.log'), 'utf8').split('\n').filter(Boolean)]; },
+  { corrupt: async rid => fs.writeFileSync(path.join(dir, 'households', rid, 'current.json'), 'enc:v1:garbage'),
+    ageKeys: async hours => { const d = path.join(dir, 'idempotency'); const t = new Date(Date.now() - hours * 3600e3); for (const f of fs.readdirSync(d)) fs.utimesSync(path.join(d, f), t, t); } });
 
 test('file store: version files are kept, one per saved version', () => {
-  const [hh] = fs.readdirSync(path.join(dir, 'households')).filter(x => ID_RE.test(x));
-  assert.deepEqual(fs.readdirSync(path.join(dir, 'households', hh, 'versions')).sort(), ['000001.json', '000002.json']);
+  const versions = fs.readdirSync(path.join(dir, 'households')).filter(x => ID_RE.test(x)).map(h => fs.readdirSync(path.join(dir, 'households', h, 'versions')).sort());
+  assert.ok(versions.some(v => v.join() === '000001.json,000002.json'), 'the household saved twice has two version files');
+  assert.ok(versions.every(v => v[0] === '000001.json'), 'every household starts at version 1');
 });
 test('household ids must be UUIDs', () => {
   assert.ok(ID_RE.test(crypto.randomUUID()));
@@ -120,6 +148,9 @@ if (BASE_URL) {
         ...(await c.query('select doc from firm_versions')).rows.map(r => r.doc),
         ...(await c.query('select entry as doc from firm_audit')).rows.map(r => r.doc)];
     } finally { await c.end(); }
+  }, {
+    corrupt: async rid => { const c = new Client({ connectionString: URL_ }); await c.connect(); try { await c.query(`update households set doc = 'enc:v1:garbage' where id = $1`, [rid]); } finally { await c.end(); } },
+    ageKeys: async hours => { const c = new Client({ connectionString: URL_ }); await c.connect(); try { await c.query(`update idempotency_keys set created_at = now() - ($1 || ' hours')::interval`, [String(hours)]); } finally { await c.end(); } },
   });
 } else {
   test('PostgreSQL store', { skip: 'set TEST_DATABASE_URL to run' }, () => {});

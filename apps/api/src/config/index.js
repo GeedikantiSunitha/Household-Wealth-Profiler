@@ -19,12 +19,16 @@ function readEnvFile(file, env) {
   for (const [k, v] of Object.entries(parsed)) if (!(k in env)) env[k] = v;
 }
 
-// AUTH_USERS: name:salt:hash entries separated by ';'. Incomplete entries are ignored.
+// AUTH_USERS: name:salt:hash entries separated by ';'. Incomplete entries are ignored; a complete
+// entry whose salt or hash is not what hash-password prints is refused here, at start-up, rather
+// than failing with a server error when that person signs in.
 function parseUsers(text) {
   const users = new Map();
   for (const entry of (text || '').split(';').map(s => s.trim()).filter(Boolean)) {
     const [name, salt, hash] = entry.split(':');
-    if (name && salt && hash) users.set(name, { salt, hash: Buffer.from(hash, 'hex') });
+    if (!(name && salt && hash)) continue;
+    if (!/^[0-9a-f]{32}$/i.test(salt) || !/^[0-9a-f]{128}$/i.test(hash)) throw new Error(`AUTH_USERS entry for "${name}" is malformed: expected name:salt:hash exactly as printed by node server.js hash-password.`);
+    users.set(name, { salt, hash: Buffer.from(hash, 'hex') });
   }
   return users;
 }
@@ -37,6 +41,14 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     key = Buffer.from(env.DATA_KEY, 'base64');
     if (key.length !== 32) throw new Error('DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key');
   }
+  // NODE_ENV=production: the settings that are fine on a developer's machine but never in production
+  const production = env.NODE_ENV === 'production';
+  if (production) {
+    if (!env.DATABASE_URL) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
+    if (env.ALLOW_PLAINTEXT === '1') throw new Error('NODE_ENV=production: ALLOW_PLAINTEXT is not accepted. Set DATA_KEY so client records are encrypted.');
+    if (env.HSTS === '0') throw new Error('NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.');
+    if (env.AUTH_USERS) throw new Error("NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in.");
+  }
   const users = parseUsers(env.AUTH_USERS);
   // import-files only copies data, so it runs without sign-in users
   if (!users.size && command !== 'import-files') throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
@@ -44,6 +56,7 @@ function load({ env = process.env, root = ROOT, command } = {}) {
 
   return {
     root,
+    production,
     port: +env.PORT || 8080,
     host: env.HOST || '0.0.0.0',
     dataDir: path.resolve(env.DATA_DIR || path.join(root, 'data')),

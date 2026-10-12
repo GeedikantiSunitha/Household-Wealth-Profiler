@@ -167,7 +167,7 @@ By default the server stores files under `DATA_DIR`. Set `DATABASE_URL` and it u
 PostgreSQL 14 or later instead. On start-up it applies any new files in [db/migrations](db/migrations)
 in name order and records each one in `schema_migrations` (tables `households`,
 `household_versions`, `audit_log`, and for the firm settings `firm_settings`, `firm_versions`,
-`firm_audit`). Database triggers refuse any delete or rewrite of households, firm settings,
+`firm_audit`; `idempotency_keys` holds a day of create keys and no client data). Database triggers refuse any delete or rewrite of households, firm settings,
 versions and audit entries. Rows are encrypted with `DATA_KEY` just like the files, so the
 database never holds readable client data. Saves lock the household's row (or the firm
 settings), so several server processes can share one database safely.
@@ -212,12 +212,13 @@ deletes anyway. Databases created before migrations were tracked are adopted as 
 To run the PostgreSQL tests, point them at an empty scratch database:
 `TEST_DATABASE_URL=postgres://... node --test test/api/postgres.test.js`.
 
-### 5. Optional: host the spreadsheet library yourself
+### 5. The spreadsheet library
 
-Excel import and export use SheetJS. By default the app loads version 0.18.5 from
-cdnjs. That version has two published vulnerabilities in file parsing
-(CVE-2023-30533, CVE-2024-22363). Run `scripts/fetch-xlsx.sh` before building to
-serve the patched 0.20.3 from your own server; the app uses it automatically.
+Excel import and export use SheetJS 0.20.3, served by the app itself from
+`apps/web/public/vendor/` and never from a CDN: the Content Security Policy allows scripts from
+this server only. The copy is pinned by hash; `npm run vendor` downloads it again from SheetJS
+and refuses anything that does not match, and a test checks the committed file. Only the
+single-file demo build, opened from disk, fetches it from SheetJS's own CDN.
 
 ## What the server does
 
@@ -228,8 +229,10 @@ serve the patched 0.20.3 from your own server; the app uses it automatically.
 | Encryption at rest | AES-256-GCM on every file or database row, including the audit log |
 | Versions | Every save is kept in `versions/` (or `household_versions`). Two people editing at once cannot overwrite each other: the second save is refused and they reload |
 | Audit trail | The server compares each save with the previous version and logs who changed which field, when, from what and to what |
+| No duplicates | Each create carries an `Idempotency-Key`; a repeat within a day (a double-click, a retried request) returns the first household instead of making a second. A record that cannot be read is logged and left out of the list rather than hiding every other household |
 | Retention | There is no delete endpoint. The Money Laundering Regulations require records for 5 years after the relationship ends. Handle erasure requests through an admin process |
 | Web security | Content Security Policy, no framing, same-origin check on writes, 2 MB request limit, input is filtered to known fields |
+| Operations | `/healthz` (the process is up) and `/readyz` (storage answers) for the host's checks; on SIGTERM requests in flight finish before the process exits. With `NODE_ENV=production` the server refuses to start with files instead of PostgreSQL, without encryption, without HTTPS, or with Basic sign-in |
 
 ## Onboarding rules
 

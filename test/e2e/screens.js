@@ -90,23 +90,22 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     const target = (await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json()).find(t => t.type === 'page');
     page = await cdp(target.webSocketDebuggerUrl);
 
-    // Script errors anywhere fail the run. The missing self-hosted SheetJS file is expected (the
-    // app falls back to cdnjs), and so is the 409 in the conflict step (expect409), and the failed
-    // start-up call in the "server unreachable" steps (breakMe: 'down' fails it, 'html' answers a
-    // non-JSON page).
+    // Script errors anywhere fail the run, except the 409 in the conflict step (expect409) and the
+    // failed start-up call in the "server unreachable" steps (breakMe: { how, url }; 'down' fails
+    // the call, 'html' answers a non-JSON page).
     let expect409 = false, breakMe = null;
     page.on((method, p) => {
       if (method === 'Runtime.exceptionThrown') problems.push('Script error: ' + (p.exceptionDetails.exception?.description || p.exceptionDetails.text));
       if (method === 'Runtime.consoleAPICalled' && p.type === 'error') problems.push('console.error: ' + p.args.map(a => a.value ?? a.description).join(' '));
-      if (method === 'Log.entryAdded' && p.entry.level === 'error' && !/vendor\/xlsx/.test(p.entry.url || '') && !(expect409 && /status of 409/.test(p.entry.text)) && !(breakMe && /\/api\/me/.test(p.entry.url || ''))) problems.push('Browser error: ' + p.entry.text + ' ' + (p.entry.url || ''));
+      if (method === 'Log.entryAdded' && p.entry.level === 'error' && !(expect409 && /status of 409/.test(p.entry.text)) && !(breakMe && breakMe.url.test(p.entry.url || ''))) problems.push('Browser error: ' + p.entry.text + ' ' + (p.entry.url || ''));
     });
     for (const d of ['Page', 'Runtime', 'Log']) await page.send(d + '.enable');
     // Sign in as a browser does: the Basic header goes to the app's own address only
     const AUTH = 'Basic ' + Buffer.from('demo:demo').toString('base64');
     page.on((method, p) => {
       if (method !== 'Fetch.requestPaused') return;
-      if (breakMe && /\/api\/me$/.test(p.request.url)) {
-        if (breakMe === 'down') page.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'ConnectionFailed' }).catch(() => {});
+      if (breakMe && breakMe.url.test(p.request.url)) {
+        if (breakMe.how === 'down') page.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'ConnectionFailed' }).catch(() => {});
         else page.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'text/html' }], body: Buffer.from('<html>proxy error</html>').toString('base64') }).catch(() => {});
         return;
       }
@@ -260,12 +259,27 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       }
     });
     // Data entered while served by the server must never fall back to this browser's storage
-    for (const [how, label] of [['down', 'the server is unreachable'], ['html', 'something other than the server answers']]) {
+    await step('a double-click on "New household" creates one household, not two', async () => {
+      await click('#btnClients');
+      await until(`document.querySelector('#main h2')?.textContent === 'Households' && !!document.querySelector('.clients')`, 'the client list');
+      const before = await js(`document.querySelectorAll('.clients tbody tr').length`);
+      await js(`(() => { const b = document.querySelector('[data-act="newBlank"]'); b.click(); b.click(); return true; })()`);
+      await until(`document.querySelector('[data-nav="household"]')?.getAttribute('aria-current') === 'true'`, 'the new household');
+      await click('#btnClients');
+      await until(`document.querySelectorAll('.clients tbody tr').length > ${before}`, 'the list to grow');
+      const after = await js(`document.querySelectorAll('.clients tbody tr').length`);
+      if (after !== before + 1) throw new Error(`${after - before} households were created`);
+    });
+    for (const [how, url, label, message] of [
+      ['down', /\/api\/me$/, 'the server is unreachable', /The server could not be reached, so nothing you enter would be saved/],
+      ['html', /\/api\/me$/, 'something other than the server answers', /The server could not be reached, so nothing you enter would be saved/],
+      ['down', /\/api\/firm$/, 'the firm settings cannot be loaded', /The firm settings could not be loaded from the server/],
+    ]) {
       await step(`when ${label} at start-up: an error, and no browser-only saving`, async () => {
-        breakMe = how;
+        breakMe = { how, url };
         await page.send('Page.navigate', { url: BASE });
         await until(`document.readyState === 'complete' && /Cannot open the profiler/.test(document.querySelector('#main').textContent)`, 'the error', 30000);
-        if (!/The server could not be reached, so nothing you enter would be saved/.test(await text('#main'))) throw new Error('message: ' + await text('#main'));
+        if (!message.test(await text('#main'))) throw new Error('message: ' + await text('#main'));
         if (await text('#saveState') === 'Saved in this browser only') throw new Error('fell back to browser-only saving');
         if (await js(`!!document.querySelector('[data-k]')`)) throw new Error('a data-entry field is on screen');
         breakMe = null;

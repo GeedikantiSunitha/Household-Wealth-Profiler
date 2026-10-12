@@ -1,9 +1,14 @@
 /* Households in PostgreSQL (when DATABASE_URL is set). Tables come from db/migrations:
    households (current record), household_versions (every version), audit_log (one row per entry),
    and for the firm settings firm_settings (one row), firm_versions and firm_audit.
-   Every doc / entry is sealed text, exactly what the file store writes. */
+   Every doc / entry is sealed text, exactly what the file store writes.
+   idempotency_keys keeps each create's reply for a day under a hash of the user and key, written
+   in the same transaction as the record, so two servers given the same key cannot both create. */
 'use strict';
+const crypto = require('crypto');
 const { createPool, tx: inTx, runMigrations } = require('../db/pool.js');
+
+const scopeOf = (user, key) => crypto.createHash('sha256').update(`${user}:${key}`).digest('hex');
 
 // Firm saves take this transaction lock first: before the first save there is no row to lock, so
 // without it two servers saving at once could both try to create it.
@@ -32,14 +37,43 @@ function createPgStore(url, { seal, open, poolMax, migrationsDir }) {
   return {
     describe: 'data in ' + where,
     init: () => runMigrations(pool, migrationsDir),
-    async list() { return (await pool.query('select doc from households')).rows.map(r => JSON.parse(open(r.doc))); },
+    // For /readyz: the database answers
+    ready: async () => { await pool.query('select 1'); },
+    // A row that cannot be read (a wrong key, a damaged row) is left out and reported, so one bad
+    // row does not hide every other household
+    async list({ onUnreadable = (id, e) => console.error(new Date().toISOString(), `unreadable household ${id}:`, e.message) } = {}) {
+      const out = [];
+      for (const r of (await pool.query('select id, doc from households')).rows) {
+        try { out.push(JSON.parse(open(r.doc))); } catch (e) { onUnreadable(r.id, e); }
+      }
+      return out;
+    },
     async get(id) { const r = (await pool.query('select doc from households where id = $1', [id])).rows[0]; return r ? JSON.parse(open(r.doc)) : null; },
-    async create(rec, audit) {
-      await tx(async c => {
-        const doc = seal(JSON.stringify(rec));
-        await c.query('insert into households (id, version, doc, updated_at) values ($1, $2, $3, $4)', [rec.id, rec.version, doc, rec.updatedAt]);
-        await insertVersion(c, rec, audit);
-      });
+    async create(rec, audit, idem) {
+      const scope = idem && scopeOf(idem.user, idem.key);
+      try {
+        return await tx(async c => {
+          if (scope) {
+            await c.query(`delete from idempotency_keys where created_at < now() - interval '24 hours'`);
+            const prev = (await c.query('select reply from idempotency_keys where scope = $1', [scope])).rows[0];
+            if (prev) return JSON.parse(prev.reply);
+          }
+          const doc = seal(JSON.stringify(rec));
+          await c.query('insert into households (id, version, doc, updated_at) values ($1, $2, $3, $4)', [rec.id, rec.version, doc, rec.updatedAt]);
+          await insertVersion(c, rec, audit);
+          const reply = { id: rec.id, version: rec.version };
+          if (scope) await c.query('insert into idempotency_keys (scope, reply) values ($1, $2)', [scope, JSON.stringify(reply)]);
+          return reply;
+        });
+      } catch (e) {
+        // The same key at the same moment on another connection: that transaction committed first,
+        // this one was rolled back whole (household included); answer with the first reply
+        if (scope && e.code === '23505') {
+          const prev = (await pool.query('select reply from idempotency_keys where scope = $1', [scope])).rows[0];
+          if (prev) return JSON.parse(prev.reply);
+        }
+        throw e;
+      }
     },
     // The row lock (select ... for update) serialises saves across every server process
     async update(id, decide) {

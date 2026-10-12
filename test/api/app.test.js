@@ -13,15 +13,17 @@ const ID = '00000000-0000-4000-8000-000000000001';
 let base, server, calls, logged;
 const households = {
   list: async () => { calls.push('list'); return [{ id: ID }]; },
-  create: async (state, user) => { calls.push(['create', user]); return { id: ID, version: 1 }; },
+  create: async (state, user, opts) => { calls.push(['create', user, opts && opts.idempotencyKey]); return { id: ID, version: 1 }; },
   get: async id => id === ID ? { id: ID, version: 1 } : null,
   audit: async id => id === ID ? [{ field: 'created' }] : null,
   save: async (id, body) => id !== ID ? { notFound: true } : body.version !== 1 ? { conflict: { version: 1, updatedBy: 'x', updatedAt: 't' } } : body.boom ? (() => { throw new Error('secret detail'); })() : { version: 2, changes: 1 },
 };
 const authenticate = req => req.headers.authorization === 'ok' ? { user: 'sam' } : req.headers.authorization === 'locked' ? { locked: true } : null;
+let storageUp = true;
+const ready = async () => { if (!storageUp) throw new Error('database down: secret detail'); };
 
 test.before(async () => {
-  ({ server } = createApp({ config: { hsts: true, key: Buffer.alloc(32), root: ROOT }, households, authenticate }));
+  ({ server } = createApp({ config: { hsts: true, key: Buffer.alloc(32), root: ROOT }, households, authenticate, ready }));
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -34,6 +36,25 @@ const J = { 'Content-Type': 'application/json' };
 test('1. the health check answers before sign-in', async () => {
   const r = await call('GET', '/healthz', { auth: 'locked' });
   assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+});
+
+test('1b. /readyz answers before sign-in: 200 when storage answers, 503 with no detail when it does not', async () => {
+  const r = await call('GET', '/readyz', { auth: '' });
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+  storageUp = false;
+  try {
+    const d = await call('GET', '/readyz', { auth: 'locked' });
+    assert.equal(d.status, 503); assert.deepEqual(await d.json(), { ok: false });
+  } finally { storageUp = true; }
+});
+
+test('malformed requests are 400 "Bad request", never a server error: "//" and broken percent-encoding', async (t) => {
+  t.mock.method(console, 'error', (...a) => logged.push(a.join(' ')));
+  for (const p of ['//', '/%E0%A4%A', '/js/%zz']) {
+    const r = await call('GET', p);
+    assert.equal(r.status, 400, p); assert.deepEqual(await r.json(), { error: 'Bad request' }, p);
+  }
+  assert.deepEqual(logged, [], 'a bad request is not logged as a server error');
 });
 
 test('2. sign-in comes before files and the API: 401 with a challenge, 429 when locked', async () => {
@@ -61,9 +82,16 @@ test('4. writes: the same-site check comes before the JSON check', async () => {
 });
 
 test('5. API routes, then 404 for everything else', async () => {
-  assert.deepEqual(await (await call('GET', '/api/me')).json(), { user: 'sam', encrypted: true });
+  assert.deepEqual(await (await call('GET', '/api/me')).json(), { user: 'sam', encrypted: true, production: false });
   assert.equal((await call('POST', '/api/households', { headers: J, body: '{"state":{}}' })).status, 201);
-  assert.deepEqual(calls, [['create', 'sam']], 'the signed-in user is passed to the service');
+  assert.deepEqual(calls, [['create', 'sam', undefined]], 'the signed-in user is passed to the service');
+  calls = [];
+  assert.equal((await call('POST', '/api/households', { headers: { ...J, 'Idempotency-Key': 'abc-12345' }, body: '{"state":{}}' })).status, 201);
+  assert.deepEqual(calls, [['create', 'sam', 'abc-12345']], 'the Idempotency-Key header reaches the service');
+  calls = [];
+  const bad = await call('POST', '/api/households', { headers: { ...J, 'Idempotency-Key': 'short' }, body: '{"state":{}}' });
+  assert.equal(bad.status, 400); assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' });
+  assert.deepEqual(calls, [], 'a bad key never reaches the service');
   for (const [m, p] of [['GET', '/api/nope'], ['GET', '/api/households/not-a-uuid'], ['GET', `/api/households/${ID.replace('1', '2')}`], ['DELETE', `/api/households/${ID}`]])
     assert.equal((await call(m, p, { headers: J, body: m === 'GET' ? undefined : '{}' })).status, 404, `${m} ${p}`);
 });
@@ -91,6 +119,7 @@ test('errors: 400 keeps its message; anything unexpected is "Server error" with 
 test('every reply carries the security headers, with HSTS when switched on', async () => {
   for (const r of [await call('GET', '/healthz'), await call('GET', '/'), await call('GET', '/api/nope')]) {
     assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    assert.match(r.headers.get('content-security-policy'), /script-src 'self';/, 'scripts come only from this server, never a CDN');
     assert.equal(r.headers.get('x-frame-options'), 'DENY');
     assert.match(r.headers.get('strict-transport-security'), /max-age=31536000/);
   }
@@ -104,4 +133,15 @@ test('checkWrite: GET passes; matching origin or x-forwarded-host passes; JSON r
   assert.equal(checkWrite(req('PUT', { origin: 'https://proxy.example', 'x-forwarded-host': 'proxy.example', 'content-type': 'application/json' })), null);
   assert.deepEqual(checkWrite(req('PUT', { origin: 'https://evil.example', 'content-type': 'application/json' })), [403, { error: 'Cross-site request refused' }]);
   assert.deepEqual(checkWrite(req('POST', {})), [415, { error: 'Send JSON' }]);
+  // "null" is what a browser sends from a sandboxed or opaque page; anything unparsable is not this site either
+  for (const origin of ['null', 'not a url', ''])
+    assert.deepEqual(checkWrite(req('PUT', { origin, 'content-type': 'application/json' })), origin === '' ? null : [403, { error: 'Cross-site request refused' }], JSON.stringify(origin));
+});
+
+test('a write with Origin "null" or an unparsable Origin is refused as cross-site (403), not a server error', async () => {
+  for (const origin of ['null', 'not a url']) {
+    const r = await call('POST', '/api/households', { headers: { ...J, Origin: origin }, body: '{"state":{}}' });
+    assert.equal(r.status, 403, origin); assert.deepEqual(await r.json(), { error: 'Cross-site request refused' });
+  }
+  assert.deepEqual(calls, []);
 });

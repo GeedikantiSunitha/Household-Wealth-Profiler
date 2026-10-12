@@ -30,6 +30,7 @@ It fails if any of these goes wrong:
 | Tasks, Firm settings | The firm-wide tasks board and the firm settings screen render |
 | Edit conflict | A save after someone else's shows "Someone else saved this household…" and "Not saved: newer version exists"; "Reload their version" loads theirs |
 | Top bar | "Export JSON" downloads the open household |
+| Double-click | Two quick clicks on "New household" create one household, not two |
 | Phone width | Household, balance sheet and KYC captured at 390 px (page width recorded in the report) |
 | Server unreachable at start-up | When the start-up call fails, or something other than the server answers, the app shows "Cannot open the profiler" and no data-entry field: it never falls back to saving in the browser |
 
@@ -60,7 +61,7 @@ Use `npm run dev` (demo / demo, data in `./data-dev`) at http://localhost:8080.
 7. **PostgreSQL mode:** `npm start` (settings from `.env`): the start-up line says `data in PostgreSQL …`, sign in, open a household, change a field, see "All changes saved"; then in Firm settings change the firm name and see it saved after a reload.
 8. **Browser-only mode:** run `npm run build` and open `dist/wealth-profiler.html` straight from the disk (no server; it has the rules built in): the sample loads, the header shows "Working as", and the save state says "Saved in this browser only".
 
-Excel needs the internet (SheetJS loads from cdnjs) unless `scripts/fetch-xlsx.sh` has been run.
+Excel import and export use the spreadsheet library the app serves itself (`apps/web/public/vendor/`); no internet is needed.
 
 ## 3. Record the result
 

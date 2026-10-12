@@ -1,5 +1,7 @@
 /* The API server: every request goes through the same steps, in this order.
-     1. GET /healthz answers without signing in (for the host's health checks)
+     0. a request whose URL cannot be parsed is 400 "Bad request"
+     1. GET /healthz answers without signing in (the process is up); GET /readyz answers without
+        signing in once storage answers too (200), else 503 with no detail (for the host's checks)
      2. sign-in: 429 while the address is locked out, 401 with a Basic challenge when not signed in
      3. anything outside /api/ is one of the app's files (GET only, else 405)
      4. any API call that changes something: same-site check (403), then JSON check (415)
@@ -19,21 +21,33 @@ const { createPriceRoute } = require('./routes/prices.js');
 const { ID_RE } = require('./repositories/ids.js');
 
 const CHALLENGE = { 'WWW-Authenticate': 'Basic realm="Household Wealth Profiler", charset="UTF-8"' };
+const READY_TIMEOUT_MS = 3000;
 
-function createApp({ config, households, firm, prices, authenticate }) {
+// ready() must answer within the time limit, or the readiness check reports not ready
+function withinTime(promise, ms) {
+  let timer;
+  return Promise.race([promise, new Promise((_, no) => { timer = setTimeout(() => no(new Error('timed out')), ms); })]).finally(() => clearTimeout(timer));
+}
+
+function createApp({ config, households, firm, prices, authenticate, ready = async () => {} }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
-    createMeRoute({ send, encrypted: !!config.key }),
+    createMeRoute({ send, encrypted: !!config.key, production: !!config.production }),
     createFirmRoutes({ firm, send, readBody }),
     createPriceRoute({ prices, send }),
     createHouseholdRoutes({ households, ID_RE, send, readBody }),
   ];
 
   async function handle(req, res) {
-    const url = new URL(req.url, 'http://localhost');
+    let url;
+    try { url = new URL(req.url, 'http://localhost'); } catch (e) { return send(res, 400, { error: 'Bad request' }); }
     const p = url.pathname;
     if (p === '/healthz') return send(res, 200, { ok: true });
+    if (p === '/readyz') {
+      try { await withinTime(ready(), READY_TIMEOUT_MS); return send(res, 200, { ok: true }); }
+      catch (e) { console.error(new Date().toISOString(), 'not ready:', e.message); return send(res, 503, { ok: false }); }
+    }
     const auth = authenticate(req);
     if (!auth || auth.locked) {
       return send(res, auth && auth.locked ? 429 : 401, { error: auth && auth.locked ? 'Too many failed sign-ins. Try again in 15 minutes.' : 'Sign in required' },
