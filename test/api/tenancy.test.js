@@ -17,7 +17,7 @@ const { createApp } = require('../../apps/api/src/app.js');
 const { migrate, pgClient } = require('../../db/migrate.js');
 const H = require('../../packages/core/core.js');
 
-const BASE_URL = process.env.TEST_DATABASE_URL;
+const BASE_URL = require('./test-db.js').testDatabaseUrl();
 const ROOT = path.join(__dirname, '..', '..');
 const FIRM_TABLES = ['households', 'household_versions', 'audit_log', 'firm_records', 'firm_record_versions', 'firm_audit', 'idempotency_keys', 'firms'];
 const rec = (id, version, name, by = 'sam') => ({ id, version, state: { household: { name, reference: 'REF-' + id.slice(0, 4) } }, createdAt: '2026-10-10T09:00:00.000Z', createdBy: 'sam', updatedAt: `2026-10-10T09:0${version}:00.000Z`, updatedBy: by });

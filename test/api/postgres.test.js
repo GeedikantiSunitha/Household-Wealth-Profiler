@@ -12,8 +12,9 @@ const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
 const { apiContract } = require('./api-contract.js');
+const { testDatabaseUrl } = require('./test-db.js');
 
-const URL_ = process.env.TEST_DATABASE_URL;
+const URL_ = testDatabaseUrl();
 const ROOT = path.join(__dirname, '..', '..');
 const PORT = 19000 + Math.floor(Math.random() * 1000);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -31,13 +32,20 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const left = (await db.query(`select count(*)::int n from information_schema.tables where table_schema = 'public' and table_name = 'households'`)).rows[0].n;
     if (left) throw new Error('TEST_DATABASE_URL must point at an empty database');
     KEY = node(['gen-key']);
-    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
+    // DATABASE_OWNER_URL is blanked too: a developer's .env must never steer a test server's migrations elsewhere
+    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATABASE_OWNER_URL: '', DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
       AUTH_USERS: [node(['hash-password', 'sam', 'correct horse']), node(['hash-password', 'chris', 'battery staple'])].join(';') };
     proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: ENV, stdio: 'pipe' });
+    proc.stderr.on('data', d => serverLog.push(String(d))); // shown at the end if the server logged an error
     for (let i = 0; i < 50; i++) { try { if ((await fetch(BASE + '/healthz')).ok) return; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
     throw new Error('server did not start');
   });
-  test.after(async () => { if (proc) proc.kill(); if (db) await db.end(); });
+  const serverLog = [];
+  test.after(async () => {
+    if (proc) proc.kill(); if (db) await db.end();
+    const errors = serverLog.join('').split('\n').filter(l => /error/i.test(l) && !/applied migration/.test(l));
+    if (errors.length) console.error('the test server logged errors during this run:\n' + errors.join('\n'));
+  });
 
   let id;
   test('create, save, version conflict and audit trail', async () => {
@@ -86,6 +94,47 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const h = (await db.query('select reference_hmac from households where id = $1', [id])).rows[0];
     assert.match(h.reference_hmac, /^[0-9a-f]{64}$/);
     assert.match(run(), /0 household\(s\) indexed/);
+  });
+
+  test('rotate-key re-wraps every firm key with NEW_DATA_KEY; a server with the new key reads everything', async () => {
+    const run = (args, extra) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_, ...extra }, encoding: 'utf8' }).trim();
+    const before = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
+    const NEW = node(['gen-key']);
+    assert.match(run(['rotate-key'], { NEW_DATA_KEY: NEW }), /1 firm key\(s\) re-wrapped/);
+    const after = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
+    assert.notEqual(after, before); assert.match(after, /^wk:v1:/);
+    // A fresh server with the new master key opens the records sealed before the rotation
+    const p2 = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, DATA_KEY: NEW, PORT: String(PORT + 2) }, stdio: 'pipe' });
+    try {
+      const B2 = `http://127.0.0.1:${PORT + 2}`;
+      for (let i = 0; i < 50; i++) { try { if ((await fetch(B2 + '/healthz')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+      const rec = await (await fetch(`${B2}/api/households/${id}`, { headers: SAM })).json();
+      assert.equal(rec.version, 3);
+      assert.ok((await (await fetch(B2 + '/api/households', { headers: SAM })).json()).length >= 1);
+    } finally { p2.kill(); }
+    // The old master key no longer opens anything: a server with it cannot unwrap the firm key
+    const p3 = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...ENV, PORT: String(PORT + 3) }, stdio: 'pipe' });
+    try {
+      const B3 = `http://127.0.0.1:${PORT + 3}`;
+      for (let i = 0; i < 50; i++) { try { if ((await fetch(B3 + '/healthz')).ok) break; } catch (e) {} await new Promise(r => setTimeout(r, 100)); }
+      assert.equal((await fetch(`${B3}/api/households/${id}`, { headers: SAM })).status, 500);
+    } finally { p3.kill(); }
+    // Rotate back, so the rest of this file (and the server started with the old key) carry on
+    assert.match(run(['rotate-key'], { DATA_KEY: NEW, NEW_DATA_KEY: KEY }), /1 firm key\(s\) re-wrapped/);
+    assert.match(run(['rotate-key'], { NEW_DATA_KEY: KEY }).toString(), /re-wrapped/, 'the same key again is harmless');
+  });
+
+  test('rotate-key refuses while any record is still sealed with the master key itself (enc:v1)', async () => {
+    const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+    const legacy = createSealer(Buffer.from(KEY, 'base64'));
+    const lid = crypto.randomUUID();
+    const rec = { id: lid, version: 1, state: H.blank(), createdAt: '2026-10-01T00:00:00.000Z', createdBy: 'old', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'old' };
+    rec.state.household.name = 'Legacy household';
+    await db.query(`insert into households (id, version, doc, updated_at, firm_id) values ($1, 1, $2, now(), 'f1a00000-0000-4000-8000-000000000001')`, [lid, legacy.seal(JSON.stringify(rec))]);
+    const r = require('node:child_process').spawnSync(process.execPath, ['server.js', 'rotate-key'], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_, NEW_DATA_KEY: node(['gen-key']) }, encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /1 record\(s\) still sealed with DATA_KEY itself \(enc:v1\)/);
+    assert.equal((await fetch(`${BASE}/api/households/${lid}`, { headers: SAM })).status, 200, 'the legacy record still reads');
   });
 
   test('the database refuses deletes and rewrites', async () => {

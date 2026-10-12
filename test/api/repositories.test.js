@@ -150,7 +150,7 @@ test('household ids must be UUIDs', () => {
 });
 
 // PostgreSQL store: raw text = households.doc, household_versions.doc, audit_log.entry
-const BASE_URL = process.env.TEST_DATABASE_URL;
+const BASE_URL = require('./test-db.js').testDatabaseUrl();
 if (BASE_URL) {
   const { Client } = require('pg');
   // test/api/postgres.test.js uses the same database at the same time, with its own key. Each run

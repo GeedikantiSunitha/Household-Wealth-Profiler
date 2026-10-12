@@ -74,6 +74,13 @@ test('NODE_ENV=production refuses files, plaintext, plain HTTP and Basic sign-in
   assert.equal(ok({ NODE_ENV: 'development', ALLOW_PLAINTEXT: '1', DATA_KEY: '' }).production, false);
 });
 
+test('DATABASE_OWNER_URL must name the same host and database as DATABASE_URL', () => {
+  assert.equal(ok({ DATABASE_URL: 'postgres://hwp_app:a@db.example:5432/hwp', DATABASE_OWNER_URL: 'postgres://hwp_owner:b@db.example:5432/hwp' }).databaseOwnerUrl, 'postgres://hwp_owner:b@db.example:5432/hwp');
+  for (const other of ['postgres://hwp_owner:b@other.example:5432/hwp', 'postgres://hwp_owner:b@db.example:5432/other', 'not a url'])
+    assert.throws(() => ok({ DATABASE_URL: 'postgres://hwp_app:a@db.example:5432/hwp', DATABASE_OWNER_URL: other }),
+      { message: 'DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).' }, other);
+});
+
 test('a malformed AUTH_USERS entry is refused at start-up, not as a server error at sign-in', () => {
   for (const bad of [`sam:${'ab'.repeat(16)}:${'cd'.repeat(63)}`, `sam:${'ab'.repeat(15)}:${'cd'.repeat(64)}`, `sam:${'zz'.repeat(16)}:${'cd'.repeat(64)}`]) {
     assert.throws(() => parseUsers(bad), { message: 'AUTH_USERS entry for "sam" is malformed: expected name:salt:hash exactly as printed by node server.js hash-password.' }, bad);

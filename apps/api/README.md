@@ -20,7 +20,7 @@ API does. `server.js` at the project root is now a one-line pointer to `src/main
 | `src/crypto/` | Encrypts and decrypts records (AES-256-GCM): each firm has its own data key, stored wrapped by `DATA_KEY`; the keyed index of client references. The only code that holds keys |
 | `src/repositories/` | The only storage code: the file store (development) and the PostgreSQL store, behind one interface. `forFirm(firmId)` gives a store that sees that firm alone; in PostgreSQL every call sets `app.firm_id` for its transaction and row-level security does the rest |
 | `src/db/` | The PostgreSQL pool and transactions; migrations through `db/migrate.js` (development applies them at start-up; production refuses to start while one is pending) |
-| `src/cli/` | `hash-password`, `gen-key`, `import-files`, `migrate` (as the owner), `index-references` |
+| `src/cli/` | `hash-password`, `gen-key`, `import-files`, `migrate` (as the owner), `index-references`, `rotate-key` (re-wraps the firm keys with a new `DATA_KEY`) |
 
 ## Rules
 

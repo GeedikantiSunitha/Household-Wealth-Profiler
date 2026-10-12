@@ -217,12 +217,30 @@ audit trail:
 node server.js import-files ./data     # households already in the database are skipped
 ```
 
-A new household whose client reference another household in the firm already has (in any
-spelling) is refused. The index behind that check is a keyed hash, filled in for households saved
-before it existed with `node server.js index-references`.
+A client reference may exist once per firm: a create or save that would give a household another
+household's reference (in any spelling) is refused, and the database's unique index guarantees it.
+The index is a keyed hash, filled in for households saved before it existed with
+`node server.js index-references`; migration 0005 refuses to apply until any existing duplicates
+are resolved, and 0006 refuses until every row names its firm.
 
 Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
-keep `DATA_KEY` in a different place from the backups.
+keep `DATA_KEY` in a different place from the backups. Row-level security is forced on every
+table, so a backup must run as a superuser or as a role with `BYPASSRLS`, never as `hwp_app`
+(it would see nothing) or `hwp_owner` (it reads but cannot switch row security off).
+
+**Rotating `DATA_KEY`.** Records are sealed with each firm's own key; only those keys are wrapped
+by `DATA_KEY`, so rotating it rewrites no record:
+
+```sh
+node server.js gen-key                               # the new key; keep it in the secrets store
+NEW_DATA_KEY=... node server.js rotate-key           # as the owner: re-wraps every firm key, in one transaction
+```
+
+Then set `DATA_KEY` to the new key on every server and restart them; servers still running keep
+working from the keys they already unwrapped, so there is no outage. Keep the old key until every
+server has restarted, then retire it. The command refuses, changing nothing, while any record is
+still sealed with `DATA_KEY` itself (`enc:v1`, from before tenancy); re-sealing those is Phase 4's
+work, and such a database keeps its key until then.
 
 **Changing the database.** Add a new file such as `db/migrations/0002_add_x.sql`; never edit
 one that has been applied (the server refuses to start if an applied file changes). Each file

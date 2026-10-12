@@ -3,7 +3,7 @@
      1. commands that need no settings (hash-password, gen-key)
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
-     4. a data command (import-files, migrate, index-references), or prepare storage and start
+     4. a data command (import-files, migrate, index-references, rotate-key), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
         migrate with DATABASE_OWNER_URL).
@@ -25,6 +25,7 @@ const { createAuth } = require('./auth');
 const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
+const { rotateKey } = require('./cli/rotate-key.js');
 
 const STOP_TIMEOUT_MS = 10e3;
 
@@ -60,6 +61,11 @@ function main([cmd, ...args] = []) {
     if (!url) { console.error('Set DATABASE_OWNER_URL (or DATABASE_URL) to the database to migrate.'); process.exit(1); }
     migrateWith(url, path.join(config.root, 'db', 'migrations'))
       .then(done => { console.log(done.length ? `Applied ${done.length} migration(s): ${done.join(', ')}` : 'No migrations pending.'); }, e => { console.error(e.message); process.exit(1); });
+    return;
+  }
+  if (cmd === 'rotate-key') {
+    rotateKey({ ownerUrl: config.databaseOwnerUrl || config.databaseUrl, key: config.key, newKey: config.newKey })
+      .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
     return;
   }
   const sealer = createSealer(config.key);
