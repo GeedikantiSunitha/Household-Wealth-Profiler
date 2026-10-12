@@ -14,3 +14,6 @@ Dockerfile text eol=lf
 *.ico binary
 *.xlsx binary
 *.pdf binary
+
+# Vendored library, pinned by hash: stored and checked out byte for byte
+apps/web/public/vendor/xlsx.full.min.js -text
