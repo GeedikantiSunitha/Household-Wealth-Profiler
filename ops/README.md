@@ -4,7 +4,7 @@ Tools for operating a deployment, kept apart from the app itself.
 
 | Folder | Holds | When |
 | --- | --- | --- |
-| `migrate-data/` | Copying existing data into PostgreSQL (today `node server.js import-files`) | Step B21 |
+| `migrate-data/` | One-off data migrations between storage set-ups. (Copying a file store into PostgreSQL is part of the API itself, `node server.js import-files` in `apps/api/src/cli/import-files.js`, because it uses the API's own storage code.) | When a migration is needed |
 | `backup/` | Encrypted database backups to storage outside the hosting platform | Before go-live |
 | `restore/` | Restoring a backup and checking it (record counts, records decrypt) | Before go-live |
 | `admin/` | Firm administration (create firm, seats, suspend) | With multi-firm support |

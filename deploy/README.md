@@ -2,7 +2,7 @@
 
 | Folder | Holds | When |
 | --- | --- | --- |
-| `local/` | Running the app on your own machine (today `npm run dev` and `npm start`) | Step B21 |
+| `local/` | Running the app on your own machine: `dev.js` is `npm run dev` (demo login, no encryption, data in `./data-dev`, any `.env` database ignored; development only). `npm start` runs the real set-up from `.env` | Done |
 | `dcdeploy/` | DCDeploy services: web, api, database and the backup job; setting names per environment | When hosting is decided |
 
 Setting **names** live here, never their values. Values go in the hosting platform's secret
