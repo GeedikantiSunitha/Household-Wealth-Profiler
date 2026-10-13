@@ -171,7 +171,9 @@ from another even if application code has a bug. The tables, from [db/migrations
 `firms`, `users`, `memberships`, `households`, `household_versions`, `audit_log`, the firm
 settings in `firm_records`, `firm_record_versions` and `firm_audit`, `idempotency_keys` (a day of
 create keys, no client data: a hash of firm, user and key, the reply's id and version, and a keyed
-hash of the request) and `schema_migrations`. Database triggers refuse any delete or
+hash of the request), the sign-in tables `sessions`, `recovery_codes`, `one_time_tokens`,
+`access_requests` and `auth_events` (reachable by the app role only inside sign-in, never client data)
+and `schema_migrations`. Database triggers refuse any delete or
 rewrite of households, firm settings, versions and audit entries. Each firm's records are
 encrypted with the firm's own key, itself stored wrapped by `DATA_KEY`, so the database never
 holds readable client data and the master key never touches a record. Saves lock the household's
@@ -224,10 +226,84 @@ The index is a keyed hash, filled in for households saved before it existed with
 `node server.js index-references`; migration 0005 refuses to apply until any existing duplicates
 are resolved, and 0006 refuses until every row names its firm.
 
-Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
-keep `DATA_KEY` in a different place from the backups. Row-level security is forced on every
-table, so a backup must run as a superuser or as a role with `BYPASSRLS`, never as `hwp_app`
-(it would see nothing) or `hwp_owner` (it reads but cannot switch row security off).
+Every household and firm settings record is held to field rules before it is stored (text lengths,
+numbers, dates, dropdown options, row counts; see apps/api/src/services/validate.js), and a request
+that breaks one is refused with the field path and the rule. Before enforcing the rules on a database
+that was filled under older rules, list what would be refused, without changing anything:
+
+```sh
+node server.js check-records            # every firm (as the owner on PostgreSQL); exit 2 when anything is flagged
+node server.js check-records FIRM_ID    # one firm
+```
+
+Sign-in accounts (Phase 2) are made by the operator as the owner; the app role cannot create them.
+The password is read from standard input so it never appears on a command line, and the account is
+asked to set up its authenticator app at its first sign-in:
+
+```sh
+node server.js create-user dana@example.com "Dana Adviser" [FIRM_ID] [admin|adviser|compliance]
+echo "a passphrase of at least 12 characters" | node server.js set-password dana@example.com
+```
+
+**Backups and the restore drill.** Run the backup on a schedule (daily at least) as a job of its
+own, and the restore drill after every change to the backup set-up and at least monthly. Both
+need `pg_dump` / `pg_restore` of at least the server's version (`PG_BIN` if they are not on the PATH):
+
+```sh
+node server.js gen-key                  # once: BACKUP_KEY, a key of its own (never DATA_KEY)
+node server.js backup                   # BACKUP_DATABASE_URL, BACKUP_DIR, BACKUP_KEY
+node server.js restore-drill            # the newest backup in BACKUP_DIR; or name a file
+node server.js restore-drill FILE --keep   # keeps the restored copy as a database (a real restore)
+```
+
+A backup dumps one consistent snapshot, encrypted as it streams (no unencrypted dump is ever on
+disk), with a signed manifest beside it: the row count of every table taken in that same snapshot,
+the migrations, triggers and policies, and the file's SHA-256. Backups older than
+`BACKUP_RETENTION_DAYS` (35) are removed; the newest never is. Row-level security is forced on every
+table, so `BACKUP_DATABASE_URL` must be a superuser or a role with `BYPASSRLS`; the command refuses
+`hwp_app` and `hwp_owner` (row security would leave rows out). Copy `BACKUP_DIR` off the hosting
+platform, and keep `BACKUP_KEY`, `DATA_KEY` and the backups in three separate places.
+
+The drill checks the manifest's signature and the file's checksum, restores into a new scratch
+database (`<database>_restore_drill_<time>`), and checks that every table has its recorded row
+count, the migrations, retention triggers and row-security policies are all back, every record
+opens with its firm's key (so `DATA_KEY` still works with it), and the app role sees no client row
+without a firm and only that firm's with one. It writes a report beside the backup
+(`<file>.drill-<time>.json`, with the restore time), drops the scratch database, and exits 0 only
+when every check passed. To restore for real: run the drill with `--keep` on the target server,
+read the report, then point `DATABASE_URL` / `DATABASE_OWNER_URL` at the kept database (or rename
+it) and restart; give `hwp_owner` and `hwp_app` their passwords if the cluster is new. A restore
+brings back any household purged after the backup was made: re-apply those purges from the purge
+register before the copy is used (see Records and retention).
+
+**Records and retention (Phase 4).** Every read of a client file is logged in the access log (who,
+when, which household, the outcome; never client data): the client list, opening a household,
+its audit trail, exports from the browser (Excel, JSON, print), subject access exports, and every
+refused attempt (an id not in the firm, an action the role may not take). Entries can never be
+changed or deleted. An administrator or compliance user records the day a household's
+relationship ended (Records and retention, in the firm menu); the household is then kept for
+`RETENTION_YEARS` (5, the Money Laundering Regulations 2017 minimum) and may be purged from the day
+after: one administrator or compliance user requests the purge with a reason, a different one
+approves it, and the database function `purge_household()` deletes the household with every
+version, its change audit and its retention row, after checking all of that again. The request
+stays as the purge register (who asked, who approved, when, the row counts). Nothing else can
+delete a record: the app role has no delete privilege, and the retention triggers refuse every
+other delete. Check before approving that no other law, complaint, investigation or litigation
+hold requires the record to be kept longer (for example pension transfer advice). Data purged
+stays in backups until they age out (`BACKUP_RETENTION_DAYS`).
+
+A client's subject access request is answered from the same page (Subject access export): one
+JSON file with the current record, every version, the change audit, the access log and the
+retention status, and a cover listing every person in the household, whose data must be
+redacted before release unless they agree (UK GDPR Article 15(4)). For a user of the app (an
+adviser's own request), the operator runs, as the owner:
+
+```sh
+node server.js subject-access-user dana@example.com dana-sar.json
+```
+
+which writes the account, memberships, sessions, sign-in events, access requests, access log and
+purge decisions, never a password, authenticator, link or code hash.
 
 **Rotating `DATA_KEY`.** Records are sealed with each firm's own key; only those keys are wrapped
 by `DATA_KEY`, so rotating it rewrites no record:
@@ -235,6 +311,7 @@ by `DATA_KEY`, so rotating it rewrites no record:
 ```sh
 node server.js gen-key                               # the new key; keep it in the secrets store
 NEW_DATA_KEY=... node server.js rotate-key           # as the owner: re-wraps every firm key, in one transaction
+                                                    # and re-seals every authenticator secret (sign-in accounts)
 ```
 
 Then set `DATA_KEY` to the new key on every server and restart them; servers still running keep
@@ -271,7 +348,10 @@ single-file demo build, opened from disk, fetches it from SheetJS's own CDN.
 | Versions | Every save is kept in `versions/` (or `household_versions`). Two people editing at once cannot overwrite each other: the second save is refused and they reload |
 | Audit trail | The server compares each save with the previous version and logs who changed which field, when, from what and to what |
 | No duplicates | Each create carries an `Idempotency-Key`; a repeat within a day (a double-click, a retried request) returns the first household instead of making a second; the same key with a different request is refused (422). A record that cannot be read is logged and left out of the list rather than hiding every other household |
-| Retention | There is no delete endpoint. The Money Laundering Regulations require records for 5 years after the relationship ends. Handle erasure requests through an admin process |
+| Field rules | Every household and firm settings record is held to one rule per field type before it is stored (text lengths, numbers, real dates, dropdown options, row counts; apps/api/src/services/validate.js). A value outside the rules is refused with 400 `invalid_field` and a list of field paths and rules, never the value. Every error reply carries a `code` (`duplicate_reference`, `version_conflict`, `invalid_field`, `idempotency_mismatch`, `busy`, `not_found`, ...) so the app can show the right message |
+| Retention | There is no delete endpoint. The Money Laundering Regulations require records for 5 years after the relationship ends (`RETENTION_YEARS`). After that a household may be purged when one administrator or compliance user requests it and a different one approves; the purge register keeps who, when and what was removed |
+| Access log | Every read of a client file, every export and every refused attempt is logged (who, when, which household, outcome), and can never be changed. A subject access export gives a client everything kept about the household |
+| Backups | `node server.js backup`: an encrypted (own `BACKUP_KEY`), consistent, checksummed backup with a signed manifest; `node server.js restore-drill` proves it restores, with every record readable and firms kept apart |
 | Web security | Content Security Policy, no framing, same-origin check on writes, 2 MB request limit, input is filtered to known fields |
 | Operations | `/healthz` (the process is up) and `/readyz` (storage answers) for the host's checks; on SIGTERM requests in flight finish before the process exits. With `NODE_ENV=production` the server refuses to start with files instead of PostgreSQL, without encryption, without HTTPS, or with Basic sign-in |
 

@@ -24,7 +24,7 @@ function createPool(url, max) {
 async function connect(pool) {
   try { return await pool.connect(); }
   catch (e) {
-    if (/timeout exceeded when trying to connect/i.test(e.message)) throw Object.assign(new Error('The server is busy. Try again in a moment.'), { status: 503, cause: e });
+    if (/timeout exceeded when trying to connect/i.test(e.message)) throw Object.assign(new Error('The server is busy. Try again in a moment.'), { status: 503, code: 'busy', cause: e });
     throw e;
   }
 }
@@ -52,16 +52,22 @@ const logLine = m => console.log(new Date().toISOString(), m);
 
 // Applies any new migration files; several processes starting at once take turns. Nothing is
 // touched when none is pending, so the app role (which may not create tables) starts fine.
+// A migration, and its wait for the lock while another process migrates, may take longer than the
+// query timeout that protects ordinary requests, so the connection runs it without one
 async function runMigrations(pool, dir) {
   const c = await pool.connect();
   try {
+    await c.query('set statement_timeout = 0');
     const db = pgClient(c);
     if (!(await pending(db, { dir })).length) return [];
     return await migrate(db, { dir, log: logLine });
   } catch (e) {
     if (e.code === '42501') e.message = `${e.message}. Migrations are pending and DATABASE_URL cannot apply them: set DATABASE_OWNER_URL, or run node server.js migrate as the owner.`;
     throw e;
-  } finally { c.release(); }
+  } finally {
+    await c.query(`set statement_timeout = ${POOL_OPTIONS.statement_timeout}`).catch(() => {}); // the pooled connection goes back with its usual limit
+    c.release();
+  }
 }
 
 // The same, on a separate connection as the owner (DATABASE_OWNER_URL)
@@ -69,7 +75,7 @@ async function migrateWith(url, dir) {
   const pg = require('pg');
   const c = new pg.Client({ connectionString: url });
   await c.connect();
-  try { return await migrate(pgClient(c), { dir, log: logLine }); }
+  try { await c.query('set statement_timeout = 0'); return await migrate(pgClient(c), { dir, log: logLine }); }
   finally { await c.end(); }
 }
 

@@ -106,6 +106,69 @@ test('0009: idempotency keys gain a nullable request hash; rows from before it s
   } finally { await pg.close(); }
 });
 
+const AUTH_TABLES = ['sessions', 'recovery_codes', 'one_time_tokens', 'access_requests', 'auth_events'];
+const USER_COLUMNS = ['password_hash', 'password_set_at', 'totp_secret', 'totp_pending', 'totp_confirmed_at', 'totp_last_step', 'failed_attempts', 'not_before', 'last_sign_in_at', 'reenrol'];
+test('0010: sign-in columns and tables; the app role reaches accounts and sessions only with app.auth set for the transaction; auth events are frozen', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await upTo(pg, '0009_idempotency_request.sql');
+    await pg.query(`insert into users (email, name) values ('sam@example.com', 'Sam')`);
+    const applied = await migrate(db, { dir: DIR });
+    assert.ok(applied.includes('0010_auth.sql'), applied.join());
+    const cols = (await db.query(`select column_name from information_schema.columns where table_name = 'users'`)).map(r => r.column_name);
+    for (const c of USER_COLUMNS) assert.ok(cols.includes(c), 'users.' + c);
+    assert.deepEqual((await db.query(`select password_hash, failed_attempts, totp_last_step, reenrol from users`))[0], { password_hash: null, failed_attempts: 0, totp_last_step: 0, reenrol: false }, 'an existing account keeps safe defaults: it cannot sign in until a password is set');
+    for (const t of AUTH_TABLES) assert.deepEqual((await db.query(`select relrowsecurity as on, relforcerowsecurity as forced from pg_class where relname = $1`, [t]))[0], { on: true, forced: true }, t);
+    const [u] = await db.query('select id from users');
+
+    await pg.exec('set role hwp_app');
+    for (const t of ['users', 'memberships', ...AUTH_TABLES]) assert.equal((await db.query(`select count(*)::int n from ${t}`))[0].n, 0, `${t}: nothing without app.auth`);
+    await assert.rejects(pg.query(`insert into auth_events (event) values ('x')`), /row-level security/, 'no insert without app.auth');
+    const r = await pg.exec(`begin; select set_config('app.auth', 'on', true); select count(*)::int as n from users;
+      insert into sessions (id_hash, user_id, stage, expires_at) values ('h1', '${u.id}', 'password', now() + interval '1 hour');
+      update users set failed_attempts = 1, not_before = now() where id = '${u.id}';
+      insert into auth_events (user_id, event, outcome) values ('${u.id}', 'sign_in', 'ok');
+      select count(*)::int as n from sessions; commit`);
+    assert.equal(r[2].rows[0].n, 1, 'with app.auth set, the accounts are visible');
+    assert.equal(r[6].rows[0].n, 1, 'and the session it wrote');
+    assert.equal((await db.query(`select count(*)::int n from sessions`))[0].n, 0, 'the setting ended with the transaction');
+    await assert.rejects(pg.query(`update users set email = 'other@example.com'`), /permission denied/, 'the app role may change sign-in columns only, never the email');
+    await assert.rejects(pg.query(`insert into users (email) values ('new@example.com')`), /row-level security|permission denied/, 'no account is made outside sign-in (0011 allows it within)');
+    await pg.exec('reset role');
+
+    await assert.rejects(pg.query(`update auth_events set outcome = 'changed'`), /not allowed/, 'auth events are never rewritten');
+    await assert.rejects(pg.query(`delete from auth_events`), /not allowed/, 'nor deleted');
+    assert.equal((await db.query(`select count(*)::int n from auth_events`))[0].n, 1, 'the owner reads them');
+    assert.equal((await db.query(`select count(*)::int n from sessions`))[0].n, 1, 'and the sessions');
+  } finally { await pg.close(); }
+});
+
+test('0011: within sign-in the app role can make an account with a membership and decide an access request; still never change an email or delete', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await upTo(pg, '0010_auth.sql');
+    const applied = await migrate(db, { dir: DIR });
+    assert.ok(applied.includes('0011_auth_invites.sql'), applied.join());
+    await pg.exec('set role hwp_app');
+    await assert.rejects(pg.query(`insert into users (email, name) values ('new@example.com', 'New')`), /row-level security/, 'nothing outside sign-in');
+    const r = await pg.exec(`begin; select set_config('app.auth', 'on', true);
+      insert into users (email, name) values ('new@example.com', 'New');
+      insert into memberships (user_id, firm_id, role) select id, '${DEFAULT_FIRM}', 'adviser' from users where email = 'new@example.com';
+      insert into access_requests (name, email) values ('Someone', 'someone@example.com');
+      update access_requests set status = 'approved', decided_by = 'operator', decided_at = now();
+      select count(*)::int as n from memberships; commit`);
+    assert.equal(r[6].rows[0].n, 1);
+    await assert.rejects(pg.query(`update users set email = 'x@example.com'`), /permission denied/);
+    await assert.rejects(pg.query(`update users set active = false`), /permission denied/, 'deactivation is not the app role\'s (Phase 3)');
+    await assert.rejects(pg.query(`update users set name = 'x'`), /permission denied/);
+    await assert.rejects(pg.query(`update memberships set role = 'admin'`), /permission denied/, 'roles are not the app role\'s (Phase 3)');
+    await assert.rejects(pg.query(`update memberships set active = false`), /permission denied/);
+    for (const t of ['users', 'memberships', 'access_requests', 'sessions', 'recovery_codes', 'one_time_tokens']) await assert.rejects(pg.query(`delete from ${t}`), /permission denied/, 'delete ' + t);
+    await pg.exec('reset role');
+    assert.equal((await db.query(`select status from access_requests`))[0].status, 'approved');
+  } finally { await pg.close(); }
+});
+
 // A database with every migration up to and including `last` applied, for testing the next one
 async function upTo(pg, last) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-upto-'));

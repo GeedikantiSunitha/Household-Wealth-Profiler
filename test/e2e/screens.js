@@ -82,7 +82,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
   try {
     const demo = execFileSync(process.execPath, ['server.js', 'hash-password', 'demo', 'demo'], { cwd: ROOT }).toString().trim();
     app = spawn(process.execPath, ['server.js'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PORT: String(appPort), HOST: '127.0.0.1',
-      DATA_DIR: data, DATABASE_URL: '', DATA_KEY: '', ALLOW_PLAINTEXT: '1', HSTS: '0', AUTH_USERS: demo } });
+      DATA_DIR: data, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', DATA_KEY: '', ALLOW_PLAINTEXT: '1', HSTS: '0', AUTH_USERS: demo } });
     await waitHttp(BASE + 'healthz');
     chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
       `--remote-debugging-port=${debugPort}`, '--remote-allow-origins=*', `--user-data-dir=${profile}`, '--window-size=1366,900', 'about:blank'], { stdio: 'ignore' });
@@ -93,11 +93,11 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     // Script errors anywhere fail the run, except the 409 in the conflict step (expect409) and the
     // failed start-up call in the "server unreachable" steps (breakMe: { how, url }; 'down' fails
     // the call, 'html' answers a non-JSON page).
-    let expect409 = false, breakMe = null;
+    let expect409 = false, breakMe = null; let expect400 = false, expectAuth = false;
     page.on((method, p) => {
       if (method === 'Runtime.exceptionThrown') problems.push('Script error: ' + (p.exceptionDetails.exception?.description || p.exceptionDetails.text));
       if (method === 'Runtime.consoleAPICalled' && p.type === 'error') problems.push('console.error: ' + p.args.map(a => a.value ?? a.description).join(' '));
-      if (method === 'Log.entryAdded' && p.entry.level === 'error' && !(expect409 && /status of 409/.test(p.entry.text)) && !(breakMe && breakMe.url.test(p.entry.url || ''))) problems.push('Browser error: ' + p.entry.text + ' ' + (p.entry.url || ''));
+      if (method === 'Log.entryAdded' && p.entry.level === 'error' && !(expect409 && /status of 409/.test(p.entry.text)) && !(expect400 && /status of 400/.test(p.entry.text)) && !(expectAuth && /status of (401|403|429)/.test(p.entry.text)) && !(breakMe && breakMe.url.test(p.entry.url || ''))) problems.push('Browser error: ' + p.entry.text + ' ' + (p.entry.url || ''));
     });
     for (const d of ['Page', 'Runtime', 'Log']) await page.send(d + '.enable');
     // Sign in as a browser does: the Basic header goes to the app's own address only
@@ -270,6 +270,37 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       const after = await js(`document.querySelectorAll('.clients tbody tr').length`);
       if (after !== before + 1) throw new Error(`${after - before} households were created`);
     });
+    // The server refuses a save by code; the app names what to change, not the conflict warning, and retries on the next edit
+    await step('a save refused as a duplicate client reference says so (not the conflict warning) and goes through once the reference is changed', async () => {
+      await click('[data-act="openHousehold"]'); // the newest household: the blank one just created
+      await until(`!!document.querySelector('#hhName') && !document.querySelector('.clients')`, 'the household');
+      await nav('household');
+      await until(`!!document.querySelector('#f-household-0-reference')`, 'the form');
+      expect409 = true;
+      await type('#f-household-0-reference', 'HH-OTHER'); // the Harrington household's reference
+      await until(`/another household in this firm already uses this client reference/.test(document.body.textContent)`, 'the duplicate-reference banner', 10000);
+      expect409 = false;
+      if (/Someone else saved this household/.test(await text('body'))) throw new Error('the conflict warning was shown for a duplicate reference');
+      if (await text('#saveState') !== 'Not saved: client reference already in use') throw new Error('save state: ' + await text('#saveState'));
+      await shot('duplicate-reference');
+      await type('#f-household-0-reference', 'HH-UNIQUE');
+      await until(`document.querySelector('#saveState').textContent === 'All changes saved'`, 'the save after the correction', 10000);
+      if (/already uses this client reference/.test(await text('body'))) throw new Error('the banner stayed after the save went through');
+    });
+    await step('a value outside the field rules is refused with the screen and field named (never the value), and saved once corrected', async () => {
+      expect400 = true;
+      await type('#f-household-0-giftsLast7', '10000000000000');
+      await until(`/Not saved: some values are outside the rules/.test(document.body.textContent)`, 'the refusal banner', 10000);
+      expect400 = false;
+      const banner = await text('.banner.bad');
+      if (!/Household, Gifts in last 7 years \(£\): must be between -1,000,000,000,000 and 1,000,000,000,000/.test(banner)) throw new Error('the problem is not named: ' + banner);
+      if (/10000000000000/.test(banner)) throw new Error('the banner echoes the submitted value');
+      if (await text('#saveState') !== 'Not saved: see the message above') throw new Error('save state: ' + await text('#saveState'));
+      await shot('refused-value');
+      await type('#f-household-0-giftsLast7', '1000');
+      await until(`document.querySelector('#saveState').textContent === 'All changes saved'`, 'the save after the correction', 10000);
+      if (/outside the rules/.test(await text('body'))) throw new Error('the banner stayed after the save went through');
+    });
     for (const [how, url, label, message] of [
       ['down', /\/api\/me$/, 'the server is unreachable', /The server could not be reached, so nothing you enter would be saved/],
       ['html', /\/api\/me$/, 'something other than the server answers', /The server could not be reached, so nothing you enter would be saved/],
@@ -285,6 +316,114 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
         breakMe = null;
       });
     }
+    // ---- The app's own sign-in (session mode), against a scratch PostgreSQL database when TEST_DATABASE_URL is set
+    const DB = process.env.TEST_DATABASE_URL;
+    if (DB) {
+      const { codeAt, base32Decode } = require('../../apps/api/src/auth/totp.js');
+      const port2 = await freePort(); const BASE2 = `http://127.0.0.1:${port2}/`;
+      const key = execFileSync(process.execPath, ['server.js', 'gen-key'], { cwd: ROOT }).toString().trim();
+      const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', PUBLIC_URL: BASE2.replace(/\/$/, '') };
+      execFileSync(process.execPath, ['server.js', 'migrate'], { cwd: ROOT, env: env2 });
+      execFileSync(process.execPath, ['server.js', 'create-user', 'ava@example.com', 'Ava Adviser'], { cwd: ROOT, env: env2 });
+      execFileSync(process.execPath, ['server.js', 'set-password', 'ava@example.com'], { cwd: ROOT, env: env2, input: 'correct horse battery staple\n' });
+      let log2 = '';
+      const app2 = spawn(process.execPath, ['server.js'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: env2 });
+      app2.stdout.on('data', d => { log2 += d; }); app2.stderr.on('data', d => { log2 += d; });
+      expectAuth = true;
+      try {
+        await waitHttp(BASE2 + 'healthz');
+        const go2 = async (hash = '') => { await page.send('Page.navigate', { url: BASE2 + hash }); await until(`document.readyState === 'complete' && !!document.querySelector('#gate, #main h2')`, 'the app', 30000); };
+        const fill = (sel, v) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('No field ' + ${JSON.stringify(sel)}); el.value = ${JSON.stringify(v)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+        const submit = () => js(`(() => { document.querySelector('#gate button[type=submit]').click(); return true; })()`);
+        const heading = () => js(`document.querySelector('#gate h2')?.textContent || document.querySelector('#main h2')?.textContent || ''`);
+        let secret, usedStep = 0;
+        const nextCode = () => { const now = Math.floor(Date.now() / 30000); const step = now > usedStep ? now : usedStep + 1; usedStep = step; return codeAt(base32Decode(secret), step); };
+        await step('sign-in page: Sign in and Request access, no data on screen, no Basic prompt', async () => {
+          await go2();
+          await until(`!!document.querySelector('#gate')`, 'the sign-in form');
+          if (await heading() !== 'Sign in') throw new Error('heading: ' + await heading());
+          if (await js(`!!document.querySelector('[data-k]')`)) throw new Error('a data field is on screen');
+          await shot('signin');
+        });
+        await step('Request access: the form is stored and acknowledged; the operator is told', async () => {
+          await click('[data-gate="request"]');
+          await until(`document.querySelector('#gate h2')?.textContent === 'Request access'`, 'the request form');
+          await fill('#g-name', 'New Adviser'); await fill('#g-email', 'new@example.com'); await fill('#g-firm', 'Alder Wealth'); await fill('#g-note', 'I work with Ava');
+          await shot('request-access');
+          await submit();
+          await until(`/Thank you/.test(document.querySelector('#gate')?.textContent || '')`, 'the acknowledgement', 10000);
+          if (!/Access request from New Adviser/.test(log2)) throw new Error('the operator was not told (log fallback)');
+          await click('[data-gate="signin"]');
+          await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'back to sign in');
+        });
+        await step('first sign-in: password, then the authenticator is set up (QR code and key) and confirmed with a code; recovery codes shown once; the client list', async () => {
+          await fill('#g-email', 'ava@example.com'); await fill('#g-password', 'correct horse battery staple'); await submit();
+          await until(`document.querySelector('#gate h2')?.textContent === 'Set up two-step verification'`, 'the enrolment screen', 15000);
+          await until(`!!document.querySelector('.gate-qr svg') && !!document.querySelector('[data-secret]')`, 'the QR code and key', 10000);
+          secret = await js(`document.querySelector('[data-secret]').dataset.secret`);
+          await shot('enrol');
+          await fill('#g-code', nextCode()); await submit();
+          await until(`document.querySelector('#gate h2')?.textContent === 'Your recovery codes'`, 'the recovery codes', 15000);
+          const codes = await js(`[...document.querySelectorAll('.codes li')].map(l => l.textContent)`);
+          if (codes.length !== 10) throw new Error('codes shown: ' + codes.length);
+          await shot('recovery-codes');
+          await click('[data-gate="done"]');
+          await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list', 15000);
+          if (!/Ava Adviser/.test(await text('#who'))) throw new Error('top bar: ' + await text('#who'));
+          await shot('session-clients');
+        });
+        await step('the user menu: account security (change password, new authenticator, sign out everywhere); sign out returns to the sign-in page', async () => {
+          await click('#who summary');
+          await shot('user-menu');
+          await click('[data-act="account"]');
+          await until(`document.querySelector('#main h2')?.textContent === 'Account security'`, 'the account page');
+          await shot('account-security');
+          await click('#who summary'); await click('[data-act="signOut"]');
+          await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'the sign-in page', 15000);
+        });
+        await step('forgotten password: the link (from the log here) opens the new-password screen; the new password and a code sign in', async () => {
+          await click('[data-gate="forgot"]');
+          await until(`document.querySelector('#gate h2')?.textContent === 'Reset your password'`, 'the reset form');
+          await fill('#g-email', 'ava@example.com'); await submit();
+          await until(`/If that address has an account/.test(document.querySelector('#gate')?.textContent || '')`, 'the acknowledgement', 10000);
+          const m = /#reset=([A-Za-z0-9_-]{43})/.exec(log2); if (!m) throw new Error('no reset link in the server log');
+          await page.send('Page.navigate', { url: 'about:blank' }); // as from an email: a fresh navigation, not a fragment change
+          await go2('#reset=' + m[1]);
+          await until(`document.querySelector('#gate h2')?.textContent === 'Choose a new password'`, 'the new-password screen');
+          await shot('new-password');
+          await fill('#g-password', 'a wholly new passphrase 1'); await fill('#g-again', 'a wholly new passphrase 1'); await submit();
+          await until(`/Your password has been changed/.test(document.querySelector('#gate')?.textContent || '')`, 'the confirmation', 10000);
+          await click('[data-gate="signin"]');
+          await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'the sign-in form');
+          await fill('#g-email', 'ava@example.com'); await fill('#g-password', 'a wholly new passphrase 1'); await submit();
+          await until(`document.querySelector('#gate h2')?.textContent === 'Two-step verification'`, 'the code screen', 15000);
+          await shot('totp');
+          await fill('#g-code', nextCode()); await submit();
+          await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list', 15000);
+        });
+        await step('records and retention (Phase 4): hidden from an adviser; a compliance user ends a relationship, requests a purge, and cannot approve it alone', async () => {
+          if (await js(`!!document.querySelector('[data-act="records"]')`)) throw new Error('an adviser sees Records and retention');
+          await click('[data-act="newBlank"]');
+          await until(`document.querySelector('#main h2') && document.querySelector('#main h2').textContent !== 'Households'`, 'the new household', 15000);
+          execFileSync(process.execPath, ['server.js', 'create-user', 'ava@example.com', 'Ava Adviser', 'f1a00000-0000-4000-8000-000000000001', 'compliance'], { cwd: ROOT, env: env2 });
+          await go2();
+          await until(`!!document.querySelector('[data-act="records"]')`, 'the Records and retention entry for a compliance user', 15000);
+          await click('[data-act="records"]');
+          await until(`document.querySelector('#main h2')?.textContent === 'Records and retention' && !!document.querySelector('[data-rec="end"]')`, 'the records page', 15000);
+          await shot('records');
+          await js(`(() => { const el = document.querySelector('input[type=date][id^="end-"]'); el.value = '2015-01-10'; return true; })()`);
+          await click('[data-rec="end"]');
+          await until(`!!document.querySelector('[data-rec="request"]')`, 'the purge request form (retention ended 2020-01-10)', 15000);
+          await fill('[id^="why-"]', 'Retention period over');
+          await click('[data-rec="request"]');
+          await until(`/Your request: someone else must approve/.test(document.querySelector('#main').textContent)`, 'the waiting request, with no approve button for the requester', 15000);
+          if (await js(`!!document.querySelector('[data-rec="ask"], [data-rec="approve"]')`)) throw new Error('the requester is offered approval');
+          await shot('records-requested');
+          await click('[data-rec="log"]');
+          await until(`/Hide access log/.test(document.querySelector('#main').textContent)`, 'the access log', 15000);
+        });
+      } finally { expectAuth = false; app2.kill(); }
+    } else results.push('INFO  the sign-in screens (session mode) were not checked: set TEST_DATABASE_URL to a scratch database');
   } catch (e) { fail('run stopped: ' + e.message); }
   finally {
     try { page && page.close(); } catch (e) {}

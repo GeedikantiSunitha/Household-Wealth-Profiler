@@ -7,6 +7,7 @@ const path = require('path');
 const util = require('util');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const BACKUP_COMMANDS = ['backup', 'restore-drill'];
 
 // Same rule as process.loadEnvFile: a variable already set (even to '') is never replaced
 function readEnvFile(file, env) {
@@ -43,11 +44,17 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   }
   // NODE_ENV=production: the settings that are fine on a developer's machine but never in production
   const production = env.NODE_ENV === 'production';
-  if (production) {
+  // The backup commands run as a job of their own, apart from the server: the server's settings do not apply to them
+  const backupCommand = BACKUP_COMMANDS.includes(command);
+  if (production && !backupCommand) {
     if (!env.DATABASE_URL) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
     if (env.ALLOW_PLAINTEXT === '1') throw new Error('NODE_ENV=production: ALLOW_PLAINTEXT is not accepted. Set DATA_KEY so client records are encrypted.');
     if (env.HSTS === '0') throw new Error('NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.');
     if (env.AUTH_USERS) throw new Error("NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in.");
+    // The app's own sign-in: a Secure cookie and links in emails need an https address; the links and warnings need a mail server over TLS
+    if (!/^https:\/\/[^/]+\/?$/i.test(env.PUBLIC_URL || '')) throw new Error('NODE_ENV=production: PUBLIC_URL must be the https address the app is served at (the session cookie is Secure and the sign-in links point there).');
+    if (!env.SMTP_URL) throw new Error('NODE_ENV=production: SMTP_URL is required. Password reset links, invitations and sign-in warnings are sent by email.');
+    if (/[?&]tls=off\b/i.test(env.SMTP_URL)) throw new Error('NODE_ENV=production: SMTP_URL with tls=off is not accepted. Mail must travel over TLS.');
   }
   // NEW_DATA_KEY: only for node server.js rotate-key
   let newKey = null;
@@ -61,9 +68,38 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     if (!same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
   }
   const users = parseUsers(env.AUTH_USERS);
-  // The data commands run without sign-in users
-  if (!users.size && !['import-files', 'migrate', 'index-references', 'rotate-key'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
-  if (!key && env.ALLOW_PLAINTEXT !== '1') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
+  // Sessions (the app's own sign-in): idle and absolute limits; cookies are Secure with the __Host-
+  // prefix in production or whenever the app is served over HTTPS (PUBLIC_URL)
+  const minutes = (name, dflt) => { const v = env[name] === undefined || env[name] === '' ? dflt : +env[name]; if (!(v > 0)) throw new Error(`${name} must be a positive number`); return v; };
+  const sessionIdleMinutes = minutes('SESSION_IDLE_MINUTES', 30), sessionAbsoluteHours = minutes('SESSION_ABSOLUTE_HOURS', 12);
+  const publicUrl = (env.PUBLIC_URL || '').replace(/\/+$/, '');
+  // Email for the sign-in links and warnings: SMTP_URL (smtp:// with STARTTLS, or smtps://), the sender,
+  // and the operator who receives access requests. Without SMTP_URL, outside production, messages go to the log.
+  const smtpUrl = env.SMTP_URL || '';
+  if (smtpUrl) require('../auth/mail.js').parseSmtpUrl(smtpUrl);
+  const smtpFrom = env.SMTP_FROM || 'Household Wealth Profiler <no-reply@localhost>';
+  const operatorEmail = env.OPERATOR_EMAIL || '';
+  // How long a household is kept after its relationship ends, in whole years. The Money Laundering
+  // Regulations 2017 (regulation 40) set five; a firm may have reason to keep longer, never shorter.
+  const retentionYears = env.RETENTION_YEARS === undefined || env.RETENTION_YEARS === '' ? 5 : +env.RETENTION_YEARS;
+  if (!Number.isInteger(retentionYears) || retentionYears < 5 || retentionYears > 100) throw new Error('RETENTION_YEARS must be a whole number of years from 5 (the Money Laundering Regulations 2017 minimum) to 100');
+  if (publicUrl && !/^https?:\/\/[^/]+$/i.test(publicUrl)) throw new Error('PUBLIC_URL must be the address the app is served at, e.g. https://profiler.example.com');
+  // With PostgreSQL the app's own sign-in (accounts in the database) is the way in and AUTH_USERS is
+  // optional (development only). With files, Basic sign-in is the only way in. The data commands run without either.
+  // Backups (node server.js backup, restore-drill): BACKUP_KEY is a key of its own, never DATA_KEY, so a
+  // stolen backup and a stolen server key are separate losses; the backup job does not need DATA_KEY at
+  // all (the restore drill does, to prove records still open). BACKUP_DATABASE_URL is a role that may
+  // read every row (superuser or BYPASSRLS), never hwp_app or hwp_owner, for which row security hides rows.
+  let backupKey = null;
+  if (env.BACKUP_KEY) {
+    backupKey = Buffer.from(env.BACKUP_KEY, 'base64');
+    if (backupKey.length !== 32) throw new Error('BACKUP_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key');
+    if (key && backupKey.equals(key)) throw new Error('BACKUP_KEY must not be the same as DATA_KEY: keep them apart, so one stolen key never opens both the server and its backups.');
+  }
+  const backupRetentionDays = env.BACKUP_RETENTION_DAYS === undefined || env.BACKUP_RETENTION_DAYS === '' ? 35 : +env.BACKUP_RETENTION_DAYS;
+  if (!Number.isInteger(backupRetentionDays) || backupRetentionDays < 1 || backupRetentionDays > 3650) throw new Error('BACKUP_RETENTION_DAYS must be a whole number of days from 1 to 3650');
+  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password', 'subject-access-user', ...BACKUP_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
+  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
     root,
@@ -85,6 +121,20 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     key,
     newKey,
     hsts: env.HSTS !== '0',
+    sessionIdleMinutes,
+    sessionAbsoluteHours,
+    publicUrl,
+    secureCookies: production || /^https:/i.test(publicUrl),
+    smtpUrl,
+    smtpFrom,
+    operatorEmail,
+    retentionYears,
+    backupUrl: env.BACKUP_DATABASE_URL || '',
+    backupDir: env.BACKUP_DIR ? path.resolve(env.BACKUP_DIR) : '',
+    backupKey,
+    backupRetentionDays,
+    // Where pg_dump and pg_restore are, when they are not on the PATH (their major version must be at least the server's)
+    pgBin: env.PG_BIN || '',
   };
 }
 

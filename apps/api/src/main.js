@@ -3,7 +3,9 @@
      1. commands that need no settings (hash-password, gen-key)
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
-     4. a data command (import-files, migrate, index-references, rotate-key), or prepare storage and start
+     4. a data command (import-files, migrate, index-references, rotate-key, check-records, create-user,
+        set-password, list-requests, approve-request, reject-request, reset-mfa, backup, restore-drill,
+        subject-access-user), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
         migrate with DATABASE_OWNER_URL).
@@ -21,11 +23,26 @@ const { migrateWith } = require('./db/pool.js');
 const { createHouseholdService } = require('./services/households.js');
 const { createFirmService } = require('./services/firm.js');
 const { createPriceService } = require('./services/prices.js');
+const { createRecordsService } = require('./services/records.js');
 const { createAuth } = require('./auth');
+const { createAuthStore } = require('./auth/store.js');
+const { createSessions, sessionSecretFrom } = require('./auth/sessions.js');
+const { createLimiter, AUTH_LIMIT } = require('./auth/limiter.js');
+const { dummyHashString } = require('./auth/password.js');
+const { createAuthRoutes } = require('./routes/auth.js');
+const { createMailer } = require('./auth/mail.js');
+const { createNotify } = require('./auth/notify.js');
 const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
 const { rotateKey } = require('./cli/rotate-key.js');
+const { checkRecords } = require('./cli/check-records.js');
+const { createUser, setPassword } = require('./cli/accounts.js');
+const { backup } = require('./cli/backup.js');
+const { restoreDrill } = require('./cli/restore.js');
+const { subjectAccessUser } = require('./cli/subject-access-user.js');
+const { COMMANDS: OPERATOR } = require('./cli/operator.js');
+const { createInvites } = require('./auth/invites.js');
 
 const STOP_TIMEOUT_MS = 10e3;
 
@@ -68,14 +85,44 @@ function main([cmd, ...args] = []) {
       .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
     return;
   }
+  if (cmd === 'backup') {
+    backup({ backupUrl: config.backupUrl, dir: config.backupDir, backupKey: config.backupKey, retentionDays: config.backupRetentionDays, pgBin: config.pgBin })
+      .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
+    return;
+  }
+  if (cmd === 'restore-drill') {
+    const file = args.find(a => !a.startsWith('--'));
+    restoreDrill({ backupUrl: config.backupUrl, dir: config.backupDir, file: file && path.resolve(file), backupKey: config.backupKey, dataKey: config.key, pgBin: config.pgBin, keep: args.includes('--keep'), migrationsDir: path.join(config.root, 'db', 'migrations') })
+      .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
+    return;
+  }
+  if (cmd === 'subject-access-user') {
+    subjectAccessUser({ ownerUrl: config.databaseOwnerUrl || config.databaseUrl, args })
+      .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
+    return;
+  }
+  if (cmd === 'create-user' || cmd === 'set-password') {
+    const ownerUrl = config.databaseOwnerUrl || config.databaseUrl;
+    (cmd === 'create-user' ? createUser : setPassword)({ ownerUrl, args })
+      .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
+    return;
+  }
   const sealer = createSealer(config.key);
   let store;
   try { store = createStore(config, sealer); } catch (e) { console.error(e.message); process.exit(1); }
   const households = createHouseholdService({ store, HWP, production: config.production });
   const firm = createFirmService({ store, HWP });
   const prices = createPriceService({ key: config.alphavantageKey });
-  const { authenticate } = createAuth(config);
-  const { server } = createApp({ config, households, firm, prices, authenticate, ready: () => store.ready() });
+  const records = createRecordsService({ store, HWP, retentionYears: config.retentionYears, production: config.production });
+  // The app's own sign-in needs PostgreSQL (sessions, accounts); with files, Basic sign-in is the only way in
+  const authStore = store.pool ? createAuthStore({ pool: store.pool }) : null;
+  const sessions = authStore ? createSessions({ store: authStore, secret: sessionSecretFrom(config.key), idleMs: config.sessionIdleMinutes * 60e3, absoluteMs: config.sessionAbsoluteHours * 3600e3, secure: config.secureCookies }) : null;
+  const { authenticate } = createAuth(config, { authStore, sessions });
+  // The sign-in emails: links, warnings, access requests (to the log outside production when SMTP_URL is not set)
+  const mailer = createMailer({ smtpUrl: config.smtpUrl, from: config.smtpFrom, production: config.production });
+  const notify = createNotify({ mailer, publicUrl: config.publicUrl || `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`, operatorEmail: config.operatorEmail });
+  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler' }) : null;
+  const { server } = createApp({ config, households, firm, prices, records, authenticate, authRoutes, ready: () => store.ready() });
 
   if (cmd === 'import-files') {
     importFiles({ dir: args[0] || config.dataDir, databaseUrl: config.databaseUrl, store, sealer })
@@ -89,6 +136,18 @@ function main([cmd, ...args] = []) {
       .then(async n => { console.log(`${n} household(s) indexed for firm ${firmId}.`); await store.end(); }, async e => { console.error(e.message); await store.end().catch(() => {}); process.exit(1); });
     return;
   }
+  if (cmd === 'check-records') {
+    checkRecords({ store, H: HWP, dataDir: config.dataDir, databaseUrl: config.databaseUrl, ownerUrl: config.databaseOwnerUrl, firmId: args[0] })
+      .then(async code => { if (store.end) await store.end(); process.exit(code); }, async e => { console.error(e.message); if (store.end) await store.end().catch(() => {}); process.exit(1); });
+    return;
+  }
+  if (OPERATOR[cmd]) {
+    if (!authStore) { console.error('Set DATABASE_URL: sign-in accounts and access requests live in PostgreSQL.'); process.exit(1); }
+    OPERATOR[cmd]({ authStore, notify, invites: createInvites({ authStore, notify }), args })
+      .then(async code => { await store.end(); process.exit(code); }, async e => { console.error(e.message); await store.end().catch(() => {}); process.exit(1); });
+    return;
+  }
+  if (authStore) dummyHashString().catch(() => {}); // warm: the first unknown-email sign-in then costs the same as any other
   store.init().then(() => {
     stopOnSignal(server, store);
     server.listen(config.port, config.host, () => console.log(`Household Wealth Profiler on http://${config.host}:${config.port} · ${config.users.size} user(s) · encryption ${config.key ? 'on' : 'OFF'} · ${store.describe}${config.production ? ' · production' : ''}`));

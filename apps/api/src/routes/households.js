@@ -19,7 +19,7 @@ function createHouseholdRoutes({ households, ID_RE, send, readBody }) {
     if (p === '/api/households' && req.method === 'GET') { send(res, 200, await households.list(ctx)); return true; }
     if (p === '/api/households' && req.method === 'POST') {
       const key = req.headers['idempotency-key'];
-      if (key !== undefined && !IDEM_KEY.test(key)) { send(res, 400, { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' }); return true; }
+      if (key !== undefined && !IDEM_KEY.test(key)) { send(res, 400, { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"', code: 'bad_idempotency_key' }); return true; }
       const body = await readBody(req);
       send(res, 201, await households.create(ctx, body.state, key ? { idempotencyKey: key } : undefined));
       return true;
@@ -41,7 +41,7 @@ function createHouseholdRoutes({ households, ID_RE, send, readBody }) {
     if (!m[2] && req.method === 'PUT') {
       const r = await households.save(ctx, id, await readBody(req));
       if (r.notFound) send(res, 404, { error: 'Not found' });
-      else if (r.conflict) send(res, 409, { error: 'This household was changed by someone else', ...r.conflict });
+      else if (r.conflict) send(res, 409, { error: 'This household was changed by someone else', code: 'version_conflict', ...r.conflict });
       else send(res, 200, r);
       return true;
     }

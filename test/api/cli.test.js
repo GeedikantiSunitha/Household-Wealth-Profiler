@@ -22,7 +22,7 @@ test('hash-password prints an AUTH_USERS entry that signs in', t => {
 });
 
 test('migrate and index-references need a database setting', () => {
-  const run = args => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, encoding: 'utf8', timeout: 15000, env: { ...process.env, DATABASE_URL: '', DATABASE_OWNER_URL: '', AUTH_USERS: 'x', DATA_KEY: '', ALLOW_PLAINTEXT: '1' } });
+  const run = args => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, encoding: 'utf8', timeout: 15000, env: { ...process.env, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', AUTH_USERS: 'x', DATA_KEY: '', ALLOW_PLAINTEXT: '1' } });
   const m = run(['migrate']);
   assert.equal(m.status, 1); assert.match(m.stderr, /Set DATABASE_OWNER_URL \(or DATABASE_URL\) to the database to migrate/);
   const i = run(['index-references']);

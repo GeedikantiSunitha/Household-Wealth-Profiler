@@ -7,9 +7,12 @@
      save(ctx, { version, settings })
                                     { version, changes }   saved (changes 0: nothing changed)
                                     { conflict: { version, updatedBy, updatedAt } }   someone saved since `version`
+                                    throws 400 invalid_field (with the list of problems) when a value
+                                    breaks the field rules in validate.js
    Saves happen one at a time per firm in this process; the PostgreSQL store also locks across processes. */
 'use strict';
 const { AUDIT_LIMIT } = require('./households.js');
+const { validateFirm, invalidError } = require('./validate.js');
 
 function createFirmService({ store, HWP, now = () => new Date().toISOString() }) {
   const blank = () => ({ version: 0, settings: HWP.firmBlank(), updatedAt: '', updatedBy: '' });
@@ -23,10 +26,12 @@ function createFirmService({ store, HWP, now = () => new Date().toISOString() })
     async audit(ctx) { return (await forFirm(ctx).audit()).slice(0, AUDIT_LIMIT); },
 
     save(ctx, { version, settings } = {}) {
+      const s = HWP.firmNormalise(settings);
+      const errors = validateFirm(HWP, s);
+      if (errors.length) throw invalidError('Invalid firm settings', errors);
       return withLock(ctx.firmId, () => forFirm(ctx).update(current => {
         const rec = current || blank();
         if (+version !== rec.version) return { result: { conflict: { version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt } } };
-        const s = HWP.firmNormalise(settings);
         const ts = now();
         const changes = HWP.firmDiff(rec.settings, s).map(c => ({ ts, user: ctx.user, ...c, version: rec.version + 1 }));
         if (!changes.length) return { result: { version: rec.version, changes: 0 } };

@@ -28,7 +28,7 @@ function expectedSummary(state) {
 const LIST_KEYS = ['blockers', 'due', 'id', 'name', 'nextReview', 'overdue', 'rating', 'reference', 'stage', 'tasks', 'updatedAt', 'updatedBy', 'version'];
 const FIRM_KEYS = ['settings', 'updatedAt', 'updatedBy', 'version'];
 const RECORD_KEYS = ['createdAt', 'createdBy', 'id', 'state', 'updatedAt', 'updatedBy', 'version'];
-const CONFLICT_KEYS = ['error', 'updatedAt', 'updatedBy', 'version'];
+const CONFLICT_KEYS = ['code', 'error', 'updatedAt', 'updatedBy', 'version'];
 const CREATED_AUDIT_KEYS = ['field', 'from', 'to', 'ts', 'user'];
 const CHANGE_AUDIT_KEYS = ['field', 'from', 'to', 'ts', 'user', 'version'];
 
@@ -71,7 +71,7 @@ function apiContract(ctx) {
       for (const p of ['/', '/api/me', '/api/households']) {
         const r = await call('GET', p);
         assert.equal(r.status, 401, p);
-        assert.deepEqual(await r.json(), { error: 'Sign in required' });
+        assert.deepEqual(await r.json(), { error: 'Sign in required', code: 'sign_in_required' });
         assert.equal(r.headers.get('www-authenticate'), 'Basic realm="Household Wealth Profiler", charset="UTF-8"');
       }
     });
@@ -101,13 +101,14 @@ function apiContract(ctx) {
       const again = H.blank(); again.household.reference = ' ' + REF.toLowerCase() + ' ';
       const r = await call('POST', '/api/households', { who: chris, body: { state: again } });
       assert.equal(r.status, 409);
-      assert.deepEqual(await r.json(), { error: `A household with reference "${REF}" already exists` });
+      const dup = await r.json(); assert.deepEqual(dup, { error: 'Another household in this firm already has this client reference', code: 'duplicate_reference' });
+      assert.ok(!JSON.stringify(dup).includes(REF), 'the reference itself is not echoed');
       const other = H.blank(); other.household.reference = REF + '-B';
       const { id: oid } = await (await call('POST', '/api/households', { who: chris, body: { state: other } })).json();
       other.household.reference = REF.toLowerCase();
       const s = await call('PUT', '/api/households/' + oid, { who: chris, body: { version: 1, state: other } });
       assert.equal(s.status, 409);
-      assert.deepEqual(await s.json(), { error: `A household with reference "${REF}" already exists` });
+      assert.deepEqual(await s.json(), { error: 'Another household in this firm already has this client reference', code: 'duplicate_reference' });
       assert.equal((await (await call('GET', '/api/households/' + oid, { who: chris })).json()).version, 1, 'nothing saved');
     });
 
@@ -124,12 +125,48 @@ function apiContract(ctx) {
       // The same key with a different request is refused, not answered with the first reply; the original repeat still replays
       const other = H.blank(); other.household.name = 'Something else ' + key.slice(-6);
       const c = await call('POST', '/api/households', { who: sam, body: { state: other }, headers: { 'Idempotency-Key': key } });
-      assert.equal(c.status, 422); assert.deepEqual(await c.json(), { error: 'This Idempotency-Key was already used for a different request' });
+      assert.equal(c.status, 422); assert.deepEqual(await c.json(), { error: 'This Idempotency-Key was already used for a different request', code: 'idempotency_mismatch' });
       assert.deepEqual(await (await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': key } })).json(), ja, 'the original request still replays');
       assert.equal((await (await call('GET', '/api/households', { who: sam })).json()).length, before + 1, 'still one household');
       const bad = await call('POST', '/api/households', { who: sam, body: { state: st }, headers: { 'Idempotency-Key': 'no spaces allowed' } });
       assert.equal(bad.status, 400);
-      assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"' });
+      assert.deepEqual(await bad.json(), { error: 'Idempotency-Key must be 8 to 200 letters, digits, "-" or "_"', code: 'bad_idempotency_key' });
+    });
+
+    test('a value outside the field rules: 400 invalid_field with every field path and rule, never the value; nothing stored (create, save, firm)', async () => {
+      const st = H.blank(); st.household.name = 'Rules ' + crypto.randomUUID().slice(0, 8); st.household.region = 'SECRET-REGION';
+      st.members = [H.defaults('members')]; st.members[0].dob = 'SECRET-DATE'; st.accounts = [H.defaults('accounts')]; st.accounts[0].value = 'SECRET-VALUE';
+      const before = (await (await call('GET', '/api/households', { who: sam })).json()).length;
+      const r = await call('POST', '/api/households', { who: sam, body: { state: st } });
+      assert.equal(r.status, 400);
+      const j = await r.json();
+      assert.deepEqual(j, { error: 'Invalid household: household.region must be one of the listed options', code: 'invalid_field', errors: [
+        { field: 'household.region', message: 'must be one of the listed options' },
+        { field: 'members[0].dob', message: 'must be a date (YYYY-MM-DD)' },
+        { field: 'accounts[0].value', message: 'must be a number' }] });
+      assert.ok(!/SECRET/.test(JSON.stringify(j)), 'no submitted value in the reply');
+      assert.equal((await (await call('GET', '/api/households', { who: sam })).json()).length, before, 'nothing created');
+      // save: the stored version is unchanged
+      const ok = H.blank(); ok.household.name = st.household.name; ok.household.reference = 'RULES-' + crypto.randomUUID().slice(0, 8);
+      const { id: hid } = await (await call('POST', '/api/households', { who: sam, body: { state: ok } })).json();
+      const bad = json(ok); bad.household.valuationDate = '2026-02-30';
+      const s = await call('PUT', '/api/households/' + hid, { who: sam, body: { version: 1, state: bad } });
+      assert.equal(s.status, 400);
+      assert.deepEqual(await s.json(), { error: 'Invalid household: household.valuationDate must be a date (YYYY-MM-DD)', code: 'invalid_field', errors: [{ field: 'household.valuationDate', message: 'must be a date (YYYY-MM-DD)' }] });
+      assert.equal((await (await call('GET', '/api/households/' + hid, { who: sam })).json()).version, 1, 'nothing saved');
+      // a numeric string is stored as a number
+      const num = json(ok); num.accounts = [H.defaults('accounts')]; num.accounts[0].value = '12,500';
+      assert.equal((await call('PUT', '/api/households/' + hid, { who: sam, body: { version: 1, state: num } })).status, 200);
+      assert.equal((await (await call('GET', '/api/households/' + hid, { who: sam })).json()).state.accounts[0].value, 12500);
+      // firm settings
+      const f0 = await (await call('GET', '/api/firm', { who: sam })).json();
+      const settings = json(f0.settings); settings.team = [{ ...H.defaults('team'), name: 'Alex', role: 'SECRET-ROLE' }];
+      const fr = await call('PUT', '/api/firm', { who: sam, body: { version: f0.version, settings } });
+      assert.equal(fr.status, 400);
+      const fj = await fr.json();
+      assert.deepEqual(fj, { error: 'Invalid firm settings: team[0].role must be one of the listed options', code: 'invalid_field', errors: [{ field: 'team[0].role', message: 'must be one of the listed options' }] });
+      assert.ok(!/SECRET/.test(JSON.stringify(fj)));
+      assert.equal((await (await call('GET', '/api/firm', { who: sam })).json()).version, f0.version, 'nothing saved');
     });
 
     test('GET /api/households/:id: the record with the normalised state', async () => {
@@ -182,7 +219,7 @@ function apiContract(ctx) {
       assert.equal(r.status, 409);
       const j = await r.json();
       assert.deepEqual(keys(j), CONFLICT_KEYS);
-      assert.equal(j.error, 'This household was changed by someone else');
+      assert.equal(j.error, 'This household was changed by someone else'); assert.equal(j.code, 'version_conflict');
       assert.equal(j.version, 2); assert.equal(j.updatedBy, 'chris');
     });
 
@@ -219,7 +256,7 @@ function apiContract(ctx) {
       assert.equal(r.status, 409);
       const j = await r.json();
       assert.deepEqual(keys(j), CONFLICT_KEYS);
-      assert.equal(j.error, 'Firm settings were changed by someone else');
+      assert.equal(j.error, 'Firm settings were changed by someone else'); assert.equal(j.code, 'version_conflict');
       assert.equal(j.version, v + 1); assert.equal(j.updatedBy, 'sam'); assert.ok(j.updatedAt);
       const f1 = await (await call('GET', '/api/firm', { who: chris })).json();
       assert.equal(f1.version, v + 1); assert.equal(f1.updatedBy, 'sam'); assert.equal(f1.settings.firm.name, name);
@@ -233,7 +270,7 @@ function apiContract(ctx) {
     test('GET /api/prices without a provider key: 501, and the message points to CSV import', async () => {
       const r = await call('GET', '/api/prices?symbol=VWRL.LON', { who: sam });
       assert.equal(r.status, 501);
-      assert.deepEqual(await r.json(), { error: 'Automatic prices are not set up. Ask your administrator to add an Alpha Vantage key, or import a CSV.' });
+      assert.deepEqual(await r.json(), { error: 'Automatic prices are not set up. Ask your administrator to add an Alpha Vantage key, or import a CSV.', code: 'not_configured' });
     });
 
     test('unknown households and routes: 404 {error: "Not found"}', async () => {
@@ -242,26 +279,26 @@ function apiContract(ctx) {
         ['GET', '/api/nope'], ['DELETE', '/api/households/' + id], ['PATCH', '/api/households/' + id], ['GET', '/no-such-file.js']]) {
         const r = await call(m, p, { who: sam, ...(m === 'GET' ? {} : { body: {} }) });
         assert.equal(r.status, 404, `${m} ${p}`);
-        assert.deepEqual(await r.json(), { error: 'Not found' });
+        assert.deepEqual(await r.json(), { error: 'Not found', code: 'not_found' });
       }
       const put = await call('PUT', '/api/households/' + unknown, { who: sam, body: { version: 1, state: sent } });
-      assert.equal(put.status, 404); assert.deepEqual(await put.json(), { error: 'Not found' });
+      assert.equal(put.status, 404); assert.deepEqual(await put.json(), { error: 'Not found', code: 'not_found' });
     });
 
     test('bad requests: 405, 415, 403 and 400 with their messages', async () => {
       let r = await call('POST', '/index.html', { who: sam, body: {} });
-      assert.equal(r.status, 405); assert.deepEqual(await r.json(), { error: 'Method not allowed' });
+      assert.equal(r.status, 405); assert.deepEqual(await r.json(), { error: 'Method not allowed', code: 'method_not_allowed' });
       r = await call('POST', '/api/households', { who: sam, body: '{}', headers: { 'Content-Type': 'text/plain' } });
-      assert.equal(r.status, 415); assert.deepEqual(await r.json(), { error: 'Send JSON' });
+      assert.equal(r.status, 415); assert.deepEqual(await r.json(), { error: 'Send JSON', code: 'json_required' });
       r = await call('POST', '/api/households', { who: sam, body: { state: sent }, headers: { Origin: 'https://evil.example' } });
-      assert.equal(r.status, 403); assert.deepEqual(await r.json(), { error: 'Cross-site request refused' });
+      assert.equal(r.status, 403); assert.deepEqual(await r.json(), { error: 'Cross-site request refused', code: 'cross_site' });
       r = await call('POST', '/api/households', { who: sam, body: '{not json' });
-      assert.equal(r.status, 400); assert.deepEqual(await r.json(), { error: 'Invalid JSON' });
+      assert.equal(r.status, 400); assert.deepEqual(await r.json(), { error: 'Invalid JSON', code: 'invalid_json' });
       r = await call('POST', '/api/households', { who: sam, body: { state: sent }, headers: { Origin: 'null' } });
-      assert.equal(r.status, 403); assert.deepEqual(await r.json(), { error: 'Cross-site request refused' });
+      assert.equal(r.status, 403); assert.deepEqual(await r.json(), { error: 'Cross-site request refused', code: 'cross_site' });
       for (const p of ['//', '/%E0%A4%A']) {
         r = await call('GET', p, { who: sam });
-        assert.equal(r.status, 400, p); assert.deepEqual(await r.json(), { error: 'Bad request' });
+        assert.equal(r.status, 400, p); assert.deepEqual(await r.json(), { error: 'Bad request', code: 'bad_request' });
       }
     });
 
