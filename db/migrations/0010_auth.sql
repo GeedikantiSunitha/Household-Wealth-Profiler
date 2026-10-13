@@ -12,6 +12,7 @@
 alter table users add column if not exists password_hash     text;         -- scrypt string; null = cannot sign in yet
 alter table users add column if not exists password_set_at   timestamptz;
 alter table users add column if not exists totp_secret       text;         -- sealed with DATA_KEY (rotate-key re-seals it)
+alter table users add column if not exists totp_pending      text;         -- a new secret awaiting its first code; the old one keeps working until then
 alter table users add column if not exists totp_confirmed_at timestamptz;  -- null = authenticator not (or no longer) set up
 alter table users add column if not exists totp_last_step    bigint not null default 0;  -- last accepted code's time step: a code is never accepted twice
 alter table users add column if not exists failed_attempts   integer not null default 0;
@@ -83,7 +84,7 @@ create or replace trigger auth_events_frozen before update or delete on auth_eve
 create or replace trigger auth_events_no_truncate before truncate on auth_events execute function refuse_change();
 
 /* ---------- grants ---------- */
-grant update (password_hash, password_set_at, totp_secret, totp_confirmed_at, totp_last_step, failed_attempts, not_before, last_sign_in_at, reenrol) on users to hwp_app;
+grant update (password_hash, password_set_at, totp_secret, totp_pending, totp_confirmed_at, totp_last_step, failed_attempts, not_before, last_sign_in_at, reenrol) on users to hwp_app;
 grant select, insert, update on sessions, recovery_codes, one_time_tokens to hwp_app;
 grant select, insert on access_requests, auth_events to hwp_app;
 grant usage, select on sequence auth_events_id_seq to hwp_app;

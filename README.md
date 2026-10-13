@@ -256,6 +256,7 @@ by `DATA_KEY`, so rotating it rewrites no record:
 ```sh
 node server.js gen-key                               # the new key; keep it in the secrets store
 NEW_DATA_KEY=... node server.js rotate-key           # as the owner: re-wraps every firm key, in one transaction
+                                                    # and re-seals every authenticator secret (sign-in accounts)
 ```
 
 Then set `DATA_KEY` to the new key on every server and restart them; servers still running keep

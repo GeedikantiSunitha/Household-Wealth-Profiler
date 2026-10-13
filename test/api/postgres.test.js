@@ -131,7 +131,14 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const run = (args, extra) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_, ...extra }, encoding: 'utf8' }).trim();
     const before = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
     const NEW = node(['gen-key']);
-    assert.match(run(['rotate-key'], { NEW_DATA_KEY: NEW }), /1 firm key\(s\) re-wrapped/);
+    // an account with an authenticator: its secret is sealed with the master key and must follow it
+    const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+    const oldSealer = createSealer(Buffer.from(KEY, 'base64')), newSealer = createSealer(Buffer.from(NEW, 'base64'));
+    const uid = (await db.query(`insert into users (email, name, totp_secret) values ('totp@example.com', 'T', $1) returning id`, [oldSealer.seal('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')])).rows[0].id;
+    assert.match(run(['rotate-key'], { NEW_DATA_KEY: NEW }), /1 firm key\(s\) re-wrapped and 1 authenticator secret\(s\) re-sealed/);
+    const sealed = (await db.query('select totp_secret from users where id = $1', [uid])).rows[0].totp_secret;
+    assert.equal(newSealer.open(sealed), 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 'the new key opens the secret');
+    assert.throws(() => oldSealer.open(sealed), 'the old key no longer does');
     const after = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
     assert.notEqual(after, before); assert.match(after, /^wk:v1:/);
     // A fresh server with the new master key opens the records sealed before the rotation
@@ -151,7 +158,8 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       assert.equal((await fetch(`${B3}/api/households/${id}`, { headers: SAM })).status, 500);
     } finally { p3.kill(); }
     // Rotate back, so the rest of this file (and the server started with the old key) carry on
-    assert.match(run(['rotate-key'], { DATA_KEY: NEW, NEW_DATA_KEY: KEY }), /1 firm key\(s\) re-wrapped/);
+    assert.match(run(['rotate-key'], { DATA_KEY: NEW, NEW_DATA_KEY: KEY }), /1 firm key\(s\) re-wrapped and 1 authenticator secret\(s\) re-sealed/);
+    assert.equal(oldSealer.open((await db.query('select totp_secret from users where id = $1', [uid])).rows[0].totp_secret), 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 'rotated back: the original key opens it again');
     assert.match(run(['rotate-key'], { NEW_DATA_KEY: KEY }).toString(), /re-wrapped/, 'the same key again is harmless');
   });
 

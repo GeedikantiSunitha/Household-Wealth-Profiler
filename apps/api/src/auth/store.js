@@ -8,7 +8,7 @@ const { tx } = require('../db/pool.js');
 const { delayAfter } = require('./password.js');
 
 const normaliseEmail = e => String(e || '').trim().toLowerCase();
-const USER_COLUMNS = 'id, email, name, active, password_hash, password_set_at, totp_secret, totp_confirmed_at, totp_last_step, failed_attempts, not_before, last_sign_in_at, reenrol';
+const USER_COLUMNS = 'id, email, name, active, password_hash, password_set_at, totp_secret, totp_pending, totp_confirmed_at, totp_last_step, failed_attempts, not_before, last_sign_in_at, reenrol';
 
 function createAuthStore({ pool, now = () => new Date() }) {
   const withAuth = fn => tx(pool, async c => { await c.query("select set_config('app.auth', 'on', true)"); return fn(c); });
@@ -37,6 +37,19 @@ function createAuthStore({ pool, now = () => new Date() }) {
     event: ({ userId = null, email = '', event, outcome = '', ip = '', userAgent = '', detail = '' }) => withAuth(c =>
       c.query('insert into auth_events (user_id, email, event, outcome, ip, user_agent, detail) values ($1, $2, $3, $4, $5, $6, $7)', [userId, normaliseEmail(email), event, outcome, ip, String(userAgent).slice(0, 300), detail])),
     events: userId => withAuth(async c => (await c.query('select at, event, outcome, ip, detail from auth_events where user_id = $1 order by id', [userId])).rows),
+
+    // The authenticator: a pending secret until its first code confirms it; the last accepted step for replay protection
+    setPendingTotp: (userId, sealed) => withAuth(c => c.query('update users set totp_pending = $2 where id = $1', [userId, sealed])),
+    confirmTotp: (userId, { sealed, step }) => withAuth(c => c.query('update users set totp_secret = $2, totp_pending = null, totp_confirmed_at = $3, totp_last_step = $4, reenrol = false where id = $1', [userId, sealed, now(), step])),
+    setTotpStep: (userId, step) => withAuth(c => c.query('update users set totp_last_step = greatest(totp_last_step, $2) where id = $1', [userId, step])),
+    // After a recovery-code sign-in: the authenticator no longer counts and a new one must be set up
+    clearTotp: userId => withAuth(c => c.query('update users set totp_confirmed_at = null, reenrol = true where id = $1', [userId])),
+    replaceRecoveryCodes: (userId, hashes) => withAuth(async c => {
+      await c.query('update recovery_codes set used_at = $2 where user_id = $1 and used_at is null', [userId, now()]);
+      for (const h of hashes) await c.query('insert into recovery_codes (user_id, code_hash) values ($1, $2)', [userId, h]);
+    }),
+    unusedRecoveryCodes: userId => withAuth(async c => (await c.query('select id, code_hash from recovery_codes where user_id = $1 and used_at is null order by created_at', [userId])).rows),
+    useRecoveryCode: id => withAuth(c => c.query('update recovery_codes set used_at = $2 where id = $1 and used_at is null', [id, now()])),
 
     // Sessions (auth/sessions.js decides the rules; this is only the rows)
     createSession: ({ idHash, userId, firmId = null, stage, expiresAt, ip = '', userAgent = '', at }) => withAuth(async c => one(await c.query(

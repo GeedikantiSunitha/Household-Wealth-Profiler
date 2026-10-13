@@ -93,7 +93,7 @@ function main([cmd, ...args] = []) {
   const sessions = authStore ? createSessions({ store: authStore, secret: sessionSecretFrom(config.key), idleMs: config.sessionIdleMinutes * 60e3, absoluteMs: config.sessionAbsoluteHours * 3600e3, secure: config.secureCookies }) : null;
   const { authenticate } = createAuth(config, { authStore, sessions });
   // notify: the emails of 2B (lockout warning, recovery-code sign-in); until then only the auth event is written
-  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify: {}, clientIpHeader: config.clientIpHeader }) : null;
+  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify: {}, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler' }) : null;
   if (authStore) dummyHashString().catch(() => {});
   const { server } = createApp({ config, households, firm, prices, authenticate, authRoutes, ready: () => store.ready() });
 

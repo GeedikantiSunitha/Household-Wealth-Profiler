@@ -107,7 +107,7 @@ test('0009: idempotency keys gain a nullable request hash; rows from before it s
 });
 
 const AUTH_TABLES = ['sessions', 'recovery_codes', 'one_time_tokens', 'access_requests', 'auth_events'];
-const USER_COLUMNS = ['password_hash', 'password_set_at', 'totp_secret', 'totp_confirmed_at', 'totp_last_step', 'failed_attempts', 'not_before', 'last_sign_in_at', 'reenrol'];
+const USER_COLUMNS = ['password_hash', 'password_set_at', 'totp_secret', 'totp_pending', 'totp_confirmed_at', 'totp_last_step', 'failed_attempts', 'not_before', 'last_sign_in_at', 'reenrol'];
 test('0010: sign-in columns and tables; the app role reaches accounts and sessions only with app.auth set for the transaction; auth events are frozen', async () => {
   const pg = await pglite(), db = adapt(pg);
   try {

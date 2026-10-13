@@ -66,6 +66,7 @@ function createApp({ config, households, firm, prices, authenticate, authRoutes 
         auth && auth.locked ? {} : basicUsers ? CHALLENGE : {});
     }
     if ((auth.stage || 'full') !== 'full' && !SECOND_STEP_PATHS.has(p)) return send(res, 401, { error: 'Finish signing in: enter the code from your authenticator app', code: 'second_step_required' });
+    if (auth.session && !auth.firmId && p !== '/api/me') return send(res, 403, { error: 'Choose a firm to work in', code: 'firm_required' });
     // Everything a route and service may act on: who is signed in, and the one firm they work in
     const ctx = { user: auth.user, firmId: auth.firmId, ...(auth.session ? { userId: auth.userId, email: auth.email, name: auth.name, firmName: auth.firmName, role: auth.role, stage: auth.stage, csrf: auth.csrf, session: auth.session } : {}) };
     if (!p.startsWith('/api/')) return req.method === 'GET' ? serveStatic(req, res, p) : send(res, 405, { error: 'Method not allowed' });
