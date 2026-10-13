@@ -3,7 +3,8 @@
      1. commands that need no settings (hash-password, gen-key)
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
-     4. a data command (import-files, migrate, index-references, rotate-key, check-records), or prepare storage and start
+     4. a data command (import-files, migrate, index-references, rotate-key, check-records, create-user,
+        set-password), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
         migrate with DATABASE_OWNER_URL).
@@ -27,6 +28,7 @@ const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
 const { rotateKey } = require('./cli/rotate-key.js');
 const { checkRecords } = require('./cli/check-records.js');
+const { createUser, setPassword } = require('./cli/accounts.js');
 
 const STOP_TIMEOUT_MS = 10e3;
 
@@ -66,6 +68,12 @@ function main([cmd, ...args] = []) {
   }
   if (cmd === 'rotate-key') {
     rotateKey({ ownerUrl: config.databaseOwnerUrl || config.databaseUrl, key: config.key, newKey: config.newKey })
+      .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
+    return;
+  }
+  if (cmd === 'create-user' || cmd === 'set-password') {
+    const ownerUrl = config.databaseOwnerUrl || config.databaseUrl;
+    (cmd === 'create-user' ? createUser : setPassword)({ ownerUrl, args })
       .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
     return;
   }

@@ -102,6 +102,31 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     assert.match(run(), /0 household\(s\) indexed/);
   });
 
+  test('create-user and set-password (as the owner): an account with a membership, a password from standard input, never on the command line', async () => {
+    const { spawnSync } = require('node:child_process');
+    const run = (args, input = '') => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_ }, input, encoding: 'utf8' });
+    let r = run(['create-user', 'Dana@Example.com', 'Dana Adviser']);
+    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Account created: [0-9a-f-]{36} \(adviser in firm f1a00000-0000-4000-8000-000000000001\)/);
+    const u = (await db.query(`select id, email, name, password_hash from users where email = 'dana@example.com'`)).rows[0];
+    assert.equal(u.name, 'Dana Adviser'); assert.equal(u.password_hash, null, 'no password yet');
+    assert.equal((await db.query('select role from memberships where user_id = $1', [u.id])).rows[0].role, 'adviser');
+    r = run(['create-user', 'dana@example.com', 'Dana Adviser', 'f1a00000-0000-4000-8000-000000000001', 'admin']);
+    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Membership added to the existing account/);
+    assert.equal((await db.query('select role from memberships where user_id = $1', [u.id])).rows[0].role, 'admin');
+    assert.equal((await db.query(`select count(*)::int n from users where email = 'dana@example.com'`)).rows[0].n, 1, 'one account');
+    r = run(['set-password', 'dana@example.com'], 'too short\n');
+    assert.equal(r.status, 1); assert.match(r.stderr, /Use at least 12 characters/);
+    r = run(['set-password', 'dana@example.com'], 'correct horse battery staple\n');
+    assert.equal(r.status, 0, r.stderr); assert.equal(r.stdout.trim(), 'Password set for dana@example.com.');
+    const h = (await db.query('select password_hash from users where id = $1', [u.id])).rows[0].password_hash;
+    assert.match(h, /^scrypt\$131072\$8\$1\$/); assert.ok(!(r.stdout + r.stderr).includes('correct horse'), 'the password is never printed');
+    assert.equal((await db.query(`select event from auth_events where user_id = $1`, [u.id])).rows[0].event, 'password_set');
+    r = run(['set-password', 'nobody@example.com'], 'correct horse battery staple\n');
+    assert.equal(r.status, 1); assert.match(r.stderr, /No account nobody@example.com/);
+    r = run(['create-user', 'not-an-email', 'X']);
+    assert.equal(r.status, 1); assert.match(r.stderr, /Usage/);
+  });
+
   test('rotate-key re-wraps every firm key with NEW_DATA_KEY; a server with the new key reads everything', async () => {
     const run = (args, extra) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_, ...extra }, encoding: 'utf8' }).trim();
     const before = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;

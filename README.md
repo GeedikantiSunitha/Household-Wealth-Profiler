@@ -236,6 +236,15 @@ node server.js check-records            # every firm (as the owner on PostgreSQL
 node server.js check-records FIRM_ID    # one firm
 ```
 
+Sign-in accounts (Phase 2) are made by the operator as the owner; the app role cannot create them.
+The password is read from standard input so it never appears on a command line, and the account is
+asked to set up its authenticator app at its first sign-in:
+
+```sh
+node server.js create-user dana@example.com "Dana Adviser" [FIRM_ID] [admin|adviser|compliance]
+echo "a passphrase of at least 12 characters" | node server.js set-password dana@example.com
+```
+
 Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
 keep `DATA_KEY` in a different place from the backups. Row-level security is forced on every
 table, so a backup must run as a superuser or as a role with `BYPASSRLS`, never as `hwp_app`

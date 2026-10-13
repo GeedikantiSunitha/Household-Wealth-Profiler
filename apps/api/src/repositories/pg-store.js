@@ -213,6 +213,7 @@ function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = ''
     },
     // A query with no firm set (tests and operator tooling only): shows what the policies allow, which is nothing
     raw: (sql, params) => pool.query(sql, params),
+    pool, // shared with the sign-in store (auth/store.js), which sets its own transaction setting
     end: () => pool.end(),
   };
 }

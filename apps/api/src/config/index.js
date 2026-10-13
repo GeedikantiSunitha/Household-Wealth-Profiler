@@ -62,7 +62,7 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   }
   const users = parseUsers(env.AUTH_USERS);
   // The data commands run without sign-in users
-  if (!users.size && !['import-files', 'migrate', 'index-references', 'rotate-key'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
+  if (!users.size && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
   if (!key && env.ALLOW_PLAINTEXT !== '1') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {

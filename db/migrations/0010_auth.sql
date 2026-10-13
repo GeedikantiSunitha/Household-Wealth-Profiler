@@ -108,4 +108,8 @@ begin
       execute format('create policy auth_rows on %I to hwp_app using (current_setting(''app.auth'', true) = ''on'') with check (current_setting(''app.auth'', true) = ''on'')', t);
     end if;
   end loop;
+  -- firms: their names are shown when a user picks a firm at sign-in (read only; nothing else of a firm)
+  if not exists (select from pg_policies where schemaname = current_schema() and tablename = 'firms' and policyname = 'auth_reads') then
+    create policy auth_reads on firms for select to hwp_app using (current_setting('app.auth', true) = 'on');
+  end if;
 end $$;

@@ -91,6 +91,7 @@ test('a malformed AUTH_USERS entry is refused at start-up, not as a server error
 test('ALLOW_PLAINTEXT=1 runs without a key; import-files runs without users', () => {
   assert.equal(load({ env: { AUTH_USERS: USER, ALLOW_PLAINTEXT: '1' }, root: root() }).key, null);
   assert.equal(load({ env: { DATA_KEY: KEY }, root: root(), command: 'import-files' }).users.size, 0);
+  for (const cmd of ['migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password']) assert.equal(load({ env: { DATA_KEY: KEY }, root: root(), command: cmd }).users.size, 0, cmd);
 });
 
 test('.env in the project folder fills gaps but never replaces what is already set', () => {
