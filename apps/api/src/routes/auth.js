@@ -30,8 +30,16 @@
                                     (next 'enrol'), the user is warned (notify.recoveryUsed)
    POST password {current, next}    checks the current password, the policy and the breach list; other
                                     sessions end and this one is rotated
-   Every outcome is an auth event. The per-address limiter counts attempts on sign-in, codes and
-   recovery codes. Secrets are sealed with DATA_KEY (rotate-key re-seals them). */
+   POST forgot {email}              always 200; a known, active account gets a reset link by email
+                                    (30 minutes, single use, token in the fragment)
+   POST reset {token, password}     sets the password through the link; every session ends
+   POST invite {token, password}    a new account chooses its password through the invitation link
+                                    (24 hours, single use); then it signs in and enrols as usual
+   POST request-access {name, email, firm, note}  stored for the operator, who is told by email;
+                                    always 200; fields capped; a few per address per hour
+   GET  state                       for a half-finished session after a reload: stage, next, csrf
+   Every outcome is an auth event. The per-address limiter counts attempts on sign-in, codes,
+   recovery codes and links. Secrets are sealed with DATA_KEY (rotate-key re-seals them). */
 'use strict';
 const crypto = require('crypto');
 const { verifyPassword, dummyVerify, hashPassword, checkPolicy, breachedCount } = require('../auth/password.js');
@@ -40,11 +48,16 @@ const { generateSecret, base32Encode, base32Decode, otpauthUri, verifyCode, newR
 const { ID_RE } = require('../repositories/ids.js');
 
 const WARN_AT = 5;
+const RESET_TTL_MS = 30 * 60e3;
+const REQUEST_LIMIT = Object.freeze({ max: 3, windowMs: 3600e3 });
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const refuse = (status, error, code) => Object.assign(new Error(error), { status, code });
 const BAD_CREDENTIALS = () => refuse(401, 'Email or password is not right', 'bad_credentials');
 const SECOND_STEP = () => refuse(401, 'Finish signing in: enter the code from your authenticator app', 'second_step_required');
 
-function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {} }) {
+function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter = null }) {
+  const { createLimiter } = require('../auth/limiter.js');
+  requestLimiter = requestLimiter || createLimiter({ ...REQUEST_LIMIT, now });
   const event = (ctx, userId, ev, outcome, detail = '') => authStore.event({ userId, email: ctx.email || '', event: ev, outcome, ip: ctx.ip, userAgent: ctx.userAgent, detail });
   const BAD_CODE = (msg = 'That code is not right') => refuse(401, msg, 'bad_code');
   const codeHash = code => crypto.createHash('sha256').update(code).digest('hex');
@@ -190,7 +203,68 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
     return { reply: { firmId, firmName: m.firmName, role: m.role, csrf: r.csrf }, headers: { 'Set-Cookie': r.cookie } };
   }
 
+  async function forgot(ctx) {
+    const { email } = ctx.body || {};
+    if (typeof email !== 'string' || !email.trim() || email.length > 254) throw refuse(400, 'An email address is required', 'bad_request');
+    ctx.email = email;
+    const user = await authStore.findUserByEmail(email);
+    const firms = user ? await authStore.memberships(user.id) : [];
+    if (!user) await event(ctx, null, 'reset_requested', 'unknown');
+    else if (!user.active || !firms.length) await event(ctx, user.id, 'reset_requested', 'inactive');
+    else {
+      const { token } = await authStore.issueToken(user.id, 'reset', RESET_TTL_MS);
+      await notify.resetLink(user, token);
+      await event(ctx, user.id, 'reset_requested', 'sent');
+    }
+    return { reply: { ok: true } };
+  }
+
+  // The password through a link (reset or invitation): policy and breach list, every session ends
+  async function throughLink(ctx, purpose, ev) {
+    const { token, password } = ctx.body || {};
+    if (typeof password !== 'string') throw refuse(400, 'A password is required', 'bad_request');
+    const problem = checkPolicy(password);
+    if (problem) throw refuse(400, problem, 'weak_password');
+    const count = await breachedCount(password, breached);
+    if (count) throw refuse(400, 'That password has appeared in a data breach. Choose a different one.', 'breached_password');
+    const user = await authStore.consumeToken(token, purpose);
+    if (!user) { await event(ctx, null, ev, 'bad_token'); throw refuse(400, 'This link is no longer valid. Ask for a new one.', 'bad_token'); }
+    ctx.email = user.email;
+    await authStore.setPassword(user.id, await hashPassword(password));
+    await authStore.recordSuccess(user.id);
+    await sessions.revokeAll(user.id, {});
+    await event(ctx, user.id, ev, 'ok', count === null ? 'breach check skipped' : '');
+    return user;
+  }
+  const reset = async ctx => { await throughLink(ctx, 'reset', 'reset'); return { reply: { ok: true } }; };
+  const invite = async ctx => { const user = await throughLink(ctx, 'invite', 'invite'); return { reply: { ok: true, email: user.email } }; };
+
+  async function requestAccess(ctx) {
+    const b = ctx.body || {};
+    const name = typeof b.name === 'string' ? b.name.trim() : '', email = typeof b.email === 'string' ? b.email.trim() : '';
+    const firm = typeof b.firm === 'string' ? b.firm.trim() : '', note = typeof b.note === 'string' ? b.note.trim() : '';
+    if (!name || name.length > 200 || !EMAIL.test(email) || email.length > 254 || firm.length > 200 || note.length > 1000 || /[\u0000-\u001F\u007F]/.test(name + firm + email)) throw refuse(400, 'Give your name, a valid email address, and at most 200 characters for the firm and 1,000 for the note', 'bad_request');
+    const l = requestLimiter.hit(ctx.ip);
+    if (!l.allowed) throw refuse(429, 'Too many requests from this address. Try again later.', 'too_many_attempts');
+    ctx.email = email;
+    await authStore.createAccessRequest({ name, email, firm, note, ip: ctx.ip });
+    await event(ctx, null, 'access_request', 'stored', firm);
+    await notify.accessRequest({ name, email, firm, note, ip: ctx.ip });
+    return { reply: { ok: true } };
+  }
+
+  async function state(ctx) {
+    const user = await authStore.findUser(ctx.auth.userId);
+    const next = ctx.auth.stage === 'full' ? (ctx.auth.firmId ? null : 'firm') : (user.totp_confirmed_at && !user.reenrol ? 'totp' : 'enrol');
+    return { reply: { stage: ctx.auth.stage, next, csrf: ctx.auth.csrf, email: user.email } };
+  }
+
   const ROUTES = {
+    'POST /api/auth/forgot': { stage: 'none', limited: true, fn: forgot },
+    'POST /api/auth/reset': { stage: 'none', limited: true, fn: reset },
+    'POST /api/auth/invite': { stage: 'none', limited: true, fn: invite },
+    'POST /api/auth/request-access': { stage: 'none', limited: true, fn: requestAccess },
+    'GET /api/auth/state': { stage: 'any', fn: state },
     'POST /api/auth/sign-in': { stage: 'none', limited: true, fn: signIn },
     'POST /api/auth/sign-out': { stage: 'any', fn: signOut },
     'POST /api/auth/sign-out-all': { stage: 'full', fn: signOutAll },

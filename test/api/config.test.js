@@ -46,6 +46,10 @@ test('settings from the environment', () => {
   assert.throws(() => ok({ SESSION_IDLE_MINUTES: '0' }), /SESSION_IDLE_MINUTES must be a positive number/);
   assert.throws(() => ok({ SESSION_ABSOLUTE_HOURS: 'soon' }), /SESSION_ABSOLUTE_HOURS must be a positive number/);
   assert.throws(() => ok({ PUBLIC_URL: 'profiler.example.com' }), /PUBLIC_URL must be the address/);
+  assert.deepEqual([c.smtpUrl, c.smtpFrom, c.operatorEmail], ['', 'Household Wealth Profiler <no-reply@localhost>', '']);
+  const m = ok({ SMTP_URL: 'smtps://u:p@mail.example.com', SMTP_FROM: 'Profiler <no-reply@example.com>', OPERATOR_EMAIL: 'ops@example.com' });
+  assert.deepEqual([m.smtpUrl, m.smtpFrom, m.operatorEmail], ['smtps://u:p@mail.example.com', 'Profiler <no-reply@example.com>', 'ops@example.com']);
+  assert.throws(() => ok({ SMTP_URL: 'mail.example.com' }), /SMTP_URL must start with smtp/);
 });
 
 test('AUTH_USERS: entries split on ";", incomplete ones ignored, hash kept as bytes', () => {

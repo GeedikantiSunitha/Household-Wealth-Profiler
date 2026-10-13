@@ -27,7 +27,7 @@ const { ID_RE } = require('./repositories/ids.js');
 
 const CHALLENGE = { 'WWW-Authenticate': 'Basic realm="Household Wealth Profiler", charset="UTF-8"' };
 // What a session may call while its second step is still pending
-const SECOND_STEP_PATHS = new Set(['/api/auth/totp', '/api/auth/enrol', '/api/auth/enrol/confirm', '/api/auth/recovery', '/api/auth/sign-out']);
+const SECOND_STEP_PATHS = new Set(['/api/auth/totp', '/api/auth/enrol', '/api/auth/enrol/confirm', '/api/auth/recovery', '/api/auth/sign-out', '/api/auth/state']);
 const READY_TIMEOUT_MS = 3000;
 
 // ready() must answer within the time limit, or the readiness check reports not ready

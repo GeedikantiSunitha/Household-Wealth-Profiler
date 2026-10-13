@@ -1,0 +1,165 @@
+// Links and requests (2.6) on PostgreSQL: forgot password and the reset link, the invitation link
+// for a new account, the sign-in state for a half-finished session, Request Access, and the
+// emails behind them (captured here, never sent). Runs when TEST_DATABASE_URL points at a scratch
+// database, in a schema of its own.
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const path = require('node:path');
+const { createApp } = require('../../apps/api/src/app.js');
+const { createAuth } = require('../../apps/api/src/auth');
+const { createAuthStore } = require('../../apps/api/src/auth/store.js');
+const { createSessions } = require('../../apps/api/src/auth/sessions.js');
+const { createAuthRoutes } = require('../../apps/api/src/routes/auth.js');
+const { createLimiter, AUTH_LIMIT } = require('../../apps/api/src/auth/limiter.js');
+const { createNotify } = require('../../apps/api/src/auth/notify.js');
+const { createInvites } = require('../../apps/api/src/auth/invites.js');
+const { hashPassword } = require('../../apps/api/src/auth/password.js');
+const { codeAt, base32Decode } = require('../../apps/api/src/auth/totp.js');
+const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+const { createPool } = require('../../apps/api/src/db/pool.js');
+const { migrate, pgClient } = require('../../db/migrate.js');
+const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+
+const ROOT = path.join(__dirname, '..', '..');
+const BASE_URL = require('./test-db.js').testDatabaseUrl();
+const PASS = 'correct horse battery staple';
+const PUBLIC = 'https://profiler.example.com';
+
+test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL to run' }, () => {
+  const { Client } = require('pg');
+  const schema = 'hwp_links_' + crypto.randomBytes(4).toString('hex');
+  const PW = crypto.randomBytes(12).toString('hex');
+  const urlFor = user => { const u = new URL(BASE_URL); u.username = user; u.password = PW; u.searchParams.set('options', `-c search_path=${schema}`); return u.toString(); };
+  const asRole = async (user, fn) => { const c = new Client({ connectionString: urlFor(user) }); await c.connect(); try { return await fn(c); } finally { await c.end(); } };
+  let admin, pool, store, sessions, server, base, sam, sent, invites;
+  const clock = { t: Date.parse('2026-10-13T10:00:00Z') };
+  const now = () => clock.t;
+
+  test.before(async () => {
+    admin = new Client({ connectionString: BASE_URL }); await admin.connect();
+    await require('./test-db.js').ensureRoles(admin, PW);
+    await admin.query(`create schema ${schema} authorization hwp_owner`);
+    await admin.query(`grant usage on schema ${schema} to hwp_app`);
+    await asRole('hwp_owner', c => migrate(pgClient(c), { dir: path.join(ROOT, 'db', 'migrations') }));
+    await asRole('hwp_owner', async c => {
+      sam = (await c.query(`insert into users (email, name, password_hash) values ('sam@example.com', 'Sam Adviser', $1) returning id`, [await hashPassword(PASS)])).rows[0].id;
+      await c.query(`insert into memberships (user_id, firm_id, role) values ($1, $2, 'adviser')`, [sam, DEFAULT_FIRM_ID]);
+    });
+    pool = createPool(urlFor('hwp_app'), 2);
+    store = createAuthStore({ pool, now: () => new Date(clock.t) });
+    sessions = createSessions({ store, secret: crypto.randomBytes(32), secure: false, now });
+    sent = [];
+    const mailer = { send: async m => { sent.push(m); return { delivered: true, logged: false }; } };
+    const notify = createNotify({ mailer, publicUrl: PUBLIC, operatorEmail: 'operator@example.com', appName: 'Household Wealth Profiler' });
+    invites = createInvites({ authStore: store, notify, now });
+    const { authenticate } = createAuth({ users: new Map(), clientIpHeader: 'x-client-ip' }, { authStore: store, sessions });
+    const authRoutes = createAuthRoutes({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), notify, clientIpHeader: 'x-client-ip', now, sealer: createSealer(Buffer.alloc(32, 7)), issuer: 'Household Wealth Profiler', breached: { fetch: async () => ({ ok: true, text: async () => '00000:1\n' }) } });
+    const households = { list: async () => [], create: async () => ({ id: '0', version: 1 }), get: async () => null, audit: async () => null, save: async () => ({ notFound: true }) };
+    const firm = { get: async () => ({ version: 0, settings: {}, updatedAt: '', updatedBy: '' }), audit: async () => [], save: async () => ({ version: 1, changes: 1 }) };
+    ({ server } = createApp({ config: { hsts: false, key: Buffer.alloc(32, 7), root: ROOT, users: new Map() }, households, firm, prices: { enabled: false }, authenticate, authRoutes, ready: async () => {} }));
+    await new Promise(r => server.listen(0, '127.0.0.1', r));
+    base = `http://127.0.0.1:${server.address().port}`;
+  }, { timeout: 120000 });
+  test.after(async () => { if (server) server.close(); if (pool) await pool.end(); await admin.query(`drop schema if exists ${schema} cascade`); await admin.end(); });
+  test.beforeEach(() => { clock.t += 16 * 60e3; sent.length = 0; });
+
+  const J = { 'Content-Type': 'application/json' };
+  const post = (p, body, { cookie, csrf, ip = '10.0.0.1' } = {}) => fetch(base + p, { method: 'POST', headers: { ...J, 'X-Client-IP': ip, ...(cookie ? { Cookie: cookie } : {}), ...(csrf ? { 'X-CSRF-Token': csrf } : {}) }, body: JSON.stringify(body) });
+  const get = (p, { cookie, ip = '10.0.0.1' } = {}) => fetch(base + p, { headers: { 'X-Client-IP': ip, ...(cookie ? { Cookie: cookie } : {}) } });
+  const cookieOf = r => (r.headers.get('set-cookie') || '').split(';')[0];
+  const events = async email => (await asRole('hwp_owner', c => c.query('select event, outcome from auth_events where email = $1 order by id', [email]))).rows.map(e => e.event + ':' + e.outcome);
+  const linkIn = (text, kind) => { const m = new RegExp(PUBLIC.replace(/\./g, '\\.') + '/#' + kind + '=([A-Za-z0-9_-]{43})').exec(text); assert.ok(m, 'a link in the email: ' + text); return m[1]; };
+
+  test('forgot password: the same 200 for any email; a known, active account gets a link by email with the token only in the fragment; events say what happened', async () => {
+    for (const email of ['nobody@example.com', 'SAM@example.com']) {
+      const r = await post('/api/auth/forgot', { email });
+      assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+    }
+    assert.equal(sent.length, 1, 'one email, for the account that exists');
+    assert.equal(sent[0].to, 'sam@example.com'); assert.equal(sent[0].subject, 'Reset your Household Wealth Profiler password');
+    const token = linkIn(sent[0].text, 'reset');
+    assert.ok(!sent[0].text.includes('?'), 'no query string: the token travels in the fragment, which browsers never send');
+    assert.match(sent[0].text, /30 minutes/);
+    assert.deepEqual(await events('nobody@example.com'), ['reset_requested:unknown']);
+    assert.deepEqual((await events('sam@example.com')).slice(-1), ['reset_requested:sent']);
+    const stored = (await asRole('hwp_owner', c => c.query(`select token_hash, purpose, used_at from one_time_tokens where user_id = $1`, [sam]))).rows;
+    assert.equal(stored.length, 1); assert.equal(stored[0].purpose, 'reset'); assert.equal(stored[0].token_hash, crypto.createHash('sha256').update(token).digest('hex'), 'stored hashed');
+    for (const bad of [{}, { email: 7 }, { email: 'x'.repeat(300) }]) assert.equal((await post('/api/auth/forgot', bad)).status, 400);
+  });
+
+  test('a reset link: single use, 30 minutes, a newer one invalidates older ones; it sets the password, ends every session and is recorded', async () => {
+    await post('/api/auth/forgot', { email: 'sam@example.com' });
+    const older = linkIn(sent[0].text, 'reset');
+    await post('/api/auth/forgot', { email: 'sam@example.com' });
+    const token = linkIn(sent[1].text, 'reset');
+    let r = await post('/api/auth/reset', { token: older, password: 'a wholly new passphrase 1' });
+    assert.equal(r.status, 400); assert.deepEqual(await r.json(), { error: 'This link is no longer valid. Ask for a new one.', code: 'bad_token' });
+    r = await post('/api/auth/reset', { token, password: 'short' });
+    assert.equal(r.status, 400); assert.deepEqual(await r.json(), { error: 'Use at least 12 characters', code: 'weak_password' });
+    const open = await sessions.issue({ userId: sam, firmId: DEFAULT_FIRM_ID, stage: 'full' });
+    r = await post('/api/auth/reset', { token, password: 'a wholly new passphrase 1' });
+    assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+    assert.equal((await get('/api/me', { cookie: open.cookie.split(';')[0] })).status, 401, 'every session ended');
+    assert.equal((await post('/api/auth/sign-in', { email: 'sam@example.com', password: PASS })).status, 401, 'the old password is gone');
+    assert.equal((await post('/api/auth/sign-in', { email: 'sam@example.com', password: 'a wholly new passphrase 1' })).status, 200);
+    r = await post('/api/auth/reset', { token, password: 'a wholly new passphrase 2' });
+    assert.equal(r.status, 400); assert.equal((await r.json()).code, 'bad_token', 'used once');
+    assert.deepEqual((await asRole('hwp_owner', c => c.query("select outcome, email from auth_events where event = 'reset' order by id"))).rows, [{ outcome: 'bad_token', email: '' }, { outcome: 'ok', email: 'sam@example.com' }, { outcome: 'bad_token', email: '' }], 'a bad token names no account');
+    await post('/api/auth/forgot', { email: 'sam@example.com' });
+    const late = linkIn(sent[2].text, 'reset');
+    clock.t += 31 * 60e3;
+    r = await post('/api/auth/reset', { token: late, password: 'a wholly new passphrase 3' });
+    assert.equal(r.status, 400); assert.equal((await r.json()).code, 'bad_token', 'expired after 30 minutes');
+    assert.equal((await post('/api/auth/reset', { token: 'not-a-token', password: 'a wholly new passphrase 3' })).status, 400);
+    assert.equal((await post('/api/auth/sign-in', { email: 'sam@example.com', password: 'a wholly new passphrase 1' })).status, 200, 'the password set earlier stands');
+  });
+
+  test('an invitation: a new account receives a link, chooses a password through it, then signs in and enrols; the link is single use and 24 hours', async () => {
+    const { userId } = await invites.create({ email: 'Dana@Example.com', name: 'Dana Adviser', firmId: DEFAULT_FIRM_ID, role: 'adviser', invitedBy: 'operator' });
+    assert.equal(sent.length, 1); assert.equal(sent[0].to, 'dana@example.com'); assert.equal(sent[0].subject, 'Your Household Wealth Profiler account');
+    const token = linkIn(sent[0].text, 'invite');
+    assert.match(sent[0].text, /24 hours/);
+    assert.equal((await asRole('hwp_owner', c => c.query('select password_hash from users where id = $1', [userId]))).rows[0].password_hash, null);
+    assert.equal((await post('/api/auth/sign-in', { email: 'dana@example.com', password: 'a passphrase for dana 1' })).status, 401, 'nothing to sign in with yet');
+    let r = await post('/api/auth/invite', { token, password: 'a passphrase for dana 1' });
+    assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true, email: 'dana@example.com' });
+    r = await post('/api/auth/sign-in', { email: 'dana@example.com', password: 'a passphrase for dana 1' });
+    assert.equal(r.status, 200); assert.equal((await r.json()).next, 'enrol');
+    assert.equal((await post('/api/auth/invite', { token, password: 'a passphrase for dana 2' })).status, 400, 'used once');
+    assert.deepEqual((await events('dana@example.com')).filter(e => /invite/.test(e)), ['invite_sent:ok', 'invite:ok']);
+    // inviting an existing account again: a new link, a membership added, nothing else changed
+    const again = await invites.create({ email: 'dana@example.com', name: 'ignored', firmId: DEFAULT_FIRM_ID, role: 'admin', invitedBy: 'operator' });
+    assert.equal(again.userId, userId); assert.equal(sent.length, 2);
+    assert.equal((await asRole('hwp_owner', c => c.query('select role from memberships where user_id = $1', [userId]))).rows[0].role, 'admin');
+    clock.t += 25 * 3600e3;
+    assert.equal((await post('/api/auth/invite', { token: linkIn(sent[1].text, 'invite'), password: 'a passphrase for dana 3' })).status, 400, 'expired after 24 hours');
+  });
+
+  test('the sign-in state for a half-finished session: what the second step needs after a reload', async () => {
+    const r = await post('/api/auth/sign-in', { email: 'sam@example.com', password: 'a wholly new passphrase 1' });
+    const cookie = cookieOf(r), { csrf } = await r.json();
+    const s = await get('/api/auth/state', { cookie });
+    assert.equal(s.status, 200); assert.deepEqual(await s.json(), { stage: 'password', next: 'enrol', csrf, email: 'sam@example.com' });
+    assert.equal((await get('/api/auth/state')).status, 401);
+    await post('/api/auth/sign-out', {}, { cookie, csrf });
+  });
+
+  test('Request Access: stored and sent to the operator; fields are capped; the same address is limited to a few an hour; nothing says whether the email exists', async () => {
+    let r = await post('/api/auth/request-access', { name: 'New Adviser', email: 'new@example.com', firm: 'Alder Wealth', note: 'I work with Sam' });
+    assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+    assert.equal(sent.length, 1); assert.equal(sent[0].to, 'operator@example.com'); assert.match(sent[0].subject, /Access request/); assert.match(sent[0].text, /New Adviser/); assert.match(sent[0].text, /Alder Wealth/);
+    const row = (await asRole('hwp_owner', c => c.query('select name, email, firm_name, firm_id, note, status, ip from access_requests'))).rows[0];
+    assert.deepEqual(row, { name: 'New Adviser', email: 'new@example.com', firm_name: 'Alder Wealth', firm_id: null, note: 'I work with Sam', status: 'pending', ip: '10.0.0.1' });
+    r = await post('/api/auth/request-access', { name: 'Sam', email: 'sam@example.com', firm: 'x', note: '' });
+    assert.equal(r.status, 200, 'an existing account gets the same answer'); assert.equal(sent.length, 2);
+    for (const bad of [{ name: '', email: 'a@b.co' }, { name: 'x', email: 'not-an-email' }, { name: 'x'.repeat(201), email: 'a@b.co' }, { name: 'x', email: 'a@b.co', note: 'n'.repeat(1001) }, { name: 'x', email: 'a@b.co', firm: 'f'.repeat(201) }]) {
+      const b = await post('/api/auth/request-access', bad);
+      assert.equal(b.status, 400, JSON.stringify(bad).slice(0, 40)); assert.equal((await b.json()).code, 'bad_request');
+    }
+    for (let i = 0; i < 3; i++) await post('/api/auth/request-access', { name: 'Again', email: `again${i}@example.com` }, { ip: '203.0.113.5' });
+    r = await post('/api/auth/request-access', { name: 'Again', email: 'again9@example.com' }, { ip: '203.0.113.5' });
+    assert.equal(r.status, 429); assert.equal((await r.json()).code, 'too_many_attempts');
+  });
+});

@@ -133,13 +133,36 @@ test('0010: sign-in columns and tables; the app role reaches accounts and sessio
     assert.equal(r[6].rows[0].n, 1, 'and the session it wrote');
     assert.equal((await db.query(`select count(*)::int n from sessions`))[0].n, 0, 'the setting ended with the transaction');
     await assert.rejects(pg.query(`update users set email = 'other@example.com'`), /permission denied/, 'the app role may change sign-in columns only, never the email');
-    await assert.rejects(pg.query(`insert into users (email) values ('new@example.com')`), /permission denied/, 'accounts are made by the owner (operator tooling), not by the app role');
+    await assert.rejects(pg.query(`insert into users (email) values ('new@example.com')`), /row-level security|permission denied/, 'no account is made outside sign-in (0011 allows it within)');
     await pg.exec('reset role');
 
     await assert.rejects(pg.query(`update auth_events set outcome = 'changed'`), /not allowed/, 'auth events are never rewritten');
     await assert.rejects(pg.query(`delete from auth_events`), /not allowed/, 'nor deleted');
     assert.equal((await db.query(`select count(*)::int n from auth_events`))[0].n, 1, 'the owner reads them');
     assert.equal((await db.query(`select count(*)::int n from sessions`))[0].n, 1, 'and the sessions');
+  } finally { await pg.close(); }
+});
+
+test('0011: within sign-in the app role can make an account with a membership and decide an access request; still never change an email or delete', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await upTo(pg, '0010_auth.sql');
+    const applied = await migrate(db, { dir: DIR });
+    assert.ok(applied.includes('0011_auth_invites.sql'), applied.join());
+    await pg.exec('set role hwp_app');
+    await assert.rejects(pg.query(`insert into users (email, name) values ('new@example.com', 'New')`), /row-level security/, 'nothing outside sign-in');
+    const r = await pg.exec(`begin; select set_config('app.auth', 'on', true);
+      insert into users (email, name) values ('new@example.com', 'New');
+      insert into memberships (user_id, firm_id, role) select id, '${DEFAULT_FIRM}', 'adviser' from users where email = 'new@example.com';
+      insert into access_requests (name, email) values ('Someone', 'someone@example.com');
+      update access_requests set status = 'approved', decided_by = 'operator', decided_at = now();
+      select count(*)::int as n from memberships; commit`);
+    assert.equal(r[6].rows[0].n, 1);
+    await assert.rejects(pg.query(`update users set email = 'x@example.com'`), /permission denied/);
+    await assert.rejects(pg.query(`update users set active = false`), /permission denied/, 'deactivation is not the app role\'s (Phase 3)');
+    await assert.rejects(pg.query(`delete from access_requests`), /permission denied/);
+    await pg.exec('reset role');
+    assert.equal((await db.query(`select status from access_requests`))[0].status, 'approved');
   } finally { await pg.close(); }
 });
 

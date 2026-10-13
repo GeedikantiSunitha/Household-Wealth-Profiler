@@ -4,6 +4,7 @@
    sees none of these rows. Emails are matched in their normalised form (trimmed, lower case).
    Sessions (2.3) and the authenticator (2.5) are kept here too. */
 'use strict';
+const crypto = require('crypto');
 const { tx } = require('../db/pool.js');
 const { delayAfter } = require('./password.js');
 
@@ -50,6 +51,32 @@ function createAuthStore({ pool, now = () => new Date() }) {
     }),
     unusedRecoveryCodes: userId => withAuth(async c => (await c.query('select id, code_hash from recovery_codes where user_id = $1 and used_at is null order by created_at', [userId])).rows),
     useRecoveryCode: id => withAuth(c => c.query('update recovery_codes set used_at = $2 where id = $1 and used_at is null', [id, now()])),
+
+    // One-time links (password reset, invitation): the token leaves as random bytes and is kept as a hash;
+    // issuing one invalidates older unused ones of that purpose; consuming is single use and within the time
+    issueToken: (userId, purpose, ttlMs) => withAuth(async c => {
+      const token = crypto.randomBytes(32).toString('base64url');
+      await c.query('update one_time_tokens set used_at = $3 where user_id = $1 and purpose = $2 and used_at is null', [userId, purpose, now()]);
+      await c.query('insert into one_time_tokens (user_id, purpose, token_hash, created_at, expires_at) values ($1, $2, $3, $4, $5)', [userId, purpose, crypto.createHash('sha256').update(token).digest('hex'), now(), new Date(now().getTime() + ttlMs)]);
+      return { token };
+    }),
+    consumeToken: (token, purpose) => withAuth(async c => {
+      if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
+      const r = one(await c.query('update one_time_tokens set used_at = $3 where token_hash = $1 and purpose = $2 and used_at is null and expires_at > $3 returning user_id', [crypto.createHash('sha256').update(token).digest('hex'), purpose, now()]));
+      return r ? one(await c.query(`select ${USER_COLUMNS} from users where id = $1`, [r.user_id])) : null;
+    }),
+    // An account with a membership, made or found (migration 0011 lets the app role do this within sign-in)
+    ensureUser: ({ email, name, firmId, role }) => withAuth(async c => {
+      const firm = one(await c.query('select name from firms where id = $1', [firmId]));
+      if (!firm) throw Object.assign(new Error('Unknown firm'), { status: 400, code: 'bad_request' });
+      let u = one(await c.query('select id from users where email = $1', [normaliseEmail(email)]));
+      const created = !u;
+      if (created) u = one(await c.query('insert into users (email, name) values ($1, $2) returning id', [normaliseEmail(email), name]));
+      await c.query('insert into memberships (user_id, firm_id, role) values ($1, $2, $3) on conflict (user_id, firm_id) do update set role = excluded.role, active = true', [u.id, firmId, role]);
+      return { userId: u.id, created, firmName: firm.name };
+    }),
+    createAccessRequest: ({ name, email, firm = '', note = '', ip = '' }) => withAuth(async c => one(await c.query(
+      'insert into access_requests (name, email, firm_name, note, ip, created_at) values ($1, $2, $3, $4, $5, $6) returning id', [name, normaliseEmail(email), firm, note, ip, now()]))),
 
     // Sessions (auth/sessions.js decides the rules; this is only the rows)
     createSession: ({ idHash, userId, firmId = null, stage, expiresAt, ip = '', userAgent = '', at }) => withAuth(async c => one(await c.query(

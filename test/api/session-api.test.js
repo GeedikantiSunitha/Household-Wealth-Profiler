@@ -87,6 +87,7 @@ test.describe('sessions in the request pipeline', { skip: !BASE_URL && 'set TEST
     // The second-step routes and sign-out are the only ones such a session may call (they do not exist yet in this step, so 404, never 401)
     for (const p of ['/api/auth/totp', '/api/auth/enrol', '/api/auth/enrol/confirm', '/api/auth/recovery', '/api/auth/sign-out'])
       assert.notEqual((await call('POST', p, { session: s, body: '{}', headers: { 'X-CSRF-Token': s.csrf } })).status, 401, p);
+    assert.notEqual((await call('GET', '/api/auth/state', { session: s })).status, 401, 'the sign-in state');
   });
 
   test('writes with a cookie session need the CSRF token bound to that session; reads do not', async () => {

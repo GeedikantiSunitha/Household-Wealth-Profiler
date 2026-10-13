@@ -28,6 +28,8 @@ const { createSessions, sessionSecretFrom } = require('./auth/sessions.js');
 const { createLimiter, AUTH_LIMIT } = require('./auth/limiter.js');
 const { dummyHashString } = require('./auth/password.js');
 const { createAuthRoutes } = require('./routes/auth.js');
+const { createMailer } = require('./auth/mail.js');
+const { createNotify } = require('./auth/notify.js');
 const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
@@ -92,8 +94,10 @@ function main([cmd, ...args] = []) {
   const authStore = store.pool ? createAuthStore({ pool: store.pool }) : null;
   const sessions = authStore ? createSessions({ store: authStore, secret: sessionSecretFrom(config.key), idleMs: config.sessionIdleMinutes * 60e3, absoluteMs: config.sessionAbsoluteHours * 3600e3, secure: config.secureCookies }) : null;
   const { authenticate } = createAuth(config, { authStore, sessions });
-  // notify: the emails of 2B (lockout warning, recovery-code sign-in); until then only the auth event is written
-  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify: {}, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler' }) : null;
+  // The sign-in emails: links, warnings, access requests (to the log outside production when SMTP_URL is not set)
+  const mailer = createMailer({ smtpUrl: config.smtpUrl, from: config.smtpFrom, production: config.production });
+  const notify = createNotify({ mailer, publicUrl: config.publicUrl || `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`, operatorEmail: config.operatorEmail });
+  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler' }) : null;
   if (authStore) dummyHashString().catch(() => {});
   const { server } = createApp({ config, households, firm, prices, authenticate, authRoutes, ready: () => store.ready() });
 

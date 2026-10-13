@@ -66,6 +66,12 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   const minutes = (name, dflt) => { const v = env[name] === undefined || env[name] === '' ? dflt : +env[name]; if (!(v > 0)) throw new Error(`${name} must be a positive number`); return v; };
   const sessionIdleMinutes = minutes('SESSION_IDLE_MINUTES', 30), sessionAbsoluteHours = minutes('SESSION_ABSOLUTE_HOURS', 12);
   const publicUrl = (env.PUBLIC_URL || '').replace(/\/+$/, '');
+  // Email for the sign-in links and warnings: SMTP_URL (smtp:// with STARTTLS, or smtps://), the sender,
+  // and the operator who receives access requests. Without SMTP_URL, outside production, messages go to the log.
+  const smtpUrl = env.SMTP_URL || '';
+  if (smtpUrl) require('../auth/mail.js').parseSmtpUrl(smtpUrl);
+  const smtpFrom = env.SMTP_FROM || 'Household Wealth Profiler <no-reply@localhost>';
+  const operatorEmail = env.OPERATOR_EMAIL || '';
   if (publicUrl && !/^https?:\/\/[^/]+$/i.test(publicUrl)) throw new Error('PUBLIC_URL must be the address the app is served at, e.g. https://profiler.example.com');
   // With PostgreSQL the app's own sign-in (accounts in the database) is the way in and AUTH_USERS is
   // optional (development only). With files, Basic sign-in is the only way in. The data commands run without either.
@@ -96,6 +102,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     sessionAbsoluteHours,
     publicUrl,
     secureCookies: production || /^https:/i.test(publicUrl),
+    smtpUrl,
+    smtpFrom,
+    operatorEmail,
   };
 }
 
