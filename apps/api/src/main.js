@@ -25,6 +25,9 @@ const { createPriceService } = require('./services/prices.js');
 const { createAuth } = require('./auth');
 const { createAuthStore } = require('./auth/store.js');
 const { createSessions, sessionSecretFrom } = require('./auth/sessions.js');
+const { createLimiter, AUTH_LIMIT } = require('./auth/limiter.js');
+const { dummyHashString } = require('./auth/password.js');
+const { createAuthRoutes } = require('./routes/auth.js');
 const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
@@ -89,7 +92,10 @@ function main([cmd, ...args] = []) {
   const authStore = store.pool ? createAuthStore({ pool: store.pool }) : null;
   const sessions = authStore ? createSessions({ store: authStore, secret: sessionSecretFrom(config.key), idleMs: config.sessionIdleMinutes * 60e3, absoluteMs: config.sessionAbsoluteHours * 3600e3, secure: config.secureCookies }) : null;
   const { authenticate } = createAuth(config, { authStore, sessions });
-  const { server } = createApp({ config, households, firm, prices, authenticate, ready: () => store.ready() });
+  // notify: the emails of 2B (lockout warning, recovery-code sign-in); until then only the auth event is written
+  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify: {}, clientIpHeader: config.clientIpHeader }) : null;
+  if (authStore) dummyHashString().catch(() => {});
+  const { server } = createApp({ config, households, firm, prices, authenticate, authRoutes, ready: () => store.ready() });
 
   if (cmd === 'import-files') {
     importFiles({ dir: args[0] || config.dataDir, databaseUrl: config.databaseUrl, store, sealer })

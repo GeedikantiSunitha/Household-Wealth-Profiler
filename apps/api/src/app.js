@@ -2,8 +2,10 @@
      0. a request whose URL cannot be parsed is 400 "Bad request"
      1. GET /healthz answers without signing in (the process is up); GET /readyz answers without
         signing in once storage answers too (200), else 503 with no detail (for the host's checks)
-     2. sign-in: 429 while the address is locked out, 401 with a Basic challenge when not signed in;
-        a session whose second step is pending reaches only the second-step and sign-out routes (401)
+     2. the sign-in routes (/api/auth/, routes/auth.js) answer here, each saying what session it
+        needs; then sign-in: 429 while the address is locked out, 401 with a Basic challenge when
+        not signed in; a session whose second step is pending reaches only the second-step and
+        sign-out routes (401)
      3. anything outside /api/ is one of the app's files (GET only, else 405)
      4. any API call that changes something: same-site check (403), then JSON check (415); with a
         cookie session, the CSRF token bound to that session must come in X-CSRF-Token (403)
@@ -34,7 +36,7 @@ function withinTime(promise, ms) {
   return Promise.race([promise, new Promise((_, no) => { timer = setTimeout(() => no(new Error('timed out')), ms); })]).finally(() => clearTimeout(timer));
 }
 
-function createApp({ config, households, firm, prices, authenticate, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true }) {
+function createApp({ config, households, firm, prices, authenticate, authRoutes = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
@@ -54,6 +56,11 @@ function createApp({ config, households, firm, prices, authenticate, ready = asy
       catch (e) { console.error(new Date().toISOString(), 'not ready:', e.message); return send(res, 503, { ok: false }); }
     }
     const auth = await authenticate(req);
+    if (authRoutes && p.startsWith('/api/auth/')) {
+      const refused = checkWrite(req);
+      if (refused) return send(res, ...refused);
+      return authRoutes.handle({ req, res, p, auth, send, readBody });
+    }
     if (!auth || auth.locked) {
       return send(res, auth && auth.locked ? 429 : 401, { error: auth && auth.locked ? 'Too many failed sign-ins. Try again in 15 minutes.' : 'Sign in required' },
         auth && auth.locked ? {} : basicUsers ? CHALLENGE : {});

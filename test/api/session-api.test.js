@@ -38,10 +38,7 @@ test.describe('sessions in the request pipeline', { skip: !BASE_URL && 'set TEST
 
   test.before(async () => {
     admin = new Client({ connectionString: BASE_URL }); await admin.connect();
-    for (const r of ['hwp_owner', 'hwp_app']) {
-      await admin.query(`do $$ begin if not exists (select from pg_roles where rolname = '${r}') then create role ${r} nosuperuser nobypassrls; end if; end $$`);
-      await admin.query(`alter role ${r} login password '${PW}'`);
-    }
+    await require('./test-db.js').ensureRoles(admin, PW);
     await admin.query(`create schema ${schema} authorization hwp_owner`);
     await admin.query(`grant usage on schema ${schema} to hwp_app`);
     await asRole('hwp_owner', c => migrate(pgClient(c), { dir: path.join(ROOT, 'db', 'migrations') }));

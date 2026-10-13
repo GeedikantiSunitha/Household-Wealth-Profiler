@@ -13,4 +13,17 @@ function testDatabaseUrl(env = process.env) {
   return url;
 }
 
-module.exports = { testDatabaseUrl };
+// The two database roles the migrations expect, with a known password for the tests. Test files
+// run at the same time and each needs them, and PostgreSQL refuses two "alter role" statements on
+// one role at once ("tuple concurrently updated"), so the work is done under an advisory lock.
+async function ensureRoles(admin, password) {
+  await admin.query('select pg_advisory_lock(7206101)');
+  try {
+    for (const r of ['hwp_owner', 'hwp_app']) {
+      await admin.query(`do $$ begin if not exists (select from pg_roles where rolname = '${r}') then create role ${r} nosuperuser nobypassrls; end if; end $$`);
+      await admin.query(`alter role ${r} login password '${password}'`);
+    }
+  } finally { await admin.query('select pg_advisory_unlock(7206101)'); }
+}
+
+module.exports = { testDatabaseUrl, ensureRoles };
