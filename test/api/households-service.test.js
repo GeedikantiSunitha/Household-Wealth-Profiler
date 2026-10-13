@@ -52,7 +52,7 @@ test('create with an idempotency key: the same user and key again returns the fi
   const st = H.blank(); st.household.reference = 'REF-ONCE';
   const withRef = await svc.create(SAM, st, { idempotencyKey: 'click-0003' });
   assert.deepEqual(await svc.create(SAM, st, { idempotencyKey: 'click-0003' }), withRef, 'the same key replays, not 409');
-  await assert.rejects(svc.create(SAM, st, { idempotencyKey: 'click-0004' }), { status: 409 }, 'another key with that reference is a duplicate');
+  await assert.rejects(svc.create(SAM, st, { idempotencyKey: 'click-0004' }), { status: 409, code: 'duplicate_reference' }, 'another key with that reference is a duplicate');
   assert.equal((await svc.list(SAM)).length, 4);
   // The same key with a different request is refused, never answered with a reply that is not its own
   const changed = H.blank(); changed.household.name = 'Not the same request';
@@ -83,7 +83,7 @@ test('another firm reusing a key gets its own create and nothing about the first
 test('create refuses a client reference that another household in the firm already has (409), in any spelling', async () => {
   const { svc } = setup();
   const { id } = await svc.create(SAM, H.sample()); // HH-0001
-  await assert.rejects(svc.create(CHRIS, H.sample()), { status: 409, message: 'A household with reference "HH-0001" already exists' });
+  await assert.rejects(svc.create(CHRIS, H.sample()), { status: 409, code: 'duplicate_reference', message: 'Another household in this firm already has this client reference' });
   await assert.rejects(svc.create(SAM, withRef(H.blank(), '  hh-0001 ')), { status: 409 });
   assert.equal((await svc.list(SAM)).length, 1);
   assert.equal(typeof (await svc.create(SAM, withRef(H.blank(), 'HH-0002'))).id, 'string', 'another reference is fine');
@@ -94,8 +94,31 @@ test('create refuses a client reference that another household in the firm alrea
   assert.deepEqual(await svc.save(SAM, id, { version: 1, state: st }), { version: 2, changes: 1 });
   const { id: two } = await svc.create(SAM, withRef(H.blank(), 'HH-0003'));
   const taken = json((await svc.get(SAM, two)).state); taken.household.reference = 'hh-0001';
-  await assert.rejects(svc.save(SAM, two, { version: 1, state: taken }), { status: 409, message: 'A household with reference "HH-0001" already exists' });
+  await assert.rejects(svc.save(SAM, two, { version: 1, state: taken }), { status: 409, code: 'duplicate_reference', message: 'Another household in this firm already has this client reference' });
   assert.equal((await svc.get(SAM, two)).version, 1, 'nothing saved');
+});
+
+test('create and save refuse a value outside the field rules (400 invalid_field), naming the field and the rule, and store nothing', async () => {
+  const { svc } = setup();
+  const bad = H.blank(); bad.household.willsInPlace = 'maybe'; bad.members = [{ ...H.defaults('members'), dob: 'SECRET' }];
+  await assert.rejects(svc.create(SAM, bad), e => {
+    assert.equal(e.status, 400); assert.equal(e.code, 'invalid_field');
+    assert.deepEqual(e.errors, [{ field: 'household.willsInPlace', message: 'must be yes or no' }, { field: 'members[0].dob', message: 'must be a date (YYYY-MM-DD)' }]);
+    assert.equal(e.message, 'Invalid household: household.willsInPlace must be yes or no'); assert.ok(!/SECRET|maybe/.test(e.message)); return true;
+  });
+  assert.deepEqual(await svc.list(SAM), [], 'nothing created');
+  const { id } = await svc.create(SAM, H.blank());
+  const edit = H.blank(); edit.accounts = [{ ...H.defaults('accounts'), value: 'SECRET' }];
+  await assert.rejects(svc.save(SAM, id, { version: 1, state: edit }), { status: 400, code: 'invalid_field', message: 'Invalid household: accounts[0].value must be a number' });
+  assert.equal((await svc.get(SAM, id)).version, 1, 'nothing saved');
+  // canonical values are what gets stored: a numeric string becomes a number, "true" a boolean
+  const fine = H.blank(); fine.accounts = [{ ...H.defaults('accounts'), value: '£12,500' }]; fine.household.willsInPlace = 'true';
+  assert.equal((await svc.save(SAM, id, { version: 1, state: fine })).version, 2);
+  const rec = await svc.get(SAM, id);
+  assert.equal(rec.state.accounts[0].value, 12500); assert.equal(rec.state.household.willsInPlace, true);
+  // more than twenty problems: the first twenty are listed
+  const many = H.blank(); many.contacts = Array.from({ length: 25 }, () => ({ ...H.defaults('contacts'), date: 'nope' }));
+  await assert.rejects(svc.create(SAM, many), e => e.errors.length === 20);
 });
 
 test('list: a household that cannot be read is skipped and logged with its id; the rest still list', async () => {
@@ -178,9 +201,9 @@ test('unknown household: get null, audit null, save not found', async () => {
 
 test('in production a sample household is refused on create and on save (400); elsewhere it is allowed', async () => {
   const { svc: prod } = setup({ production: true });
-  await assert.rejects(prod.create(SAM, H.sample()), { status: 400, message: 'Sample households are not allowed in production' });
+  await assert.rejects(prod.create(SAM, H.sample()), { status: 400, code: 'sample_refused', message: 'Sample households are not allowed in production' });
   const { id } = await prod.create(SAM, H.blank());
-  await assert.rejects(prod.save(SAM, id, { version: 1, state: H.sample() }), { status: 400, message: 'Sample households are not allowed in production' });
+  await assert.rejects(prod.save(SAM, id, { version: 1, state: H.sample() }), { status: 400, code: 'sample_refused', message: 'Sample households are not allowed in production' });
   assert.equal((await prod.get(SAM, id)).version, 1, 'nothing was saved');
   assert.equal((await prod.list(SAM)).length, 1);
   const { svc: dev } = setup();

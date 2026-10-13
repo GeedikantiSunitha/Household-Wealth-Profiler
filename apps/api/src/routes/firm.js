@@ -12,7 +12,7 @@ function createFirmRoutes({ firm, send, readBody }) {
     if (p === '/api/firm/audit' && req.method === 'GET') { send(res, 200, await firm.audit(ctx)); return true; }
     if (p === '/api/firm' && req.method === 'PUT') {
       const r = await firm.save(ctx, await readBody(req));
-      if (r.conflict) send(res, 409, { error: 'Firm settings were changed by someone else', ...r.conflict });
+      if (r.conflict) send(res, 409, { error: 'Firm settings were changed by someone else', code: 'version_conflict', ...r.conflict });
       else send(res, 200, r);
       return true;
     }

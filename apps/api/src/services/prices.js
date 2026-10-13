@@ -19,7 +19,7 @@ function createPriceService({ key, fetch = globalThis.fetch, now = Date.now }) {
       const text = await r.text();
       if (!r.ok || !/^timestamp,/i.test(text)) {
         const msg = /Invalid API call/i.test(text) ? 'The data provider does not recognise that ticker. Try the exchange suffix, e.g. VWRL.LON.' : /rate limit|frequency|premium/i.test(text) ? 'The free data allowance for today is used up. Try again tomorrow or import a CSV.' : 'The data provider did not return prices.';
-        throw Object.assign(new Error(msg), { status: 502 });
+        throw Object.assign(new Error(msg), { status: 502, code: 'provider_error' });
       }
       cache.set(symbol, { at: now(), text });
       return text;

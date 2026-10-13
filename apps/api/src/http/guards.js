@@ -4,7 +4,7 @@
    An Origin of "null" (a sandboxed or opaque page) or one that is not a URL is not this site. */
 'use strict';
 
-const REFUSED = [403, { error: 'Cross-site request refused' }];
+const REFUSED = [403, { error: 'Cross-site request refused', code: 'cross_site' }];
 
 function checkWrite(req) {
   if (req.method === 'GET') return null;
@@ -15,7 +15,7 @@ function checkWrite(req) {
     try { originHost = new URL(origin).host; } catch (e) { return REFUSED; }
     if (originHost !== host) return REFUSED;
   }
-  if (!(req.headers['content-type'] || '').includes('application/json')) return [415, { error: 'Send JSON' }];
+  if (!(req.headers['content-type'] || '').includes('application/json')) return [415, { error: 'Send JSON', code: 'json_required' }];
   return null;
 }
 

@@ -7,7 +7,7 @@
 const crypto = require('node:crypto');
 
 const requestHash = (indexKey, request) => request == null ? null : crypto.createHmac('sha256', indexKey).update(String(request), 'utf8').digest('hex');
-const mismatch = () => Object.assign(new Error('This Idempotency-Key was already used for a different request'), { status: 422 });
+const mismatch = () => Object.assign(new Error('This Idempotency-Key was already used for a different request'), { status: 422, code: 'idempotency_mismatch' });
 // The reply to give for a stored key, or a refusal. A stored key without a hash (kept before hashes
 // were recorded) or a caller that sent no request replays as before.
 function replay(stored, hash) {

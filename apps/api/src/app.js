@@ -6,8 +6,9 @@
      3. anything outside /api/ is one of the app's files (GET only, else 405)
      4. any API call that changes something: same-site check (403), then JSON check (415)
      5. the API routes; anything else is 404
-   An error a step raises with a status (413, 400) is sent with its message; any other error is
-   logged and answered "Server error" (500) without detail. */
+   An error a step raises with a status (413, 400) is sent with its message, its code and, for a
+   refused record, its list of problems; any other error is logged and answered "Server error"
+   (500) without detail. Every error reply carries a code (see http/respond.js). */
 'use strict';
 const http = require('http');
 const path = require('path');
@@ -66,7 +67,7 @@ function createApp({ config, households, firm, prices, authenticate, ready = asy
     handle(req, res).catch(err => {
       const status = err.status || 500;
       if (status === 500) console.error(new Date().toISOString(), req.method, req.url, err);
-      if (!res.headersSent) send(res, status, { error: status === 500 ? 'Server error' : err.message });
+      if (!res.headersSent) send(res, status, status === 500 ? { error: 'Server error' } : { error: err.message, code: err.code, ...(err.errors ? { errors: err.errors } : {}) });
     });
   });
   server.headersTimeout = 20e3;

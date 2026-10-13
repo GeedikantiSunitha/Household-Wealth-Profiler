@@ -32,7 +32,7 @@ function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = ''
   async function keysFor(c, firmId) {
     if (firmKeys.has(firmId)) return firmKeys.get(firmId);
     let row = (await c.query('select wrapped_key from firms where id = $1', [firmId])).rows[0];
-    if (!row) throw Object.assign(new Error('Unknown firm'), { status: 403 });
+    if (!row) throw Object.assign(new Error('Unknown firm'), { status: 403, code: 'unknown_firm' });
     let firmKey = null;
     if (master) {
       if (!row.wrapped_key) {

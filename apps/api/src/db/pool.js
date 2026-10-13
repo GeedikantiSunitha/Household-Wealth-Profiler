@@ -24,7 +24,7 @@ function createPool(url, max) {
 async function connect(pool) {
   try { return await pool.connect(); }
   catch (e) {
-    if (/timeout exceeded when trying to connect/i.test(e.message)) throw Object.assign(new Error('The server is busy. Try again in a moment.'), { status: 503, cause: e });
+    if (/timeout exceeded when trying to connect/i.test(e.message)) throw Object.assign(new Error('The server is busy. Try again in a moment.'), { status: 503, code: 'busy', cause: e });
     throw e;
   }
 }
