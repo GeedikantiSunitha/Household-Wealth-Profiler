@@ -78,6 +78,10 @@ function createAuthStore({ pool, now = () => new Date() }) {
     }),
     createAccessRequest: ({ name, email, firm = '', note = '', ip = '' }) => withAuth(async c => one(await c.query(
       'insert into access_requests (name, email, firm_name, note, ip, created_at) values ($1, $2, $3, $4, $5, $6) returning id', [name, normaliseEmail(email), firm, note, ip, now()]))),
+    pendingRequests: () => withAuth(async c => (await c.query(`select id, name, email, firm_name, note, created_at from access_requests where status = 'pending' order by created_at`)).rows),
+    request: id => withAuth(async c => one(await c.query('select id, name, email, firm_name, note, status, decided_by, decided_at, firm_id, created_at from access_requests where id = $1', [id]))),
+    // The operator's decision on a request (migration 0011 allows these columns within sign-in); who and when are always recorded
+    decideRequest: (id, { status, by, firmId = null }) => withAuth(c => c.query('update access_requests set status = $2, decided_by = $3, decided_at = $4, firm_id = coalesce($5, firm_id) where id = $1 and status = $6', [id, status, by, now(), firmId, 'pending'])),
 
     // Sessions (auth/sessions.js decides the rules; this is only the rows)
     createSession: ({ idHash, userId, firmId = null, stage, expiresAt, ip = '', userAgent = '', at }) => withAuth(async c => one(await c.query(

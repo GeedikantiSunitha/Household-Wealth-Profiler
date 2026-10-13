@@ -82,7 +82,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
   try {
     const demo = execFileSync(process.execPath, ['server.js', 'hash-password', 'demo', 'demo'], { cwd: ROOT }).toString().trim();
     app = spawn(process.execPath, ['server.js'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PORT: String(appPort), HOST: '127.0.0.1',
-      DATA_DIR: data, DATABASE_URL: '', DATA_KEY: '', ALLOW_PLAINTEXT: '1', HSTS: '0', AUTH_USERS: demo } });
+      DATA_DIR: data, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', DATA_KEY: '', ALLOW_PLAINTEXT: '1', HSTS: '0', AUTH_USERS: demo } });
     await waitHttp(BASE + 'healthz');
     chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
       `--remote-debugging-port=${debugPort}`, '--remote-allow-origins=*', `--user-data-dir=${profile}`, '--window-size=1366,900', 'about:blank'], { stdio: 'ignore' });

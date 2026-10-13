@@ -19,7 +19,7 @@ const OTHER_FIRM = '0f1e0000-0000-4000-8000-000000000002';
 const KEY = crypto.randomBytes(32).toString('base64');
 const rec = (id, state) => ({ id, version: 1, state, createdAt: '2026-10-10T09:00:00.000Z', createdBy: 'sam', updatedAt: '2026-10-10T09:00:00.000Z', updatedBy: 'sam' });
 const run = (dir, args = []) => new Promise(resolve => execFile(process.execPath, ['server.js', 'check-records', ...args],
-  { cwd: ROOT, timeout: 20000, env: { ...process.env, DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '' } },
+  { cwd: ROOT, timeout: 20000, env: { ...process.env, DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '' } },
   (error, stdout, stderr) => resolve({ code: error ? (error.code === undefined ? 'killed' : error.code) : 0, stdout, stderr })));
 
 test('check-records lists each record the rules would refuse and each unreadable one, per firm, and changes nothing', async () => {

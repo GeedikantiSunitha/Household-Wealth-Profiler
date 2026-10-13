@@ -22,6 +22,8 @@ function createNotify({ mailer, publicUrl, operatorEmail = '', appName = 'Househ
       text: `Hello ${user.name || ''},\n\nThere have been ${failures} failed attempts to sign in to your ${appName} account${ip ? ` from the address ${ip}` : ''}. Each further attempt is delayed.\n\nIf this was you, wait a minute and try again, or use "Forgotten your password?" on the sign-in page.${signOff}` })),
     recoveryUsed: (user, { ip } = {}) => quietly('recovery notice', () => mailer.send({ to: user.email, subject: `${appName}: a recovery code was used`,
       text: `Hello ${user.name || ''},\n\nA recovery code was just used to sign in to your ${appName} account${ip ? ` from the address ${ip}` : ''}. The authenticator app on that account no longer counts: a new one must be set up at the next sign-in, and every other session has been ended.${signOff}` })),
+    mfaReset: user => quietly('authenticator reset notice', () => mailer.send({ to: user.email, subject: `${appName}: your authenticator app was reset`,
+      text: `Hello ${user.name || ''},\n\nAn operator has reset the authenticator app on your ${appName} account, and every recovery code and every session has been ended. At your next sign-in you will set up a new authenticator app and receive new recovery codes.${signOff}` })),
     accessRequest: req => {
       if (!operatorEmail) { log('access request stored, but OPERATOR_EMAIL is not set, so nobody was told'); return Promise.resolve(); }
       return quietly('access request', () => mailer.send({ to: operatorEmail, subject: `${appName}: Access request from ${req.name}`,

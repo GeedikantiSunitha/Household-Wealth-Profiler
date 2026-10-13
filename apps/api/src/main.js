@@ -4,7 +4,7 @@
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
      4. a data command (import-files, migrate, index-references, rotate-key, check-records, create-user,
-        set-password), or prepare storage and start
+        set-password, list-requests, approve-request, reject-request, reset-mfa), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
         migrate with DATABASE_OWNER_URL).
@@ -36,6 +36,8 @@ const { importFiles } = require('./cli/import-files.js');
 const { rotateKey } = require('./cli/rotate-key.js');
 const { checkRecords } = require('./cli/check-records.js');
 const { createUser, setPassword } = require('./cli/accounts.js');
+const { COMMANDS: OPERATOR } = require('./cli/operator.js');
+const { createInvites } = require('./auth/invites.js');
 
 const STOP_TIMEOUT_MS = 10e3;
 
@@ -115,6 +117,12 @@ function main([cmd, ...args] = []) {
   if (cmd === 'check-records') {
     checkRecords({ store, H: HWP, dataDir: config.dataDir, databaseUrl: config.databaseUrl, ownerUrl: config.databaseOwnerUrl, firmId: args[0] })
       .then(async code => { if (store.end) await store.end(); process.exit(code); }, async e => { console.error(e.message); if (store.end) await store.end().catch(() => {}); process.exit(1); });
+    return;
+  }
+  if (OPERATOR[cmd]) {
+    if (!authStore) { console.error('Set DATABASE_URL: sign-in accounts and access requests live in PostgreSQL.'); process.exit(1); }
+    OPERATOR[cmd]({ authStore, notify, invites: createInvites({ authStore, notify }), args })
+      .then(async code => { await store.end(); process.exit(code); }, async e => { console.error(e.message); await store.end().catch(() => {}); process.exit(1); });
     return;
   }
   if (authStore) dummyHashString().catch(() => {}); // warm: the first unknown-email sign-in then costs the same as any other

@@ -12,6 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
 const { apiContract } = require('./api-contract.js');
+const { recordsContract } = require('./records-contract.js');
 const { testDatabaseUrl } = require('./test-db.js');
 const { waitForServer } = require('./servers.js');
 
@@ -35,7 +36,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     if (left) throw new Error('TEST_DATABASE_URL must point at an empty database');
     KEY = node(['gen-key']);
     // DATABASE_OWNER_URL is blanked too: a developer's .env must never steer a test server's migrations elsewhere
-    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATABASE_OWNER_URL: '', DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
+    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
       AUTH_USERS: [node(['hash-password', 'sam', 'correct horse']), node(['hash-password', 'chris', 'battery staple'])].join(';') };
     proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: ENV, stdio: 'pipe' });
     proc.stderr.on('data', d => serverLog.push(String(d))); // shown at the end if the server logged an error
@@ -127,6 +128,64 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     assert.equal(r.status, 1); assert.match(r.stderr, /Usage/);
   });
 
+  test('operator commands: list-requests, approve-request (account, membership, invitation, decision recorded), reject-request, reset-mfa; each names who decided', async () => {
+    const { spawnSync } = require('node:child_process');
+    // the operator commands run as the app role within sign-in (migration 0011); no owner URL, no AUTH_USERS needed
+    const run = (args, input = '') => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, AUTH_USERS: '', PUBLIC_URL: 'https://profiler.example.com' }, input, encoding: 'utf8' });
+    const JJ = { ...J, 'X-Client-IP': '198.51.100.' + Math.floor(Math.random() * 200) };
+    const ask = body => fetch(BASE + '/api/auth/request-access', { method: 'POST', headers: JJ, body: JSON.stringify(body) });
+    assert.equal((await ask({ name: 'New Adviser', email: 'New.Adviser@Example.com', firm: 'Alder Wealth', note: 'Joining in November' })).status, 200);
+    assert.equal((await ask({ name: 'Someone Else', email: 'else@example.com', firm: '' })).status, 200);
+    const ids = (await db.query(`select id, email from access_requests where status = 'pending' order by created_at`)).rows;
+    assert.equal(ids.length, 2);
+
+    let r = run(['list-requests']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /2 pending request\(s\)/);
+    assert.match(r.stdout, new RegExp(ids[0].id + '.*New Adviser.*new.adviser@example.com.*Alder Wealth.*Joining in November'));
+    assert.match(r.stdout, new RegExp(ids[1].id + '.*Someone Else.*else@example.com'));
+
+    r = run(['approve-request', ids[0].id, 'f1a00000-0000-4000-8000-000000000001']);
+    assert.equal(r.status, 1); assert.match(r.stderr, /--by/, 'the decider must be named');
+    r = run(['approve-request', ids[0].id, 'f1a00000-0000-4000-8000-000000000001', '--by', 'Sunitha Gedikanti']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /Approved: account created for new.adviser@example.com \(adviser in firm f1a00000-0000-4000-8000-000000000001\); invitation sent/);
+    assert.match(r.stderr, /EMAIL NOT SENT \(no SMTP_URL\)/, 'no SMTP here: the invitation goes to the log'); assert.match(r.stderr, /https:\/\/profiler\.example\.com\/#invite=[A-Za-z0-9_-]{43}/);
+    const req = (await db.query('select status, decided_by, decided_at, firm_id from access_requests where id = $1', [ids[0].id])).rows[0];
+    assert.equal(req.status, 'approved'); assert.equal(req.decided_by, 'Sunitha Gedikanti'); assert.ok(req.decided_at); assert.equal(req.firm_id, 'f1a00000-0000-4000-8000-000000000001');
+    const u = (await db.query(`select u.id, u.name, u.password_hash, m.role from users u join memberships m on m.user_id = u.id where u.email = 'new.adviser@example.com'`)).rows[0];
+    assert.equal(u.name, 'New Adviser'); assert.equal(u.role, 'adviser'); assert.equal(u.password_hash, null, 'the password comes through the invitation link');
+    assert.deepEqual((await db.query(`select event, outcome, detail from auth_events where email = 'new.adviser@example.com' order by id`)).rows.map(e => e.event + ':' + e.outcome),
+      ['access_request:stored', 'invite_sent:ok', 'access_request:approved']);
+    assert.match((await db.query(`select detail from auth_events where email = 'new.adviser@example.com' and event = 'access_request' and outcome = 'approved'`)).rows[0].detail, /by Sunitha Gedikanti/);
+    r = run(['approve-request', ids[0].id, 'f1a00000-0000-4000-8000-000000000001', '--by', 'Sunitha Gedikanti']);
+    assert.equal(r.status, 1); assert.match(r.stderr, /already decided \(approved/);
+
+    r = run(['reject-request', ids[1].id, '--by', 'Sunitha Gedikanti']);
+    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Declined: else@example.com/);
+    assert.deepEqual((await db.query('select status, decided_by from access_requests where id = $1', [ids[1].id])).rows[0], { status: 'declined', decided_by: 'Sunitha Gedikanti' });
+    assert.equal((await db.query(`select count(*)::int n from users where email = 'else@example.com'`)).rows[0].n, 0, 'no account for a declined request');
+    assert.match(run(['list-requests']).stdout, /0 pending request\(s\)/);
+    r = run(['approve-request', '00000000-0000-4000-8000-00000000dead', 'f1a00000-0000-4000-8000-000000000001', '--by', 'x']);
+    assert.equal(r.status, 1); assert.match(r.stderr, /No request/);
+
+    // reset-mfa: the authenticator and recovery codes go, every session ends, the user is told, the decision is recorded
+    const oldSealer = require('../../apps/api/src/crypto/seal.js').createSealer(Buffer.from(KEY, 'base64'));
+    await db.query(`update users set totp_secret = $2, totp_confirmed_at = now(), totp_last_step = 5, reenrol = false where id = $1`, [u.id, oldSealer.seal('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')]);
+    await db.query(`insert into recovery_codes (user_id, code_hash) values ($1, 'h1'), ($1, 'h2')`, [u.id]);
+    await db.query(`insert into sessions (id_hash, user_id, firm_id, stage, expires_at) values ('s1', $1, $2, 'full', now() + interval '1 hour')`, [u.id, 'f1a00000-0000-4000-8000-000000000001']);
+    r = run(['reset-mfa', 'new.adviser@example.com']);
+    assert.equal(r.status, 1); assert.match(r.stderr, /--by/);
+    r = run(['reset-mfa', 'New.Adviser@example.com', '--by', 'Sunitha Gedikanti']);
+    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Authenticator reset for new.adviser@example.com: 2 recovery code\(s\) revoked, 1 session\(s\) ended/);
+    assert.match(r.stderr, /EMAIL NOT SENT/); assert.match(r.stderr, /authenticator app was reset/);
+    const after = (await db.query('select totp_confirmed_at, reenrol, totp_last_step, (select count(*)::int from recovery_codes where user_id = $1 and used_at is null) as codes, (select count(*)::int from sessions where user_id = $1 and revoked_at is null) as live from users where id = $1', [u.id])).rows[0];
+    assert.equal(after.totp_confirmed_at, null); assert.equal(after.reenrol, true); assert.equal(after.codes, 0); assert.equal(after.live, 0);
+    assert.match((await db.query(`select detail from auth_events where user_id = $1 and event = 'mfa_reset'`, [u.id])).rows[0].detail, /by Sunitha Gedikanti/);
+    r = run(['reset-mfa', 'nobody@example.com', '--by', 'x']);
+    assert.equal(r.status, 1); assert.match(r.stderr, /No account nobody@example.com/);
+  });
+
   test('rotate-key re-wraps every firm key with NEW_DATA_KEY; a server with the new key reads everything', async () => {
     const run = (args, extra) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, DATABASE_OWNER_URL: URL_, ...extra }, encoding: 'utf8' }).trim();
     const before = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
@@ -135,7 +194,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const { createSealer } = require('../../apps/api/src/crypto/seal.js');
     const oldSealer = createSealer(Buffer.from(KEY, 'base64')), newSealer = createSealer(Buffer.from(NEW, 'base64'));
     const uid = (await db.query(`insert into users (email, name, totp_secret) values ('totp@example.com', 'T', $1) returning id`, [oldSealer.seal('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')])).rows[0].id;
-    assert.match(run(['rotate-key'], { NEW_DATA_KEY: NEW }), /1 firm key\(s\) re-wrapped and 1 authenticator secret\(s\) re-sealed/);
+    assert.match(run(['rotate-key'], { NEW_DATA_KEY: NEW }), /1 firm key\(s\) re-wrapped and \d+ authenticator secret\(s\) re-sealed/);
     const sealed = (await db.query('select totp_secret from users where id = $1', [uid])).rows[0].totp_secret;
     assert.equal(newSealer.open(sealed), 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 'the new key opens the secret');
     assert.throws(() => oldSealer.open(sealed), 'the old key no longer does');
@@ -158,7 +217,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       assert.equal((await fetch(`${B3}/api/households/${id}`, { headers: SAM })).status, 500);
     } finally { p3.kill(); }
     // Rotate back, so the rest of this file (and the server started with the old key) carry on
-    assert.match(run(['rotate-key'], { DATA_KEY: NEW, NEW_DATA_KEY: KEY }), /1 firm key\(s\) re-wrapped and 1 authenticator secret\(s\) re-sealed/);
+    assert.match(run(['rotate-key'], { DATA_KEY: NEW, NEW_DATA_KEY: KEY }), /1 firm key\(s\) re-wrapped and \d+ authenticator secret\(s\) re-sealed/);
     assert.equal(oldSealer.open((await db.query('select totp_secret from users where id = $1', [uid])).rows[0].totp_secret), 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 'rotated back: the original key opens it again');
     assert.match(run(['rotate-key'], { NEW_DATA_KEY: KEY }).toString(), /re-wrapped/, 'the same key again is harmless');
   });
@@ -249,4 +308,5 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
 
   // PostgreSQL storage held to the same API contract as file storage
   apiContract(() => ({ base: BASE, sam: SAM, chris: CHRIS }));
+  recordsContract(() => ({ base: BASE, sam: SAM, chris: CHRIS }));
 });
