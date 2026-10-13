@@ -136,6 +136,28 @@ test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to
     });
   });
 
+  const AUTH_TABLES = ['sessions', 'recovery_codes', 'one_time_tokens', 'access_requests', 'auth_events'];
+  test('sign-in tables: row security forced; the app role sees and writes accounts, sessions and events only with app.auth set for the transaction', async () => {
+    const uid = (await asRole('hwp_owner', c => c.query(`insert into users (email, name) values ('sam@example.com', 'Sam') returning id`))).rows[0].id;
+    await asRole('hwp_app', async c => {
+      for (const t of ['users', 'memberships', ...AUTH_TABLES]) assert.equal((await c.query(`select count(*)::int n from ${t}`)).rows[0].n, 0, `${t}: nothing without app.auth`);
+      await assert.rejects(c.query(`insert into sessions (id_hash, user_id, stage, expires_at) values ('h', $1, 'password', now())`, [uid]), /row-level security/);
+      await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)");
+      assert.equal((await c.query('select count(*)::int n from users')).rows[0].n, 1, 'the account is visible to sign-in code');
+      await c.query(`insert into sessions (id_hash, user_id, stage, expires_at) values ('h', $1, 'password', now() + interval '1 hour')`, [uid]);
+      await c.query(`insert into auth_events (user_id, event, outcome) values ($1, 'sign_in', 'ok')`, [uid]);
+      await c.query(`update users set failed_attempts = 2 where id = $1`, [uid]);
+      await c.query('commit');
+      assert.equal((await c.query('select count(*)::int n from sessions')).rows[0].n, 0, 'nothing visible once the transaction ended');
+      await assert.rejects(c.query(`update users set email = 'x@example.com' where id = $1`, [uid]), /permission denied/, 'the email is not the app role\'s to change');
+    });
+    await asRole('hwp_owner', async c => {
+      assert.equal((await c.query('select count(*)::int n from sessions')).rows[0].n, 1, 'the owner reads sessions');
+      await assert.rejects(c.query('delete from auth_events'), /not allowed/, 'events are kept');
+      assert.equal((await c.query('select failed_attempts from users where id = $1', [uid])).rows[0].failed_attempts, 2);
+    });
+  });
+
   test('every API endpoint: written under firm A, invisible under firm B', async () => {
     const households = createHouseholdService({ store, HWP: H });
     const firm = createFirmService({ store, HWP: H });

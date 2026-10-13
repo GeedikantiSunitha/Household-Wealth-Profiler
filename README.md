@@ -171,7 +171,9 @@ from another even if application code has a bug. The tables, from [db/migrations
 `firms`, `users`, `memberships`, `households`, `household_versions`, `audit_log`, the firm
 settings in `firm_records`, `firm_record_versions` and `firm_audit`, `idempotency_keys` (a day of
 create keys, no client data: a hash of firm, user and key, the reply's id and version, and a keyed
-hash of the request) and `schema_migrations`. Database triggers refuse any delete or
+hash of the request), the sign-in tables `sessions`, `recovery_codes`, `one_time_tokens`,
+`access_requests` and `auth_events` (reachable by the app role only inside sign-in, never client data)
+and `schema_migrations`. Database triggers refuse any delete or
 rewrite of households, firm settings, versions and audit entries. Each firm's records are
 encrypted with the firm's own key, itself stored wrapped by `DATA_KEY`, so the database never
 holds readable client data and the master key never touches a record. Saves lock the household's
