@@ -22,6 +22,7 @@ const { checkWrite } = require('./http/guards.js');
 const { createMeRoute } = require('./routes/me.js');
 const { createHouseholdRoutes } = require('./routes/households.js');
 const { createFirmRoutes } = require('./routes/firm.js');
+const { createMembersRoutes } = require('./routes/members.js');
 const { createPriceRoute } = require('./routes/prices.js');
 const { createRecordsRoutes } = require('./routes/records.js');
 const { ID_RE } = require('./repositories/ids.js');
@@ -37,7 +38,7 @@ function withinTime(promise, ms) {
   return Promise.race([promise, new Promise((_, no) => { timer = setTimeout(() => no(new Error('timed out')), ms); })]).finally(() => clearTimeout(timer));
 }
 
-function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers }) {
+function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, members = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
@@ -46,6 +47,7 @@ function createApp({ config, households, firm, prices, records = null, authentic
     createPriceRoute({ prices, send }),
     createHouseholdRoutes({ households, ID_RE, send, readBody }),
     ...(records ? [createRecordsRoutes({ records, ID_RE, send, readBody })] : []),
+    ...(members ? [createMembersRoutes({ members, send, readBody })] : []), // the team: only with the app's own sign-in (PostgreSQL)
   ];
 
   async function handle(req, res) {
@@ -72,7 +74,7 @@ function createApp({ config, households, firm, prices, records = null, authentic
     if ((auth.stage || 'full') !== 'full' && !SECOND_STEP_PATHS.has(p)) return send(res, 401, { error: 'Finish signing in: enter the code from your authenticator app', code: 'second_step_required' });
     if (auth.session && !auth.firmId && p !== '/api/me') return send(res, 403, { error: 'Choose a firm to work in', code: 'firm_required' });
     // Everything a route and service may act on: who is signed in, and the one firm they work in
-    const ctx = { user: auth.user, firmId: auth.firmId, ...(auth.session ? { userId: auth.userId, email: auth.email, name: auth.name, firmName: auth.firmName, role: auth.role, stage: auth.stage, csrf: auth.csrf, session: auth.session } : {}) };
+    const ctx = { user: auth.user, firmId: auth.firmId, ...(auth.session ? { userId: auth.userId, email: auth.email, name: auth.name, firmName: auth.firmName, role: auth.role, roles: auth.roles, stage: auth.stage, csrf: auth.csrf, session: auth.session } : {}) };
     if (!p.startsWith('/api/')) return req.method === 'GET' ? serveStatic(req, res, p) : send(res, 405, { error: 'Method not allowed' });
     const refused = checkWrite(req);
     if (refused) return send(res, ...refused);

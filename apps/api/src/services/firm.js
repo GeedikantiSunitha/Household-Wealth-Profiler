@@ -9,10 +9,13 @@
                                     { conflict: { version, updatedBy, updatedAt } }   someone saved since `version`
                                     throws 400 invalid_field (with the list of problems) when a value
                                     breaks the field rules in validate.js
+   Reading is open to every role, the audit trail to administrators and compliance reviewers, and saving to
+   administrators only (services/access.js): 403 forbidden otherwise, before anything is read or written.
    Saves happen one at a time per firm in this process; the PostgreSQL store also locks across processes. */
 'use strict';
 const { AUDIT_LIMIT } = require('./households.js');
 const { validateFirm, invalidError } = require('./validate.js');
+const { authorize } = require('./access.js');
 
 function createFirmService({ store, HWP, now = () => new Date().toISOString() }) {
   const blank = () => ({ version: 0, settings: HWP.firmBlank(), updatedAt: '', updatedBy: '' });
@@ -21,11 +24,12 @@ function createFirmService({ store, HWP, now = () => new Date().toISOString() })
   const forFirm = ctx => store.forFirm(ctx.firmId).firm;
 
   return {
-    async get(ctx) { return (await forFirm(ctx).get()) || blank(); },
+    async get(ctx) { authorize(ctx, 'firm.read'); return (await forFirm(ctx).get()) || blank(); },
 
-    async audit(ctx) { return (await forFirm(ctx).audit()).slice(0, AUDIT_LIMIT); },
+    async audit(ctx) { authorize(ctx, 'firm.audit'); return (await forFirm(ctx).audit()).slice(0, AUDIT_LIMIT); },
 
-    save(ctx, { version, settings } = {}) {
+    async save(ctx, { version, settings } = {}) {
+      authorize(ctx, 'firm.write');
       const s = HWP.firmNormalise(settings);
       const errors = validateFirm(HWP, s);
       if (errors.length) throw invalidError('Invalid firm settings', errors);

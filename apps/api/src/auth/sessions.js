@@ -43,7 +43,7 @@ function createSessions({ store, secret, idleMs = 30 * 60e3, absoluteMs = 12 * 3
     return { id, idHash, cookie: cookie(id, expiresAt.getTime()), csrf: csrfFor(idHash), expiresAt };
   }
 
-  // The session a request carries, with its user, firm role and CSRF token; null when there is none or it has ended
+  // The session a request carries, with its user, roles in the firm (role: the primary one) and CSRF token; null when there is none or it has ended
   async function resolve(req) {
     const id = parseCookies(req.headers.cookie)[name];
     if (!id || !ID_RE.test(id)) return null;
@@ -54,14 +54,14 @@ function createSessions({ store, secret, idleMs = 30 * 60e3, absoluteMs = 12 * 3
     if (new Date(s.expires_at).getTime() <= t || new Date(s.last_seen_at).getTime() + idleMs <= t) { await store.revokeSession(idHash, at()); return null; }
     const user = await store.findUser(s.user_id);
     if (!user || !user.active) { await store.revokeSession(idHash, at()); return null; }
-    let role = null, firmName = null;
+    let role = null, roles = [], firmName = null;
     if (s.firm_id) {
       const m = (await store.memberships(s.user_id)).find(x => x.firmId === s.firm_id);
       if (!m) { await store.revokeSession(idHash, at()); return null; }
-      role = m.role; firmName = m.firmName;
+      role = m.role; roles = m.roles; firmName = m.firmName;
     }
     if (t - new Date(s.last_seen_at).getTime() >= TOUCH_MS) await store.touchSession(idHash, at());
-    return { session: s, user, role, firmName, csrf: csrfFor(idHash) };
+    return { session: s, user, role, roles, firmName, csrf: csrfFor(idHash) };
   }
 
   async function rotate(session, { stage, firmId } = {}) {

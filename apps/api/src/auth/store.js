@@ -2,7 +2,9 @@
    the tables of migration 0010. Every call runs in one transaction with app.auth set, which is
    what the row-security policies require of the app role; outside such a transaction the app role
    sees none of these rows. Emails are matched in their normalised form (trimmed, lower case).
-   Sessions (2.3) and the authenticator (2.5) are kept here too. */
+   Sessions (2.3) and the authenticator (2.5) are kept here too. Team management (Phase 3) runs in a
+   transaction that also says which firm it works in (withFirm): the policies of migration 0014 let a
+   membership be changed only for that firm. */
 'use strict';
 const crypto = require('crypto');
 const { tx } = require('../db/pool.js');
@@ -13,17 +15,42 @@ const USER_COLUMNS = 'id, email, name, active, password_hash, password_set_at, t
 
 function createAuthStore({ pool, now = () => new Date() }) {
   const withAuth = fn => tx(pool, async c => { await c.query("select set_config('app.auth', 'on', true)"); return fn(c); });
+  // Sign-in rights plus the firm the work is for: what membership changes (migration 0014) require
+  const withFirm = (firmId, fn) => tx(pool, async c => { await c.query("select set_config('app.auth', 'on', true)"); await c.query("select set_config('app.firm_id', $1, true)", [firmId]); return fn(c); });
   const one = r => r.rows[0] || null;
+  const refuse = (status, code, message) => Object.assign(new Error(message), { status, code });
+  const rolesOf = m => [m.role, ...(m.extra_roles || m.extraRoles || [])];
+  const withRoles = ({ extraRoles, ...m }) => ({ ...m, roles: [m.role, ...(extraRoles || [])] });
 
   return {
     withAuth,
+    withFirm,
     normaliseEmail,
 
     findUserByEmail: email => withAuth(async c => one(await c.query(`select ${USER_COLUMNS} from users where email = $1`, [normaliseEmail(email)]))),
     findUser: id => withAuth(async c => one(await c.query(`select ${USER_COLUMNS} from users where id = $1`, [id]))),
-    // Active memberships with the firm's name, for the firm picker
+    // Active, accepted memberships with the firm's name, for the firm picker and for the session: role is the
+    // primary role and roles every role (the primary one first). A pending or declined invitation is not one.
     memberships: userId => withAuth(async c => (await c.query(
-      `select m.firm_id as "firmId", f.name as "firmName", m.role from memberships m join firms f on f.id = m.firm_id where m.user_id = $1 and m.active and f.status = 'active' order by f.name`, [userId])).rows),
+      `select m.firm_id as "firmId", f.name as "firmName", m.role, m.extra_roles as "extraRoles" from memberships m join firms f on f.id = m.firm_id
+        where m.user_id = $1 and m.active and m.accepted_at is not null and f.status = 'active' order by f.name`, [userId])).rows.map(withRoles)),
+    // Invitations to a firm that the person has not answered yet (an existing account added to another firm)
+    pendingInvitations: userId => withAuth(async c => (await c.query(
+      `select m.firm_id as "firmId", f.name as "firmName", m.role, m.extra_roles as "extraRoles", m.created_at as "invitedAt" from memberships m join firms f on f.id = m.firm_id
+        where m.user_id = $1 and m.active and m.accepted_at is null and m.declined_at is null and f.status = 'active' order by f.name`, [userId])).rows.map(withRoles)),
+    // The person's own answer to an invitation. The firm is named in the transaction (the update policy of migration 0014
+    // needs it) and the row must be this person's pending invitation: nothing else can be answered through here.
+    respondToInvitation: (userId, firmId, accept) => withFirm(firmId, async c => {
+      const m = one(await c.query(
+        'select role, extra_roles from memberships where user_id = $1 and firm_id = $2 and active and accepted_at is null and declined_at is null for update', [userId, firmId]));
+      if (!m) throw refuse(404, 'not_found', 'There is no invitation from that firm to answer');
+      if (accept) await c.query('update memberships set accepted_at = $3 where user_id = $1 and firm_id = $2', [userId, firmId, now()]);
+      else await c.query('update memberships set declined_at = $3, active = false where user_id = $1 and firm_id = $2', [userId, firmId, now()]);
+      const who = one(await c.query('select email from users where id = $1', [userId]));
+      await c.query('insert into auth_events (user_id, email, event, outcome, detail) values ($1, $2, $3, $4, $5)',
+        [userId, who ? who.email : '', accept ? 'invitation_accepted' : 'invitation_declined', 'ok', `${rolesOf(m).join('+')} in ${firmId}`]);
+      return { roles: rolesOf(m) };
+    }),
 
     // One more failure: the count goes up and the account is not tried again before the delay has passed
     recordFailure: userId => withAuth(async c => {
@@ -101,6 +128,69 @@ function createAuthStore({ pool, now = () => new Date() }) {
     revokeAllSessions: (userId, { except = null, at } = {}) => withAuth(async c =>
       (await c.query('update sessions set revoked_at = $2 where user_id = $1 and revoked_at is null and ($3::text is null or id_hash <> $3)', [userId, at || now(), except])).rowCount),
     activeSessions: userId => withAuth(async c => (await c.query('select id_hash, firm_id, stage, created_at, last_seen_at, expires_at, ip, user_agent from sessions where user_id = $1 and revoked_at is null and expires_at > $2 order by last_seen_at desc', [userId, now()])).rows),
+
+    // ---- Team management (Phase 3). The services decide who may call these; the rules below hold whoever does. ----
+    // A firm's team with each person's roles and sign-in state, and the seats in use. Invitations hold a seat.
+    // invitation is 'pending' for an existing account that has not yet accepted, 'declined' when it said no.
+    members: firmId => withAuth(async c => (await c.query(
+      `select u.id as "userId", u.email, u.name, m.role, m.extra_roles as "extraRoles", m.active, m.created_at as "createdAt", (u.password_hash is not null) as "hasPassword",
+              (u.totp_confirmed_at is not null) as mfa, u.last_sign_in_at as "lastSignInAt", m.accepted_at as "acceptedAt", m.declined_at as "declinedAt"
+         from memberships m join users u on u.id = m.user_id where m.firm_id = $1 order by lower(u.name), u.email`, [firmId])).rows
+      .map(({ acceptedAt, declinedAt, ...m }) => ({ ...withRoles(m), invitation: declinedAt ? 'declined' : acceptedAt ? null : 'pending' }))),
+    seats: firmId => withAuth(async c => one(await c.query(
+      'select f.seats, (select count(*)::int from memberships m where m.firm_id = f.id and m.active) as used from firms f where f.id = $1', [firmId]))),
+
+    // Adds someone to the firm's team. A new email gets an account and is on the team at once (they accept by
+    // using the invitation link). An email that already has an account is added as a PENDING membership: it gives
+    // no access until that person accepts at their next sign-in. The firm row is locked while the seats are counted,
+    // so two invitations at once cannot both take the last seat. Refused: 409 already_member (this firm only:
+    // nothing is said about other firms), 402 seats_full. Someone who declined earlier can be invited again.
+    addMember: ({ email, name, firmId, roles }) => withFirm(firmId, async c => {
+      const firm = one(await c.query('select id, name, seats from firms where id = $1 for update', [firmId]));
+      if (!firm) throw refuse(400, 'bad_request', 'Unknown firm');
+      let u = one(await c.query('select id, (password_hash is not null) as has_password from users where email = $1', [normaliseEmail(email)]));
+      const had = u && one(await c.query('select declined_at from memberships where user_id = $1 and firm_id = $2', [u.id, firmId]));
+      if (had && !had.declined_at) throw refuse(409, 'already_member', 'That person is already on the team. If they were deactivated, reactivate them instead.');
+      const used = (await c.query('select count(*)::int n from memberships where firm_id = $1 and active', [firmId])).rows[0].n;
+      if (used >= firm.seats) throw refuse(402, 'seats_full', `All ${firm.seats} seats are in use. Deactivate someone, or ask for more seats.`);
+      const created = !u;
+      if (created) u = one(await c.query('insert into users (email, name) values ($1, $2) returning id', [normaliseEmail(email), name]));
+      const pending = !created;
+      if (had) await c.query('update memberships set role = $3, extra_roles = $4, active = true, accepted_at = null, declined_at = null where user_id = $1 and firm_id = $2', [u.id, firmId, roles[0], roles.slice(1)]);
+      else await c.query('insert into memberships (user_id, firm_id, role, extra_roles, accepted_at) values ($1, $2, $3, $4, $5)', [u.id, firmId, roles[0], roles.slice(1), pending ? null : now()]);
+      return { userId: u.id, created, firmName: firm.name, hasPassword: !created && u.has_password, pending };
+    }),
+
+    // Changes a member's roles and/or active flag. All the firm's memberships are locked first, so two
+    // administrators acting at once see each other: the firm can never be left with no active administrator
+    // who has accepted (409 last_admin), and a reactivation needs a free seat (402 seats_full). Reactivating
+    // someone who declined invites them again. Deactivating ends that person's sessions in this firm in the
+    // same transaction. Every change is an auth event naming who made it.
+    changeMember: (firmId, userId, { roles, active }, { by = '' } = {}) => withFirm(firmId, async c => {
+      const rows = (await c.query('select user_id, role, extra_roles, active, accepted_at, declined_at from memberships where firm_id = $1 for update', [firmId])).rows;
+      const target = rows.find(r => r.user_id === userId);
+      if (!target) throw refuse(404, 'not_found', 'No such person on this team');
+      const before = { roles: rolesOf(target), active: target.active };
+      const next = { roles: roles === undefined ? before.roles : roles, active: active === undefined ? before.active : active };
+      if (next.active === before.active && next.roles.join() === before.roles.join()) return { userId, ...next, changed: false };
+      const standing = r => r.active && r.accepted_at && rolesOf(r).includes('admin');
+      const admins = rows.map(r => (r.user_id === userId ? { ...r, role: next.roles[0], extra_roles: next.roles.slice(1), active: next.active } : r)).filter(standing).length;
+      if (!admins) throw refuse(409, 'last_admin', 'The firm must keep at least one active administrator.');
+      if (!target.active && next.active) {
+        const { seats } = one(await c.query('select seats from firms where id = $1 for update', [firmId]));
+        if (rows.filter(r => r.active).length >= seats) throw refuse(402, 'seats_full', `All ${seats} seats are in use. Deactivate someone, or ask for more seats.`);
+      }
+      const again = !target.active && next.active && target.declined_at; // reactivating a declined invitation invites again
+      await c.query('update memberships set role = $3, extra_roles = $4, active = $5, accepted_at = $6, declined_at = $7 where firm_id = $1 and user_id = $2',
+        [firmId, userId, next.roles[0], next.roles.slice(1), next.active, again ? null : target.accepted_at, again ? null : target.declined_at]);
+      if (!next.active) await c.query('update sessions set revoked_at = $3 where user_id = $1 and firm_id = $2 and revoked_at is null', [userId, firmId, now()]);
+      const who = one(await c.query('select email from users where id = $1', [userId]));
+      const events = [];
+      if (next.roles.join() !== before.roles.join()) events.push(['member_role_changed', `${before.roles.join('+')} to ${next.roles.join('+')}`]);
+      if (next.active !== before.active) events.push([next.active ? 'member_reactivated' : 'member_deactivated', next.active ? (again ? 'invited again' : 'access restored') : 'sessions ended']);
+      for (const [ev, what] of events) await c.query('insert into auth_events (user_id, email, event, outcome, detail) values ($1, $2, $3, $4, $5)', [userId, who ? who.email : '', ev, 'ok', `${what} in ${firmId}${by ? `, by ${by}` : ''}`]);
+      return { userId, ...next, changed: true };
+    }),
   };
 }
 

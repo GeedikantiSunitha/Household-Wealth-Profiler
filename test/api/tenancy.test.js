@@ -195,7 +195,7 @@ test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to
     } finally { server.close(); }
   });
 
-  test('after 0011 the app role can add an account and a membership inside sign-in, but cannot change or delete accounts or memberships, and still reads nothing across firms', async () => {
+  test('after 0011 the app role can add an account and a membership inside sign-in, but cannot change or delete accounts, and still reads nothing across firms; since 0014 it changes a membership only for the firm it works in', async () => {
     await asRole('hwp_app', async c => {
       await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)");
       const uid = (await c.query(`insert into users (email, name) values ('invited@example.com', 'Invited') returning id`)).rows[0].id;
@@ -208,11 +208,23 @@ test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to
       assert.equal((await c.query('select count(*)::int n from firms')).rows[0].n, 2, 'firm names are readable inside sign-in (the firm picker); nothing else of a firm');
       await c.query('commit');
       for (const [sql, what] of [["update users set email = 'x@example.com'", 'an email'], ["update users set name = 'x'", 'a name'], ['update users set active = false', 'deactivation'],
-        ["update memberships set role = 'admin'", 'a role'], ['update memberships set active = false', 'a membership'], ['delete from users', 'deleting accounts'], ['delete from memberships', 'deleting memberships'], ['delete from sessions', 'deleting sessions'], ['delete from auth_events', 'deleting events']]) {
+        ['delete from users', 'deleting accounts'], ['delete from memberships', 'deleting memberships'], ['delete from sessions', 'deleting sessions'], ['delete from auth_events', 'deleting events']]) {
         await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)");
         await assert.rejects(c.query(sql), /permission denied/, what + ' is not the app role\'s, even inside sign-in');
         await c.query('rollback');
       }
+      // Phase 3 (migration 0014): a membership's role and active flag can be changed, but only for the firm the transaction works in.
+      // With no firm set nothing changes (it fails closed); with a firm set only that firm's memberships change.
+      const roles = async () => (await asRole('hwp_owner', o => o.query('select firm_id, role, active from memberships order by firm_id, user_id'))).rows;
+      const before = await roles();
+      await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)");
+      assert.equal((await c.query("update memberships set role = 'admin'")).rowCount, 0, 'no firm set: no membership changes');
+      assert.equal((await c.query('update memberships set active = false')).rowCount, 0, 'no firm set: no membership is deactivated');
+      await c.query('rollback');
+      await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)"); await c.query("select set_config('app.firm_id', $1, true)", [B]);
+      assert.equal((await c.query("update memberships set role = 'compliance'")).rowCount, before.filter(m => m.firm_id === B).length, "working for B: exactly B's memberships");
+      await c.query('rollback');
+      assert.deepEqual(await roles(), before, 'nothing was committed');
     });
     assert.equal((await asRole('hwp_owner', c => c.query(`select role from memberships m join users u on u.id = m.user_id where u.email = 'invited@example.com'`))).rows[0].role, 'adviser');
   });

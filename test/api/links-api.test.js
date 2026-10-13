@@ -141,7 +141,7 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
   test('no route a signed-in user can reach approves an access request or creates an account: the sign-in route table is exactly the known set, and every plausible path is 404', async () => {
     const { createAuthRoutes: make } = require('../../apps/api/src/routes/auth.js');
     const table = Object.keys(make({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), now }).routes).sort();
-    assert.deepEqual(table, ['GET /api/auth/firms', 'GET /api/auth/state', 'POST /api/auth/enrol', 'POST /api/auth/enrol/confirm', 'POST /api/auth/firm', 'POST /api/auth/forgot', 'POST /api/auth/invite', 'POST /api/auth/password',
+    assert.deepEqual(table, ['GET /api/auth/firms', 'GET /api/auth/invitations', 'GET /api/auth/state', 'POST /api/auth/enrol', 'POST /api/auth/enrol/confirm', 'POST /api/auth/firm', 'POST /api/auth/forgot', 'POST /api/auth/invitations/accept', 'POST /api/auth/invitations/decline', 'POST /api/auth/invite', 'POST /api/auth/password',
       'POST /api/auth/recovery', 'POST /api/auth/request-access', 'POST /api/auth/reset', 'POST /api/auth/sign-in', 'POST /api/auth/sign-out', 'POST /api/auth/sign-out-all', 'POST /api/auth/totp'],
       'adding a route is a deliberate change to this list');
     const s = await sessions.issue({ userId: sam, firmId: DEFAULT_FIRM_ID, stage: 'full' });

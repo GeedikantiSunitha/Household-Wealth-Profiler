@@ -21,14 +21,14 @@
                                   requester withdrawing it
      subjectAccess(ctx, id)       everything kept for the household as one package, with a cover
                                   listing every person in it, for redaction before release
-   Every action except logExport belongs to a firm's administrators and compliance users (role admin
-   or compliance; 403 forbidden otherwise). Development Basic sign-in carries no role and is allowed;
+   Every action except logExport belongs to a firm's administrators and compliance users (any of a
+   person's roles being admin or compliance, services/access.js; 403 forbidden otherwise). Development Basic sign-in carries no role and is allowed;
    production refuses Basic sign-in, and here refuses any call without a session.
    Every read, every refusal on role and every unknown household is written to the access log. */
 'use strict';
 const { summarise } = require('./households.js');
+const { can } = require('./access.js');
 
-const MANAGERS = new Set(['admin', 'compliance']);
 const EXPORT_KINDS = new Set(['excel', 'json', 'print']);
 const TEXT_MAX = 500;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -63,7 +63,7 @@ function createRecordsService({ store, HWP, retentionYears = 5, production = fal
 
   // Administrators and compliance users only; a refusal is logged
   async function requireManager(ctx, action, householdId = null) {
-    if (ctx.session ? MANAGERS.has(ctx.role) : !production) return;
+    if (ctx.session ? can(ctx, 'records.manage') : !production) return; // roles: services/access.js (a person may hold several)
     await log(ctx, action, householdId, 'forbidden');
     throw fail(403, 'forbidden', 'Only a firm administrator or compliance user can do this');
   }

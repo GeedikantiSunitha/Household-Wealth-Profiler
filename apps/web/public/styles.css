@@ -246,6 +246,15 @@ tr.t td{font-weight:700;border-top:2px solid var(--ink);border-bottom:0;backgrou
 tr.sub td:first-child{padding-left:22px}
 .side-a{border-top:3px solid var(--asset)} .side-l{border-top:3px solid var(--liab)}
 .note{font-size:12px;color:var(--muted);margin-top:10px;max-width:80ch}
+/* A screen the signed-in person can read but not change: nothing offers to add, remove, import or fetch */
+#main.ro [data-act="add"],#main.ro [data-act="del"],#main.ro [data-act="fundImport"],#main.ro [data-act="fundFetch"],#main.ro [data-act="rtqStart"],#main.ro [data-act="resetAssump"]{display:none}
+.note.ro-note{margin:0 0 14px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--sunk);max-width:none}
+/* A field this person may read but not change */
+.f input:disabled,.f select:disabled,.f textarea:disabled{background:var(--sunk);color:var(--muted);cursor:not-allowed}
+/* Roles to tick (User accounts), and an invitation to answer at sign-in */
+.chk-inline{display:inline-flex;gap:6px;align-items:center;margin-right:14px;font-size:13px;white-space:nowrap}
+.invite-row{margin:12px 0;padding:10px 12px;border:1px solid var(--line);border-radius:8px}
+.invite-row p{margin:0 0 8px}
 .list{margin:0;padding:0;list-style:none}
 .list li{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);align-items:flex-start}
 .list li:last-child{border-bottom:0}

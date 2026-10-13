@@ -77,6 +77,8 @@ function suite(name, open, { skip } = {}) {
       assert.deepEqual((await read(id)).map(e => [e.action, e.outcome]), [['subject_access', 'forbidden'], ['purge_request', 'forbidden'], ['retention', 'forbidden'], ['access_log', 'forbidden']]);
       assert.equal((await records.accessLog(ctxs.bob, id)).length, 4, 'compliance reads the access log');
       assert.ok(Array.isArray((await records.overview(ctxs.basic)).households), 'development Basic sign-in (no role) is allowed');
+      assert.ok(Array.isArray((await records.overview({ ...ctxs.ada, roles: ['adviser', 'compliance'] })).households), 'an adviser who also holds the compliance role is a manager (several roles on one membership)');
+      await assert.rejects(records.overview({ ...ctxs.ada, roles: ['adviser'] }), { status: 403, code: 'forbidden' });
       await assert.rejects(prod.overview(ctxs.basic), { status: 403 }, 'production refuses a call without a session');
     });
 

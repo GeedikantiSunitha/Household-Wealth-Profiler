@@ -127,3 +127,21 @@ test('.env in the project folder fills gaps but never replaces what is already s
   assert.equal(c.hsts, true, 'HSTS already set, even to empty: .env does not win');
   assert.equal(env.PORT, '7000', '.env values are added to the environment, as process.loadEnvFile does');
 });
+
+test('operator commands (Phase 3): no users, no DATA_KEY and, in production, no DATABASE_URL; the operator URL must name the app\'s database', () => {
+  for (const cmd of ['firm-create', 'firm-list', 'firm-seats', 'firm-status', 'access-review', 'grant-operator', 'create-user', 'set-password']) {
+    assert.equal(load({ env: {}, root: root(), command: cmd }).users.size, 0, `${cmd} needs no users and no key`);
+    assert.doesNotThrow(() => load({ env: { NODE_ENV: 'production', DATABASE_OPERATOR_URL: 'postgres://hwp_operator:x@db.example/wealth' }, root: root(), command: cmd }), `${cmd} in production`);
+  }
+  // the server itself, and the data commands, still need their settings
+  assert.throws(() => load({ env: { DATABASE_URL: 'postgres://a@h/db' }, root: root() }), /DATA_KEY is not set/);
+  assert.throws(() => load({ env: { NODE_ENV: 'production', DATA_KEY: KEY }, root: root() }), /DATABASE_URL is required/);
+  // the production refusals that are about secrets stay for operator commands too
+  assert.throws(() => load({ env: { NODE_ENV: 'production', HSTS: '0' }, root: root(), command: 'firm-list' }), /HSTS=0 is not accepted/);
+  assert.throws(() => load({ env: { NODE_ENV: 'production', ALLOW_PLAINTEXT: '1' }, root: root(), command: 'firm-list' }), /ALLOW_PLAINTEXT is not accepted/);
+  assert.equal(load({ env: { DATABASE_OPERATOR_URL: 'postgres://o:x@h/db' }, root: root(), command: 'firm-list' }).databaseOperatorUrl, 'postgres://o:x@h/db');
+  assert.equal(load({ env: {}, root: root(), command: 'firm-list' }).databaseOperatorUrl, '');
+  assert.equal(load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@h:5432/db' }, root: root() }).databaseOperatorUrl, 'postgres://o:y@h:5432/db');
+  assert.throws(() => load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@h:5432/other' }, root: root() }), /DATABASE_OPERATOR_URL must point at the same host and database as DATABASE_URL/);
+  assert.throws(() => load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@elsewhere:5432/db' }, root: root() }), /same host and database/);
+});

@@ -76,7 +76,7 @@ test.describe('sessions in the request pipeline', { skip: !BASE_URL && 'set TEST
   test('a full session reaches the API and the files; /api/me says who, which firm, the role, the stage and the CSRF token', async () => {
     const s = await sessions.issue({ userId: uid, firmId: DEFAULT_FIRM_ID, stage: 'full', ip: '10.0.0.1', userAgent: 'test' });
     const me = await (await call('GET', '/api/me', { session: s })).json();
-    assert.deepEqual(me, { user: 'sam@example.com', email: 'sam@example.com', name: 'Sam Adviser', firmId: DEFAULT_FIRM_ID, firmName: 'Default firm', role: 'admin', stage: 'full', csrf: s.csrf, encrypted: true, production: false });
+    assert.deepEqual(me, { user: 'sam@example.com', email: 'sam@example.com', name: 'Sam Adviser', firmId: DEFAULT_FIRM_ID, firmName: 'Default firm', role: 'admin', roles: ['admin'], stage: 'full', csrf: s.csrf, encrypted: true, production: false });
     assert.equal((await call('GET', '/api/households', { session: s })).status, 200);
     assert.deepEqual(calls, [['list', 'sam@example.com', DEFAULT_FIRM_ID]], 'services see the email as the user and the session\'s firm');
     assert.equal((await call('GET', '/', { session: s })).status, 200);

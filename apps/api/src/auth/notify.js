@@ -18,6 +18,10 @@ function createNotify({ mailer, publicUrl, operatorEmail = '', appName = 'Househ
     // The invitation: 24 hours, single use
     inviteLink: ({ email, name }, token, { firmName = '' } = {}) => mailer.send({ to: email, subject: `Your ${appName} account`,
       text: `Hello ${name || ''},\n\nAn account has been created for you in ${appName}${firmName ? ` for ${firmName}` : ''}.\n\nTo choose your password, open this link within 24 hours:\n\n${link('invite', token)}\n\nThen sign in with your email address and set up your authenticator app, which is required for every sign-in.${signOff}` }),
+    // Someone who already has an account was invited to a firm: no link (a link would reset their password). The
+    // invitation waits until they accept it when they next sign in; nothing is open to them before that.
+    invitedToFirm: ({ email, name }, { firmName = '', roles = [] } = {}) => mailer.send({ to: email, subject: `You have been invited to ${firmName || 'another firm'} in ${appName}`,
+      text: `Hello ${name || ''},\n\nYou have been invited to join ${firmName || 'another firm'} in ${appName}${roles.length ? ` as ${roles.join(' and ')}` : ''}.\n\nNothing changes until you accept. Sign in as usual with your email address, password and authenticator app; you will be asked whether to accept or decline the invitation:\n\n${publicUrl}${signOff}` }),
     lockoutWarning: (user, { failures, ip } = {}) => quietly('lockout warning', () => mailer.send({ to: user.email, subject: `${appName}: repeated failed sign-ins`,
       text: `Hello ${user.name || ''},\n\nThere have been ${failures} failed attempts to sign in to your ${appName} account${ip ? ` from the address ${ip}` : ''}. Each further attempt is delayed.\n\nIf this was you, wait a minute and try again, or use "Forgotten your password?" on the sign-in page.${signOff}` })),
     recoveryUsed: (user, { ip } = {}) => quietly('recovery notice', () => mailer.send({ to: user.email, subject: `${appName}: a recovery code was used`,

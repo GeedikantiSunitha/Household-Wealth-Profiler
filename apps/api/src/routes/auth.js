@@ -14,8 +14,14 @@
      On the fifth consecutive failure the account holder is warned (notify.lockoutWarning) once.
    POST sign-out                    ends the session; the cookie is cleared
    POST sign-out-all                ends every session of the account
-   GET  firms                       the firms the account belongs to
+   GET  firms                       the firms the account belongs to (accepted memberships, with their roles)
    POST firm {firmId}               the session's firm; the session id is rotated
+   GET  invitations                 invitations to a firm that this account has not answered (an existing account
+                                    invited by another firm's administrator); each waits for the person's own answer
+   POST invitations/accept {firmId} / invitations/decline {firmId}
+                                    the person's answer. Nothing about a firm is open to them until they accept; at
+                                    sign-in, pending invitations come before the choice of firm. Only this account's
+                                    own pending invitation can be answered here: no route creates or approves one.
    POST enrol [{password}]          a new authenticator secret (base32 and otpauth URI), shown once and
                                     kept sealed as pending; at a password-stage session when the account
                                     has none, or at a full session with the current password
@@ -65,9 +71,12 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
   // The second step is done: a full session, in the only firm or with a firm still to choose
   async function finish(ctx, user, { next = null } = {}) {
     const firms = await authStore.memberships(user.id);
-    const firm = firms.length === 1 ? firms[0] : null;
+    const pending = await authStore.pendingInvitations(user.id);
+    // With an invitation waiting, the person answers it before anything is chosen for them
+    const firm = !pending.length && firms.length === 1 ? firms[0] : null;
     const r = await sessions.rotate(ctx.auth.session, { stage: 'full', firmId: firm ? firm.firmId : null });
-    return { reply: { stage: 'full', next: next || (firm ? null : 'firm'), firmId: firm ? firm.firmId : null, firmName: firm ? firm.firmName : null, role: firm ? firm.role : null, csrf: r.csrf }, headers: { 'Set-Cookie': r.cookie } };
+    return { reply: { stage: 'full', next: next || (pending.length ? 'invitations' : firm ? null : 'firm'), firmId: firm ? firm.firmId : null, firmName: firm ? firm.firmName : null, role: firm ? firm.role : null, roles: firm ? firm.roles : null,
+      ...(pending.length ? { invitations: pending } : {}), csrf: r.csrf }, headers: { 'Set-Cookie': r.cookie } };
   }
 
   async function totp(ctx) {
@@ -162,7 +171,7 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
     if (!user) return fail('unknown');
     if (!user.active) return fail('inactive', user.id);
     if (!user.password_hash) return fail('no_password', user.id);
-    if (!(await authStore.memberships(user.id)).length) return fail('no_firm', user.id);
+    if (!(await authStore.memberships(user.id)).length && !(await authStore.pendingInvitations(user.id)).length) return fail('no_firm', user.id);
     if (user.not_before && new Date(user.not_before).getTime() > now()) return fail('slowed', user.id);
     if (!(await verifyPassword(user.password_hash, password))) {
       const { failures } = await authStore.recordFailure(user.id);
@@ -200,7 +209,25 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
     if (!m) throw refuse(403, 'You are not a member of that firm', 'forbidden');
     const r = await sessions.rotate(ctx.auth.session, { firmId });
     await event(ctx, ctx.auth.userId, 'firm_switch', 'ok', firmId);
-    return { reply: { firmId, firmName: m.firmName, role: m.role, csrf: r.csrf }, headers: { 'Set-Cookie': r.cookie } };
+    return { reply: { firmId, firmName: m.firmName, role: m.role, roles: m.roles, csrf: r.csrf }, headers: { 'Set-Cookie': r.cookie } };
+  }
+
+  const invitations = async ctx => ({ reply: await authStore.pendingInvitations(ctx.auth.userId) });
+
+  // The person's own answer to an invitation. When none is left to answer, they carry on into their only firm, or choose.
+  async function answerInvitation(ctx, accept) {
+    const firmId = ctx.body && ctx.body.firmId;
+    if (typeof firmId !== 'string' || !ID_RE.test(firmId)) throw refuse(400, 'Choose an invitation', 'bad_request');
+    await authStore.respondToInvitation(ctx.auth.userId, firmId, accept); // records the event
+    const pending = await authStore.pendingInvitations(ctx.auth.userId);
+    if (pending.length) return { reply: { next: 'invitations', invitations: pending } };
+    const firms = await authStore.memberships(ctx.auth.userId);
+    if (firms.length === 1) {
+      const m = firms[0];
+      const r = await sessions.rotate(ctx.auth.session, { firmId: m.firmId });
+      return { reply: { stage: 'full', next: null, firmId: m.firmId, firmName: m.firmName, role: m.role, roles: m.roles, csrf: r.csrf }, headers: { 'Set-Cookie': r.cookie } };
+    }
+    return { reply: { next: firms.length ? 'firm' : 'none' } };
   }
 
   async function forgot(ctx) {
@@ -255,7 +282,7 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
 
   async function state(ctx) {
     const user = await authStore.findUser(ctx.auth.userId);
-    const next = ctx.auth.stage === 'full' ? (ctx.auth.firmId ? null : 'firm') : (user.totp_confirmed_at && !user.reenrol ? 'totp' : 'enrol');
+    const next = ctx.auth.stage === 'full' ? (ctx.auth.firmId ? null : ((await authStore.pendingInvitations(user.id)).length ? 'invitations' : 'firm')) : (user.totp_confirmed_at && !user.reenrol ? 'totp' : 'enrol');
     return { reply: { stage: ctx.auth.stage, next, csrf: ctx.auth.csrf, email: user.email } };
   }
 
@@ -270,6 +297,9 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
     'POST /api/auth/sign-out-all': { stage: 'full', fn: signOutAll },
     'GET /api/auth/firms': { stage: 'full', fn: firms },
     'POST /api/auth/firm': { stage: 'full', fn: switchFirm },
+    'GET /api/auth/invitations': { stage: 'full', fn: invitations },
+    'POST /api/auth/invitations/accept': { stage: 'full', fn: ctx => answerInvitation(ctx, true) },
+    'POST /api/auth/invitations/decline': { stage: 'full', fn: ctx => answerInvitation(ctx, false) },
     'POST /api/auth/totp': { stage: 'any', limited: true, fn: totp },
     'POST /api/auth/enrol': { stage: 'any', fn: enrol },
     'POST /api/auth/enrol/confirm': { stage: 'any', limited: true, fn: confirmEnrol },

@@ -8,6 +8,8 @@ const util = require('util');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 const BACKUP_COMMANDS = ['backup', 'restore-drill'];
+// Commands run by the platform operator (cli/accounts.js, cli/platform.js): they need no sign-in users and no DATA_KEY
+const OPERATOR_COMMANDS = ['create-user', 'set-password', 'firm-create', 'firm-list', 'firm-seats', 'firm-status', 'access-review', 'grant-operator'];
 
 // Same rule as process.loadEnvFile: a variable already set (even to '') is never replaced
 function readEnvFile(file, env) {
@@ -46,15 +48,18 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   const production = env.NODE_ENV === 'production';
   // The backup commands run as a job of their own, apart from the server: the server's settings do not apply to them
   const backupCommand = BACKUP_COMMANDS.includes(command);
+  // The platform operator's commands send no email and use their own database connection, so the server's address and mail settings do not apply to them
+  const operatorCommand = OPERATOR_COMMANDS.includes(command);
   if (production && !backupCommand) {
-    if (!env.DATABASE_URL) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
+    // (the operator commands use their own connection, so the operator's machine never holds the app's password)
+    if (!env.DATABASE_URL && !operatorCommand) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
     if (env.ALLOW_PLAINTEXT === '1') throw new Error('NODE_ENV=production: ALLOW_PLAINTEXT is not accepted. Set DATA_KEY so client records are encrypted.');
     if (env.HSTS === '0') throw new Error('NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.');
     if (env.AUTH_USERS) throw new Error("NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in.");
     // The app's own sign-in: a Secure cookie and links in emails need an https address; the links and warnings need a mail server over TLS
-    if (!/^https:\/\/[^/]+\/?$/i.test(env.PUBLIC_URL || '')) throw new Error('NODE_ENV=production: PUBLIC_URL must be the https address the app is served at (the session cookie is Secure and the sign-in links point there).');
-    if (!env.SMTP_URL) throw new Error('NODE_ENV=production: SMTP_URL is required. Password reset links, invitations and sign-in warnings are sent by email.');
-    if (/[?&]tls=off\b/i.test(env.SMTP_URL)) throw new Error('NODE_ENV=production: SMTP_URL with tls=off is not accepted. Mail must travel over TLS.');
+    if (!operatorCommand && !/^https:\/\/[^/]+\/?$/i.test(env.PUBLIC_URL || '')) throw new Error('NODE_ENV=production: PUBLIC_URL must be the https address the app is served at (the session cookie is Secure and the sign-in links point there).');
+    if (!operatorCommand && !env.SMTP_URL) throw new Error('NODE_ENV=production: SMTP_URL is required. Password reset links, invitations and sign-in warnings are sent by email.');
+    if (!operatorCommand && /[?&]tls=off\b/i.test(env.SMTP_URL)) throw new Error('NODE_ENV=production: SMTP_URL with tls=off is not accepted. Mail must travel over TLS.');
   }
   // NEW_DATA_KEY: only for node server.js rotate-key
   let newKey = null;
@@ -63,10 +68,10 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     if (newKey.length !== 32) throw new Error('NEW_DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key');
   }
   // The owner connection must be to the same database as the app's: migrations run where the data is
-  if (env.DATABASE_URL && env.DATABASE_OWNER_URL) {
-    const same = (a, b) => { try { const x = new URL(a), y = new URL(b); return x.host === y.host && x.pathname === y.pathname; } catch (e) { return false; } };
-    if (!same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
-  }
+  const same = (a, b) => { try { const x = new URL(a), y = new URL(b); return x.host === y.host && x.pathname === y.pathname; } catch (e) { return false; } };
+  if (env.DATABASE_URL && env.DATABASE_OWNER_URL && !same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
+  // The platform operator's connection (operator commands only, as the operator role) is checked the same way
+  if (env.DATABASE_URL && env.DATABASE_OPERATOR_URL && !same(env.DATABASE_URL, env.DATABASE_OPERATOR_URL)) throw new Error('DATABASE_OPERATOR_URL must point at the same host and database as DATABASE_URL (only the user differs).');
   const users = parseUsers(env.AUTH_USERS);
   // Sessions (the app's own sign-in): idle and absolute limits; cookies are Secure with the __Host-
   // prefix in production or whenever the app is served over HTTPS (PUBLIC_URL)
@@ -98,8 +103,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   }
   const backupRetentionDays = env.BACKUP_RETENTION_DAYS === undefined || env.BACKUP_RETENTION_DAYS === '' ? 35 : +env.BACKUP_RETENTION_DAYS;
   if (!Number.isInteger(backupRetentionDays) || backupRetentionDays < 1 || backupRetentionDays > 3650) throw new Error('BACKUP_RETENTION_DAYS must be a whole number of days from 1 to 3650');
-  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password', 'subject-access-user', ...BACKUP_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
-  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
+  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'subject-access-user', ...BACKUP_COMMANDS, ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
+  // The operator commands never touch a client record, so the operator's machine does not need the key
+  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
     root,
@@ -111,6 +117,8 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     // The owner connection for migrations (node server.js migrate); the server itself runs as the
     // app role in DATABASE_URL, which cannot change the schema or bypass row-level security
     databaseOwnerUrl: env.DATABASE_OWNER_URL || '',
+    // The platform operator's connection: the operator role cannot read client records (db/operator.sql)
+    databaseOperatorUrl: env.DATABASE_OPERATOR_URL || '',
     databasePoolMax: +env.DATABASE_POOL_MAX || 10,
     // Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
     // to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.
@@ -138,4 +146,4 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   };
 }
 
-module.exports = { load, parseUsers, ROOT };
+module.exports = { load, parseUsers, ROOT, OPERATOR_COMMANDS };

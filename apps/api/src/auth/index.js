@@ -13,7 +13,7 @@ function createAuth(config, { authStore = null, sessions = null, now } = {}) {
   async function authenticate(req) {
     if (sessions && authStore) {
       const r = await sessions.resolve(req);
-      if (r) return { user: r.user.email, email: r.user.email, name: r.user.name, userId: r.user.id, firmId: r.session.firm_id, firmName: r.firmName, role: r.role, stage: r.session.stage, session: r.session, csrf: r.csrf };
+      if (r) return { user: r.user.email, email: r.user.email, name: r.user.name, userId: r.user.id, firmId: r.session.firm_id, firmName: r.firmName, role: r.role, roles: r.roles, stage: r.session.stage, session: r.session, csrf: r.csrf };
     }
     return b ? b.authenticate(req) : null;
   }

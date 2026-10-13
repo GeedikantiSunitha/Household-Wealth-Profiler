@@ -97,7 +97,7 @@ test.describe('second step API', { skip: !BASE_URL && 'set TEST_DATABASE_URL to 
     r = await post('/api/auth/enrol/confirm', { code: codeAt(samSecret, stepNow()) }, s);
     assert.equal(r.status, 200);
     const c = await r.json();
-    assert.deepEqual(Object.keys(c).sort(), ['csrf', 'firmId', 'firmName', 'next', 'recoveryCodes', 'role', 'stage']);
+    assert.deepEqual(Object.keys(c).sort(), ['csrf', 'firmId', 'firmName', 'next', 'recoveryCodes', 'role', 'roles', 'stage']);
     assert.equal(c.stage, 'full'); assert.equal(c.next, null); assert.equal(c.firmId, DEFAULT_FIRM_ID); assert.equal(c.role, 'adviser');
     assert.equal(c.recoveryCodes.length, 10); for (const code of c.recoveryCodes) assert.match(code, /^[a-z2-9]{5}-[a-z2-9]{5}$/);
     samRecovery = c.recoveryCodes;
@@ -208,6 +208,61 @@ test.describe('second step API', { skip: !BASE_URL && 'set TEST_DATABASE_URL to 
     r = await post('/api/auth/firm', { firmId: FIRM_B }, { cookie, csrf: c.csrf });
     assert.equal(r.status, 200);
     assert.deepEqual(await (await get('/api/households', { cookie: cookieOf(r) })).json(), [{ id: FIRM_B }], 'data routes see the chosen firm');
+  });
+
+  // An existing account that another firm invited: the invitation is answered at sign-in, before anything is chosen for the person
+  async function invitedUser(email, memberships) {
+    const hash = await hashPassword(PASS);
+    return asRole('hwp_owner', async c => {
+      const id = (await c.query(`insert into users (email, name, password_hash) values ($1, 'Invited', $2) returning id`, [email, hash])).rows[0].id;
+      for (const [firm, accepted] of memberships) await c.query(`insert into memberships (user_id, firm_id, role, extra_roles, accepted_at) values ($1, $2, 'adviser', array['compliance'], $3)`, [id, firm, accepted ? new Date(clock.t) : null]);
+      return id;
+    });
+  }
+  const finishEnrol = async email => {
+    const s = await signIn(email); assert.equal(s.next, 'enrol');
+    let r = await post('/api/auth/enrol', {}, s); const secret = base32Decode((await r.json()).secret);
+    r = await post('/api/auth/enrol/confirm', { code: codeAt(secret, stepNow()) }, s);
+    assert.equal(r.status, 200);
+    return { c: await r.json(), cookie: cookieOf(r) };
+  };
+
+  test('an invitation waiting at sign-in is answered before a firm is chosen; accepting opens the firm, declining closes it', async () => {
+    // lee works in the default firm and has been invited to Firm B: he is not dropped into the default firm, he is asked
+    await invitedUser('lee@example.com', [[DEFAULT_FIRM_ID, true], [FIRM_B, false]]);
+    const { c, cookie } = await finishEnrol('lee@example.com');
+    assert.equal(c.stage, 'full'); assert.equal(c.next, 'invitations'); assert.equal(c.firmId, null);
+    assert.deepEqual(c.invitations.map(i => [i.firmId, i.firmName, i.role, i.roles]), [[FIRM_B, 'Firm B', 'adviser', ['adviser', 'compliance']]]);
+    let r = await get('/api/households', { cookie });
+    assert.equal(r.status, 403); assert.equal((await r.json()).code, 'firm_required');
+    assert.equal((await (await get('/api/auth/state', { cookie })).json()).next, 'invitations', 'also after a reload');
+    assert.deepEqual((await (await get('/api/auth/firms', { cookie })).json()).map(f => f.firmId), [DEFAULT_FIRM_ID], 'the invitation is not a firm yet');
+    r = await post('/api/auth/firm', { firmId: FIRM_B }, { cookie, csrf: c.csrf });
+    assert.equal(r.status, 403, 'the firm cannot be chosen before the invitation is accepted');
+    r = await post('/api/auth/invitations/accept', { firmId: FIRM_B }, { cookie, csrf: c.csrf });
+    assert.equal(r.status, 200); assert.deepEqual(await r.json(), { next: 'firm' });
+    assert.deepEqual((await (await get('/api/auth/firms', { cookie })).json()).map(f => [f.firmId, f.roles]), [[DEFAULT_FIRM_ID, ['adviser', 'compliance']], [FIRM_B, ['adviser', 'compliance']]]);
+
+    // an account whose only way in is an invitation can still sign in to answer it; accepting opens that firm
+    await invitedUser('ola@example.com', [[FIRM_B, false]]);
+    const o = await finishEnrol('ola@example.com');
+    assert.equal(o.c.next, 'invitations');
+    r = await post('/api/auth/invitations/accept', { firmId: FIRM_B }, { cookie: o.cookie, csrf: o.c.csrf });
+    assert.equal(r.status, 200);
+    const opened = await r.json();
+    assert.deepEqual([opened.stage, opened.next, opened.firmId, opened.firmName, opened.role, opened.roles], ['full', null, FIRM_B, 'Firm B', 'adviser', ['adviser', 'compliance']]);
+    assert.deepEqual(await (await get('/api/households', { cookie: cookieOf(r) })).json(), [{ id: FIRM_B }]);
+
+    // and if they decline, with nothing else to their name, there is nothing to open
+    await invitedUser('kim@example.com', [[FIRM_B, false]]);
+    const k = await finishEnrol('kim@example.com');
+    r = await post('/api/auth/invitations/decline', { firmId: FIRM_B }, { cookie: k.cookie, csrf: k.c.csrf });
+    assert.equal(r.status, 200); assert.deepEqual(await r.json(), { next: 'none' });
+    assert.equal((await get('/api/households', { cookie: k.cookie })).status, 403);
+    assert.ok((await events('kim@example.com')).includes('invitation_declined:ok'));
+    // someone with no membership and no invitation still cannot sign in
+    await asRole('hwp_owner', async cl => { await cl.query(`insert into users (email, name, password_hash) values ('nobody@example.com', 'N', $1)`, [await hashPassword(PASS)]); });
+    assert.equal((await post('/api/auth/sign-in', { email: 'nobody@example.com', password: PASS })).status, 401);
   });
 
   test('re-enrolling while signed in needs the current password and ends other sessions once confirmed', async () => {
