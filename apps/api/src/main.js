@@ -3,7 +3,7 @@
      1. commands that need no settings (hash-password, gen-key)
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
-     4. a data command (import-files, migrate, index-references, rotate-key), or prepare storage and start
+     4. a data command (import-files, migrate, index-references, rotate-key, check-records), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
         migrate with DATABASE_OWNER_URL).
@@ -26,6 +26,7 @@ const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
 const { rotateKey } = require('./cli/rotate-key.js');
+const { checkRecords } = require('./cli/check-records.js');
 
 const STOP_TIMEOUT_MS = 10e3;
 
@@ -87,6 +88,11 @@ function main([cmd, ...args] = []) {
     const firmId = args[0] || DEFAULT_FIRM_ID;
     store.forFirm(firmId).reindexReferences()
       .then(async n => { console.log(`${n} household(s) indexed for firm ${firmId}.`); await store.end(); }, async e => { console.error(e.message); await store.end().catch(() => {}); process.exit(1); });
+    return;
+  }
+  if (cmd === 'check-records') {
+    checkRecords({ store, H: HWP, dataDir: config.dataDir, databaseUrl: config.databaseUrl, ownerUrl: config.databaseOwnerUrl, firmId: args[0] })
+      .then(async code => { if (store.end) await store.end(); process.exit(code); }, async e => { console.error(e.message); if (store.end) await store.end().catch(() => {}); process.exit(1); });
     return;
   }
   store.init().then(() => {

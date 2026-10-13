@@ -224,6 +224,16 @@ The index is a keyed hash, filled in for households saved before it existed with
 `node server.js index-references`; migration 0005 refuses to apply until any existing duplicates
 are resolved, and 0006 refuses until every row names its firm.
 
+Every household and firm settings record is held to field rules before it is stored (text lengths,
+numbers, dates, dropdown options, row counts; see apps/api/src/services/validate.js), and a request
+that breaks one is refused with the field path and the rule. Before enforcing the rules on a database
+that was filled under older rules, list what would be refused, without changing anything:
+
+```sh
+node server.js check-records            # every firm (as the owner on PostgreSQL); exit 2 when anything is flagged
+node server.js check-records FIRM_ID    # one firm
+```
+
 Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
 keep `DATA_KEY` in a different place from the backups. Row-level security is forced on every
 table, so a backup must run as a superuser or as a role with `BYPASSRLS`, never as `hwp_app`
