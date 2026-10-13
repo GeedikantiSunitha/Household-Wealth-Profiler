@@ -21,8 +21,9 @@ export function renderNav(){
       <button type="button" data-act="tasks" aria-current="${state.VIEW==='tasks'}" title="Every open task across all households, by person"><span>Tasks</span></button>
       <button type="button" data-act="diary" aria-current="${state.VIEW==='diary'}" title="Every review, expiry, task and complaint deadline across all households"><span>Reviews due</span></button>
       <button type="button" data-act="firmSettings" aria-current="${state.VIEW==='firmSettings'}" title="Firm details, team members and providers"><span>Firm settings</span></button>
-      ${Store.role==='admin'?`<button type="button" data-act="team" aria-current="${state.VIEW==='team'}" title="Sign-in accounts"><span>User accounts</span></button>`:''}</div></div>`;
-    $('#hhName').textContent={team:'User accounts',diary:'Reviews due across the firm',tasks:'Tasks across the firm',firmSettings:'Firm settings'}[state.VIEW]||'Choose a household to open';return}
+      ${Store.role==='admin'&&!Store.session?`<button type="button" data-act="team" aria-current="${state.VIEW==='team'}" title="Sign-in accounts"><span>User accounts</span></button>`:''}
+      ${Store.session?`<button type="button" data-act="account" aria-current="${state.VIEW==='account'}" title="Your password, authenticator app and sessions"><span>Account security</span></button>`:''}</div></div>`;
+    $('#hhName').textContent={team:'User accounts',diary:'Reviews due across the firm',tasks:'Tasks across the firm',firmSettings:'Firm settings',account:'Account security'}[state.VIEW]||'Choose a household to open';return}
   const O=state.E.onboarding();const bad=state.E.checks().filter(x=>x.lvl==='bad').length;
   const badge=id=>{const s=SCHEMA[id];let ct='',cls='';if(s&&!s.single)ct=state.S[id].length||'';
     if(id==='checks'&&bad){ct=bad+' to fix';cls='bad'}
@@ -45,4 +46,4 @@ export function renderNav(){
   $('#hhName').textContent=(state.S.household.name||'Unnamed household')+(state.S.household.reference?' · '+state.S.household.reference:'')+' · '+O.stage;
 }
 export const NAV_OPEN=new Set();
-export const FIRM_VIEWS=new Set(['clients','team','diary','tasks','firmSettings']);
+export const FIRM_VIEWS=new Set(['clients','team','diary','tasks','firmSettings','account']);

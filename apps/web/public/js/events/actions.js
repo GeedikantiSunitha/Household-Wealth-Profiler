@@ -28,7 +28,11 @@ document.addEventListener('click',async e=>{
   if(act==='closeBanner'){state.banner=null;render();return}
   if(act==='navGroup'){const g=b.dataset.g;const grp=NAV.find(x=>x[0]===g);if(grp.some(([id])=>id===state.VIEW))return;NAV_OPEN.has(g)?NAV_OPEN.delete(g):NAV_OPEN.add(g);renderNav();return}
   if(['goClients','team','diary','tasks','firmSettings'].includes(act)){await Store.flush();state.VIEW=act==='goClients'?'clients':act;state.banner=null;render();return}
-  if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}await Store.cloud.signOut();location.reload();return}
+  if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}
+    if(Store.session){try{await Store.api('POST','auth/sign-out',{})}catch(err){/* the session may have ended already */}location.reload();return}
+    await Store.cloud.signOut();location.reload();return}
+  if(act==='account'){await Store.flush();state.VIEW='account';state.banner=null;render();window.scrollTo({top:0});return}
+  if(act==='switchFirm'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}const {firmPicker}=await import('../auth/gate.js');await firmPicker();location.reload();return}
   if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
     try{await Store.api('POST','members',body);state.banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}
   if(act==='memberActive'){try{await Store.api('PATCH','members/'+encodeURIComponent(b.dataset.uid),{active:b.dataset.on==='1'});state.banner=null}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}

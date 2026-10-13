@@ -36,7 +36,7 @@ function withinTime(promise, ms) {
   return Promise.race([promise, new Promise((_, no) => { timer = setTimeout(() => no(new Error('timed out')), ms); })]).finally(() => clearTimeout(timer));
 }
 
-function createApp({ config, households, firm, prices, authenticate, authRoutes = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true }) {
+function createApp({ config, households, firm, prices, authenticate, authRoutes = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
@@ -61,6 +61,8 @@ function createApp({ config, households, firm, prices, authenticate, authRoutes 
       if (refused) return send(res, ...refused);
       return authRoutes.handle({ req, res, p, auth, send, readBody });
     }
+    // With the app's own sign-in the shell must load before anyone is signed in (it holds no data)
+    if (publicShell && !p.startsWith('/api/')) return req.method === 'GET' ? serveStatic(req, res, p) : send(res, 405, { error: 'Method not allowed' });
     if (!auth || auth.locked) {
       return send(res, auth && auth.locked ? 429 : 401, { error: auth && auth.locked ? 'Too many failed sign-ins. Try again in 15 minutes.' : 'Sign in required' },
         auth && auth.locked ? {} : basicUsers ? CHALLENGE : {});

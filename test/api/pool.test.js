@@ -4,7 +4,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createPool, tx, POOL_OPTIONS, RETRIES } = require('../../apps/api/src/db/pool.js');
+const { createPool, tx, POOL_OPTIONS, RETRIES, runMigrations } = require('../../apps/api/src/db/pool.js');
 
 test('the pool limits connection waits, statements and idle time, and names itself to the database', async () => {
   assert.deepEqual(POOL_OPTIONS, { connectionTimeoutMillis: 10000, idleTimeoutMillis: 30000, statement_timeout: 15000, application_name: 'household-wealth-profiler' });
@@ -55,4 +55,15 @@ test('no free connection within the time limit is answered 503 "busy", not a ser
   await assert.rejects(tx(pool, async () => 'never', noSleep), { status: 503, message: 'The server is busy. Try again in a moment.' });
   const other = fakePool({ connectError: new Error('connection refused') });
   await assert.rejects(tx(other, async () => 'never', noSleep), { message: 'connection refused' });
+});
+
+test('a start-up migration runs without the query timeout (the wait for the migration lock may be long) and the pooled connection gets its limit back', async () => {
+  const fs = require('node:fs'), os = require('node:os'), path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-mig-')); // no migration files: nothing pending
+  const queries = [];
+  const client = { query: async (sql) => { queries.push(String(sql)); return { rows: /to_regclass/.test(sql) ? [{ exists: false }] : [], rowCount: 0 }; }, release: () => { queries.push('release'); } };
+  const pool = { connect: async () => client };
+  assert.deepEqual(await runMigrations(pool, dir), []);
+  assert.equal(queries[0], 'set statement_timeout = 0');
+  assert.deepEqual(queries.slice(-2), [`set statement_timeout = ${POOL_OPTIONS.statement_timeout}`, 'release']);
 });

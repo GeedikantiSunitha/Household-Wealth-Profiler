@@ -48,7 +48,7 @@ test.describe('sessions in the request pipeline', { skip: !BASE_URL && 'set TEST
     store = createAuthStore({ pool, now: () => new Date(clock.t) });
     sessions = createSessions({ store, secret: crypto.randomBytes(32), idleMs: 30 * 60e3, absoluteMs: 12 * 3600e3, secure: false, now: () => clock.t });
     const { authenticate } = createAuth({ users: new Map(), clientIpHeader: '' }, { authStore: store, sessions });
-    ({ server } = createApp({ config: { hsts: false, key: Buffer.alloc(32), root: ROOT }, households, firm, prices: { enabled: false }, authenticate, ready: async () => {} }));
+    ({ server } = createApp({ config: { hsts: false, key: Buffer.alloc(32), root: ROOT, users: new Map() }, households, firm, prices: { enabled: false }, authenticate, publicShell: true, ready: async () => {} }));
     await new Promise(r => server.listen(0, '127.0.0.1', r));
     base = `http://127.0.0.1:${server.address().port}`;
   }, { timeout: 120000 });
@@ -62,6 +62,15 @@ test.describe('sessions in the request pipeline', { skip: !BASE_URL && 'set TEST
   test('no cookie: 401 sign_in_required with the Basic challenge absent (no Basic users configured)', async () => {
     const r = await call('GET', '/api/me');
     assert.equal(r.status, 401); assert.deepEqual(await r.json(), { error: 'Sign in required', code: 'sign_in_required' });
+    assert.equal(r.headers.get('www-authenticate'), null);
+  });
+
+  test('with the app\'s own sign-in the shell (files) is served without a session, so the sign-in page can load; nothing under /api/ is', async () => {
+    assert.equal((await call('GET', '/', { session: null })).status, 200);
+    assert.equal((await call('GET', '/core.js', { session: null })).status, 200);
+    assert.equal((await call('GET', '/api/households', { session: null })).status, 401);
+    assert.equal((await call('GET', '/api/firm', { session: null })).status, 401);
+    assert.equal((await call('POST', '/index.html', { session: null, body: 'x' })).status, 405);
   });
 
   test('a full session reaches the API and the files; /api/me says who, which firm, the role, the stage and the CSRF token', async () => {
@@ -76,7 +85,7 @@ test.describe('sessions in the request pipeline', { skip: !BASE_URL && 'set TEST
   test('every route except the second-step and sign-out routes refuses a password-stage session (401 second_step_required)', async () => {
     const s = await sessions.issue({ userId: uid, stage: 'password' });
     const routes = [['GET', '/api/me'], ['GET', '/api/households'], ['POST', '/api/households', '{"state":{}}'], ['GET', `/api/households/${ID}`], ['PUT', `/api/households/${ID}`, '{"version":1,"state":{}}'],
-      ['GET', `/api/households/${ID}/audit`], ['GET', '/api/firm'], ['PUT', '/api/firm', '{"version":0,"settings":{}}'], ['GET', '/api/firm/audit'], ['GET', '/api/prices?symbol=VWRL.LON'], ['GET', '/'], ['GET', '/core.js'], ['GET', '/api/nope'],
+      ['GET', `/api/households/${ID}/audit`], ['GET', '/api/firm'], ['PUT', '/api/firm', '{"version":0,"settings":{}}'], ['GET', '/api/firm/audit'], ['GET', '/api/prices?symbol=VWRL.LON'], ['GET', '/api/nope'],
       ['POST', '/api/auth/firm', '{}'], ['POST', '/api/auth/sign-out-all', '{}'], ['POST', '/api/auth/password', '{}']];
     for (const [m, p, body] of routes) {
       const r = await call(m, p, { session: s, body, headers: { 'X-CSRF-Token': s.csrf } });
@@ -84,6 +93,7 @@ test.describe('sessions in the request pipeline', { skip: !BASE_URL && 'set TEST
       assert.deepEqual(await r.json(), { error: 'Finish signing in: enter the code from your authenticator app', code: 'second_step_required' }, `${m} ${p}`);
     }
     assert.deepEqual(calls, [], 'no service was reached');
+    assert.equal((await call('GET', '/', { session: s })).status, 200, 'the shell itself is public: it holds no data');
     // The second-step routes and sign-out are the only ones such a session may call (they do not exist yet in this step, so 404, never 401)
     for (const p of ['/api/auth/totp', '/api/auth/enrol', '/api/auth/enrol/confirm', '/api/auth/recovery', '/api/auth/sign-out'])
       assert.notEqual((await call('POST', p, { session: s, body: '{}', headers: { 'X-CSRF-Token': s.csrf } })).status, 401, p);

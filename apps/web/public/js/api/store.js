@@ -28,7 +28,9 @@ function describeProblem(p,firmSettings){const m=/^(\w+)(?:\[(\d+)\])?(?:\.(\w+)
   return esc(where+(label?', '+label:'')+': '+p.message)}
 const problemList=(body,firm)=>'<ul>'+((body&&body.errors)||[]).map(p=>'<li>'+describeProblem(p,firm)+'</li>').join('')+'</ul>';
 const CFG=window.HWP_CONFIG||{};
-const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,cloud:null,role:'',firm:'',seats:0,
+// A reply from /api/me with the app's own sign-in: the session's details
+function sessionFrom(S,j){Object.assign(S,{mode:'server',session:true,user:j.user,email:j.email||'',name:j.name||'',firmId:j.firmId||'',firmName:j.firmName||'',role:j.role||'',csrf:j.csrf||'',encrypted:!!j.encrypted,production:!!j.production})}
+const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,cloud:null,role:'',firm:'',seats:0,session:false,csrf:'',email:'',name:'',firmId:'',firmName:'',
   async init(){
     if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');
       Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firmName:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
@@ -36,19 +38,28 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     if(window.HWP_STANDALONE===true){this.mode='local';try{this.user=localStorage.getItem(LS_USER)||''}catch(e){this.user=''}return}
     // Served by the server: the server must answer. Never fall back to browser storage, or client
     // details could be entered that are never saved, encrypted or audited on the server.
-    let j=null;
-    try{const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});
-      if(r.ok&&(r.headers.get('content-type')||'').includes('json'))j=await r.json()}catch(e){}
-    if(j&&j.user){this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;this.production=!!j.production;return}
+    let j=null,status=0;
+    try{const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});status=r.status;
+      if((r.headers.get('content-type')||'').includes('json'))j=await r.json()}catch(e){}
+    if(status===200&&j&&j.user){if(j.csrf)sessionFrom(this,j);else{this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;this.production=!!j.production}return}
+    // The app's own sign-in: not signed in, a second step pending, or a firm to choose. The sign-in screens take over until the app can open.
+    if((status===401||status===403)&&j&&['sign_in_required','second_step_required','firm_required'].includes(j.code)){
+      const {runGate}=await import('../auth/gate.js');await runGate(j);
+      const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});const me=r.ok?await r.json():null;
+      if(me&&me.csrf){sessionFrom(this,me);return}}
     throw new Error(NO_SERVER);
   },
   loadLocal(){try{const r=localStorage.getItem(LS);return r?window.HWP.normalise(JSON.parse(r)):null}catch(e){return null}},
   saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state.S))}catch(e){}},
   async api(method,path,body,extraHeaders){const headers={'Accept':'application/json',...(extraHeaders||{})};if(body)headers['Content-Type']='application/json';
+    if(this.session&&this.csrf&&method!=='GET')headers['X-CSRF-Token']=this.csrf;
     if(this.cloud){headers.Authorization='Bearer '+await this.cloud.token();headers.apikey=CFG.supabaseKey}
     const r=await fetch(this.cloud?CFG.supabaseUrl.replace(/\/+$/,'')+'/functions/v1/api/'+path:'api/'+path,{method,credentials:this.cloud?'omit':'same-origin',headers,body:body?JSON.stringify(body):undefined});
     let j=null;try{j=await r.json()}catch(e){}
     if(this.cloud&&(r.status===401||(j&&j.code==='mfa_required'))){location.reload();return new Promise(()=>{})}
+    // The session has ended (signed out elsewhere, idle too long, deactivated): back to the sign-in page
+    if(this.session&&r.status===401&&j&&j.code==='sign_in_required'){location.reload();return new Promise(()=>{})}
+    if(j&&j.csrf&&this.session)this.csrf=j.csrf;
     if(!r.ok){const err=new Error((j&&j.error)||('Request failed ('+r.status+')'));err.status=r.status;err.body=j;throw err}return j},
   async list(){return this.api('GET','households')},
   firm:{version:0,settings:null,dirty:false,saving:false,err:null},

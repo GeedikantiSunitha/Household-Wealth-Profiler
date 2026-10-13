@@ -9,6 +9,7 @@ export function renderTopbar(){
   $('#btnClients').hidden=!server||!inHH;
   for(const id of ['#btnImport','#btnExport','#btnJson'])$(id).hidden=!inHH;
   $('#resetWrap').hidden=server||!inHH;
-  $('#who').innerHTML=server?`Signed in as <b>${esc(Store.user)}</b>${Store.cloud?' <button class="btn ghost" type="button" data-act="signOut">Sign out</button>':''}`:`<label for="whoIn">Working as</label><input id="whoIn" value="${esc(Store.user)}" placeholder="Your name">`;
+  $('#who').innerHTML=Store.session?`<details class="menu"><summary><b>${esc(Store.firmName||'')}</b>${Store.firmName?' · ':''}${esc(Store.name||Store.user)}</summary><div class="menu-items">
+      <button class="btn ghost" type="button" data-act="account">Account security</button><button class="btn ghost" type="button" data-act="switchFirm">Switch firm</button><button class="btn ghost" type="button" data-act="signOut">Sign out</button></div></details>`:server?`Signed in as <b>${esc(Store.user)}</b>${Store.cloud?' <button class="btn ghost" type="button" data-act="signOut">Sign out</button>':''}`:`<label for="whoIn">Working as</label><input id="whoIn" value="${esc(Store.user)}" placeholder="Your name">`;
   saveStatus();
 }

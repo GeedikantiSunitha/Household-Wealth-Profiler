@@ -17,3 +17,4 @@ Dockerfile text eol=lf
 
 # Vendored library, pinned by hash: stored and checked out byte for byte
 apps/web/public/vendor/xlsx.full.min.js -text
+apps/web/public/vendor/qrcode.js -text

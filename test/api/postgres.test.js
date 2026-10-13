@@ -234,10 +234,12 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
       const second = run();
       assert.match(second, /Copied 0 household\(s\) .* \(1 already/);
       assert.match(second, /Firm settings not copied: the database already has firm settings/);
-      assert.deepEqual(await (await fetch(BASE + '/api/firm', { headers: SAM })).json(), fileFirm);
-      assert.deepEqual(await (await fetch(BASE + '/api/firm/audit', { headers: SAM })).json(), fileFirmAudit);
+      // The two command runs above blocked this process for longer than the server keeps an idle connection: fresh connections, not a reused one
+      const fresh = { ...SAM, Connection: 'close' };
+      assert.deepEqual(await (await fetch(BASE + '/api/firm', { headers: fresh })).json(), fileFirm);
+      assert.deepEqual(await (await fetch(BASE + '/api/firm/audit', { headers: fresh })).json(), fileFirmAudit);
       assert.equal((await db.query('select count(*)::int n from firm_record_versions')).rows[0].n, 2);
-      const rec = await (await fetch(`${BASE}/api/households/${fid}`, { headers: SAM })).json();
+      const rec = await (await fetch(`${BASE}/api/households/${fid}`, { headers: fresh })).json();
       assert.equal(rec.version, 2); assert.equal(rec.state.household.reference, 'IMP-1');
       const audit = await (await fetch(`${BASE}/api/households/${fid}/audit`, { headers: SAM })).json();
       assert.equal(audit[0].field, 'household.reference'); assert.equal(audit[audit.length - 1].field, 'created');

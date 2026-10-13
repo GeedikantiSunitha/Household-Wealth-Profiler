@@ -10,7 +10,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { checkMigrations } = require('../../scripts/ci/check-migrations.js');
 const { checkLicences, fromNpm } = require('../../scripts/ci/check-licences.js');
-const { verify, vendor, XLSX } = require('../../scripts/vendor.js');
+const { verify, vendor, XLSX, QRCODE } = require('../../scripts/vendor.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const write = (dir, files) => { for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text); return dir; };
@@ -71,20 +71,29 @@ test.describe('the spreadsheet library is vendored at a pinned version', () => {
     assert.equal(r.ok, true, `sha256 is ${r.sha256}`);
     assert.match(fs.readFileSync(path.join(VENDOR, 'LICENSE-xlsx.txt'), 'utf8'), /Apache License/);
   });
+  test('apps/web/public/vendor/qrcode.js is qrcode-generator 1.4.4 (sha256 pinned, MIT), with its licence beside it', () => {
+    assert.equal(QRCODE.version, '1.4.4');
+    const r = verify(path.join(VENDOR, 'qrcode.js'), QRCODE);
+    assert.equal(r.ok, true, `sha256 is ${r.sha256}`);
+    assert.match(fs.readFileSync(path.join(VENDOR, 'LICENSE-qrcode.txt'), 'utf8'), /MIT License/);
+  });
   test('vendor() refuses a download whose hash does not match, and writes nothing', async () => {
     const dir = tmp();
     const fakeFetch = async () => ({ ok: true, arrayBuffer: async () => Buffer.from('not the library') });
     await assert.rejects(vendor({ dir, fetch: fakeFetch }), /sha256/);
     assert.ok(!fs.existsSync(path.join(dir, 'xlsx.full.min.js')));
+    assert.ok(!fs.existsSync(path.join(dir, 'qrcode.js')));
   });
-  test('vendor() writes a download that matches, with the licence', async () => {
+  test('vendor() writes downloads that match, each with its licence', async () => {
     const dir = tmp();
-    const real = fs.readFileSync(path.join(VENDOR, 'xlsx.full.min.js'));
-    const fakeFetch = async url => ({ ok: true, arrayBuffer: async () => (/LICENSE$/.test(url) ? Buffer.from('Apache License\n') : real) });
+    const real = { [XLSX.url]: fs.readFileSync(path.join(VENDOR, 'xlsx.full.min.js')), [QRCODE.url]: fs.readFileSync(path.join(VENDOR, 'qrcode.js')) };
+    const fakeFetch = async url => ({ ok: true, arrayBuffer: async () => real[url] || Buffer.from(/qrcode/.test(url) ? 'MIT License\n' : 'Apache License\n') });
     const r = await vendor({ dir, fetch: fakeFetch });
-    assert.equal(r.sha256, XLSX.sha256);
+    assert.deepEqual(r.map(x => x.sha256), [XLSX.sha256, QRCODE.sha256]);
     assert.equal(verify(path.join(dir, 'xlsx.full.min.js')).ok, true);
+    assert.equal(verify(path.join(dir, 'qrcode.js'), QRCODE).ok, true);
     assert.match(fs.readFileSync(path.join(dir, 'LICENSE-xlsx.txt'), 'utf8'), /Apache/);
+    assert.match(fs.readFileSync(path.join(dir, 'LICENSE-qrcode.txt'), 'utf8'), /MIT/);
   });
 });
 

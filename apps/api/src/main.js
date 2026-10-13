@@ -98,7 +98,6 @@ function main([cmd, ...args] = []) {
   const mailer = createMailer({ smtpUrl: config.smtpUrl, from: config.smtpFrom, production: config.production });
   const notify = createNotify({ mailer, publicUrl: config.publicUrl || `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`, operatorEmail: config.operatorEmail });
   const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler' }) : null;
-  if (authStore) dummyHashString().catch(() => {});
   const { server } = createApp({ config, households, firm, prices, authenticate, authRoutes, ready: () => store.ready() });
 
   if (cmd === 'import-files') {
@@ -118,6 +117,7 @@ function main([cmd, ...args] = []) {
       .then(async code => { if (store.end) await store.end(); process.exit(code); }, async e => { console.error(e.message); if (store.end) await store.end().catch(() => {}); process.exit(1); });
     return;
   }
+  if (authStore) dummyHashString().catch(() => {}); // warm: the first unknown-email sign-in then costs the same as any other
   store.init().then(() => {
     stopOnSignal(server, store);
     server.listen(config.port, config.host, () => console.log(`Household Wealth Profiler on http://${config.host}:${config.port} · ${config.users.size} user(s) · encryption ${config.key ? 'on' : 'OFF'} · ${store.describe}${config.production ? ' · production' : ''}`));
