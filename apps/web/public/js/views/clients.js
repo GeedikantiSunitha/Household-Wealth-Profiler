@@ -5,7 +5,7 @@ import { fmtDate, fmtTs } from '../lib/format.js';
 import { state } from '../state.js';
 
 export async function renderClients(){
-  let h=`<div class="sec-head"><div><h2>Households</h2><p>Signed in as ${esc(Store.user)}. ${Store.encrypted?'Client files are encrypted at rest.':'<b>Encryption at rest is off.</b> Set DATA_KEY on the server.'}</p></div><div class="addrow">${Store.production?'':'<button class="btn" type="button" data-act="newSample">New from sample</button>'}<button class="btn primary" type="button" data-act="newBlank">New household</button></div></div>`;
+  let h=`<div class="sec-head"><div><h2>Households</h2><p>Signed in as ${esc(Store.user)}. ${Store.encrypted?'Client files are encrypted at rest.':'<b>Encryption at rest is off.</b> Set DATA_KEY on the server.'}</p></div>${Store.canEditHousehold()?`<div class="addrow">${Store.production?'':'<button class="btn" type="button" data-act="newSample">New from sample</button>'}<button class="btn primary" type="button" data-act="newBlank">New household</button></div>`:''}</div>`;
   $('#main').innerHTML=h+`<div class="panel"><p class="muted">Loading…</p></div>`;
   let list=[];try{list=await Store.list()}catch(e){$('#main').innerHTML=h+`<div class="banner bad"><div>Could not load households. ${esc(e.message)}</div></div>`;return}
   if(state.VIEW!=='clients')return;

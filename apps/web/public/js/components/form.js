@@ -1,5 +1,6 @@
 /* Form building blocks: field inputs with their tooltips and checks, field groups, owner choices and the one-line summary shown on each card. */
 import { FIELD_HELP, GROUP_HELP } from '../content/help.js';
+import { Store } from '../api/store.js';
 import { esc } from '../lib/dom.js';
 import { FIRM_KEYS, providerOptions, teamOptions } from '../lib/firm.js';
 import { fmtDate, gbp, fmtYM } from '../lib/format.js';
@@ -12,7 +13,7 @@ export const tipBtn=(label,text,cls='')=>text?`<button type="button" class="tip 
 export function ownerOptions(withJoint){let o=withJoint?[['JOINT','Joint (adults equally)']]:[];return o.concat(state.S.members.map(m=>[m.ref,`${m.ref} · ${m.firstName||''} ${m.lastName||''}`.trim()]))}
 export const VALIDATE={niNumber:v=>!v||H.validNino(v)?'':'Not a valid NI number',postcode:v=>!v||H.validPostcode(v)?'':'Check the postcode format',email:v=>!v||H.validEmail(v)?'':'Check the email address'};
 export function fieldHTML(col,idx,f,val){
-  const id=`f-${col}-${idx}-${f.k}`;const data=`data-col="${col}" data-idx="${idx}" data-k="${f.k}"${FIRM_KEYS.has(col)?' data-scope="firm"':''}`;
+  const id=`f-${col}-${idx}-${f.k}`;const data=`data-col="${col}" data-idx="${idx}" data-k="${f.k}"${FIRM_KEYS.has(col)?' data-scope="firm"':''}${Store.locked(col,f.k,FIRM_KEYS.has(col)?'firm':'')?' disabled aria-disabled="true"':''}`;
   const vmsg=VALIDATE[f.k]?VALIDATE[f.k](val):'';
   const hint=vmsg?`<span class="hint err" id="${id}-h">${esc(vmsg)}</span>`:f.h?`<span class="hint" id="${id}-h">${esc(f.h)}</span>`:'';
   const aria=(vmsg||f.h?` aria-describedby="${id}-h"`:'')+(vmsg?' aria-invalid="true"':'');

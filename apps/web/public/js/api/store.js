@@ -21,6 +21,8 @@ let rerender = () => {};
 export function setRenderer(fn) { rerender = fn; }
 
 const LS='hwp-draft-v2',LS_USER='hwp-user';
+// The four fields of the four-eyes check that only a compliance reviewer records (the server enforces this: services/access.js)
+const SIGN_OFF=new Set(['reviewer','reviewDate','outcome','reviewNotes']);
 
 // A refused save's problems, as the server lists them ({ field, message }), described by screen and label: People entry 2, Date of birth: must be a date
 function describeProblem(p,firmSettings){const m=/^(\w+)(?:\[(\d+)\])?(?:\.(\w+))?$/.exec(p.field||'');if(!m)return esc(p.field)+': '+esc(p.message);
@@ -29,8 +31,8 @@ function describeProblem(p,firmSettings){const m=/^(\w+)(?:\[(\d+)\])?(?:\.(\w+)
 const problemList=(body,firm)=>'<ul>'+((body&&body.errors)||[]).map(p=>'<li>'+describeProblem(p,firm)+'</li>').join('')+'</ul>';
 const CFG=window.HWP_CONFIG||{};
 // A reply from /api/me with the app's own sign-in: the session's details
-function sessionFrom(S,j){Object.assign(S,{mode:'server',session:true,user:j.user,email:j.email||'',name:j.name||'',firmId:j.firmId||'',firmName:j.firmName||'',role:j.role||'',csrf:j.csrf||'',encrypted:!!j.encrypted,production:!!j.production})}
-const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,cloud:null,role:'',firm:'',seats:0,session:false,csrf:'',email:'',name:'',firmId:'',firmName:'',
+function sessionFrom(S,j){Object.assign(S,{mode:'server',session:true,user:j.user,email:j.email||'',name:j.name||'',firmId:j.firmId||'',firmName:j.firmName||'',role:j.role||'',roles:j.roles||(j.role?[j.role]:[]),csrf:j.csrf||'',encrypted:!!j.encrypted,production:!!j.production})}
+const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,cloud:null,role:'',roles:[],review:null,reviewStale:false,firm:'',seats:0,session:false,csrf:'',email:'',name:'',firmId:'',firmName:'',
   async init(){
     if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');
       Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firmName:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
@@ -41,10 +43,12 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     let j=null,status=0;
     try{const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});status=r.status;
       if((r.headers.get('content-type')||'').includes('json'))j=await r.json()}catch(e){}
-    if(status===200&&j&&j.user){if(j.csrf)sessionFrom(this,j);else{this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;this.production=!!j.production}return}
+    // A signed-in session that has no firm yet (a reload while an invitation or the choice of firm is still to be answered) is not an open session: the sign-in carries on from where it stopped
+    const noFirm=status===200&&j&&j.csrf&&!j.firmId;
+    if(status===200&&j&&j.user&&!noFirm){if(j.csrf)sessionFrom(this,j);else{this.mode='server';this.user=j.user;this.encrypted=!!j.encrypted;this.production=!!j.production}return}
     // The app's own sign-in: not signed in, a second step pending, or a firm to choose. The sign-in screens take over until the app can open.
-    if((status===401||status===403)&&j&&['sign_in_required','second_step_required','firm_required'].includes(j.code)){
-      const {runGate}=await import('../auth/gate.js');await runGate(j);
+    if(noFirm||((status===401||status===403)&&j&&['sign_in_required','second_step_required','firm_required'].includes(j.code))){
+      const {runGate}=await import('../auth/gate.js');await runGate(noFirm?{code:'firm_required'}:j);
       const r=await fetch('api/me',{credentials:'same-origin',headers:{'Accept':'application/json'}});const me=r.ok?await r.json():null;
       if(me&&me.csrf){sessionFrom(this,me);return}}
     throw new Error(NO_SERVER);
@@ -62,6 +66,17 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     if(j&&j.csrf&&this.session)this.csrf=j.csrf;
     if(!r.ok){const err=new Error((j&&j.error)||('Request failed ('+r.status+')'));err.status=r.status;err.body=j;throw err}return j},
   async list(){return this.api('GET','households')},
+  // What this person may change. The server decides; this only keeps the screens honest. With HTTP Basic, the standalone file and the Supabase edition there is no role here and nothing is locked.
+  // A person can hold several roles in a firm (roles; role is the primary one): they can do whatever any of them allows.
+  hasRole(r){return (this.roles&&this.roles.length?this.roles:[this.role]).includes(r)},
+  canEditHousehold(){return !this.session||this.hasRole('admin')||this.hasRole('adviser')},
+  canEditFirm(){return !this.session||this.hasRole('admin')},
+  canSignOff(){return !this.session||this.hasRole('compliance')},
+  // The reviewer and the review date are put on a sign-off by the server (the signed-in reviewer, today): nobody types them.
+  locked(col,k,scope){if(!this.session)return false;if(scope==='firm')return !this.canEditFirm();
+    if(col==='compliance'&&(k==='reviewer'||k==='reviewDate'))return true;
+    if(col==='compliance'&&SIGN_OFF.has(k))return !this.canSignOff();return !this.canEditHousehold()},
+  roleLabel(){const L={admin:'Administrator',adviser:'Adviser',compliance:'Compliance reviewer'};return (this.roles&&this.roles.length?this.roles:[this.role]).map(r=>L[r]).filter(Boolean).join(' + ')},
   firm:{version:0,settings:null,dirty:false,saving:false,err:null},
   // Served by a server: the firm settings come from it or the app does not open (never from this browser)
   async loadFirm(){if(this.mode==='server'){let j;try{j=await this.api('GET','firm')}catch(e){throw new Error('The firm settings could not be loaded from the server, so nothing you enter would be saved correctly. Check your connection, then reload this page.')}
@@ -75,17 +90,19 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     catch(e){const code=e.body&&e.body.code;F.err=code==='invalid_field'?'invalid':e.status===409?'conflict':e.status===403?'forbidden':'failed';if(F.err==='failed'||F.err==='invalid')F.dirty=true;
       state.banner={cls:'bad',sticky:F.err==='conflict'||F.err==='forbidden',html:F.err==='conflict'?'<b>Someone else changed the firm settings.</b> Your latest change was not saved. <button class="btn" type="button" data-act="reloadFirm">Reload</button>':F.err==='forbidden'?'Only a firm administrator can change firm settings.':F.err==='invalid'?'<b>Firm settings not saved: some values are outside the rules.</b> Correct them and they will be saved.'+problemList(e.body,true):'Firm settings not saved. Retrying when you edit.'};rerender()}
     finally{F.saving=false;saveStatus()}},
-  async open(id){const j=await this.api('GET','households/'+encodeURIComponent(id));this.id=j.id;this.version=j.version;setState(window.HWP.normalise(j.state));this.dirty=false;return j},
+  async open(id){const j=await this.api('GET','households/'+encodeURIComponent(id));this.id=j.id;this.version=j.version;setState(window.HWP.normalise(j.state));this.dirty=false;this.review=j.review||null;this.reviewStale=!!j.reviewStale;return j},
   // Each create carries a fresh key, so a double-click or a retried request cannot make a second household
   async create(household){const key=crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2);
-    const j=await this.api('POST','households',{state:household},{'Idempotency-Key':key});this.id=j.id;this.version=j.version;return j},
+    const j=await this.api('POST','households',{state:household},{'Idempotency-Key':key});this.id=j.id;this.version=j.version;this.review=null;this.reviewStale=false;return j},
   async audit(){return this.mode==='server'&&this.id?this.api('GET','households/'+encodeURIComponent(this.id)+'/audit'):(state.S.audit||[]).slice().reverse()},
   touch(){if(this.mode==='local'){clearTimeout(this.t);this.t=setTimeout(()=>this.saveLocal(),300);return}
     if(!this.id)return;this.dirty=true;saveStatus();clearTimeout(this.t);this.t=setTimeout(()=>this.flush(),1200)},
   async flush(){if(this.mode!=='server'||!this.id||!this.dirty||this.saving)return;this.saving=true;this.dirty=false;saveStatus();
-    try{const j=await this.api('PUT','households/'+encodeURIComponent(this.id),{version:this.version,state:state.S});this.version=j.version;if(this.err==='invalid'||this.err==='duplicate'){state.banner=null;rerender()}this.err=null}
+    try{const j=await this.api('PUT','households/'+encodeURIComponent(this.id),{version:this.version,state:state.S});this.version=j.version;if(this.err==='invalid'||this.err==='duplicate'||this.err==='refused'){state.banner=null;rerender()}this.err=null;
+      if(j.review!==undefined||j.reviewStale!==undefined){if(j.review!==undefined)this.review=j.review;this.reviewStale=!!j.reviewStale;document.dispatchEvent(new CustomEvent('hwp-review'))}}
     catch(e){const code=e.body&&e.body.code;
       if(code==='duplicate_reference'){this.err='duplicate';this.dirty=true;state.banner={cls:'bad',html:'<b>Not saved: another household in this firm already uses this client reference.</b> Change the reference and it will be saved.'};rerender()}
+      else if(code==='forbidden'||code==='sign_off_identity'||code==='separation_of_duties'||code==='four_eyes'){this.err='refused';this.dirty=true;state.banner={cls:'bad',html:'<b>Not saved.</b> '+esc((e.body&&e.body.error)||'Your role does not allow this change.')};rerender()}
       else if(code==='invalid_field'){this.err='invalid';this.dirty=true;state.banner={cls:'bad',html:'<b>Not saved: some values are outside the rules.</b> Correct them and the household will be saved.'+problemList(e.body)};rerender()}
       else if(e.status===409){this.err='conflict';state.banner={cls:'bad',sticky:true,html:'<b>Someone else saved this household since you opened it.</b> Your latest changes were not saved. <button class="btn" type="button" data-act="reloadHousehold">Reload their version</button>'};rerender()}
       else{this.err='failed';this.dirty=true}}
@@ -95,7 +112,7 @@ function saveStatus(){const el=$('#saveState');if(!el)return;
   if(Store.mode!=='server'){el.textContent='Saved in this browser only';el.className='save';return}
   if(!Store.id){el.textContent='';return}
   el.className='save'+(Store.err?' err':'');
-  el.textContent=Store.err==='conflict'?'Not saved: newer version exists':Store.err==='duplicate'?'Not saved: client reference already in use':Store.err==='invalid'?'Not saved: see the message above':Store.err?'Not saved. Retrying when you edit':Store.saving?'Saving…':Store.dirty?'Unsaved changes':'All changes saved';}
+  el.textContent=Store.err==='conflict'?'Not saved: newer version exists':Store.err==='duplicate'?'Not saved: client reference already in use':Store.err==='invalid'?'Not saved: see the message above':Store.err==='refused'?'Not saved: not permitted':Store.err?'Not saved. Retrying when you edit':Store.saving?'Saving…':Store.dirty?'Unsaved changes':'All changes saved';}
 window.addEventListener('beforeunload',e=>{if(Store.mode==='server'&&(Store.dirty||Store.saving)){e.preventDefault();e.returnValue=''}});
 
 /* Local audit trail (server mode records it on the server instead) */

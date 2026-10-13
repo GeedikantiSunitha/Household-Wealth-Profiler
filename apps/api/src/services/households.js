@@ -11,6 +11,14 @@
                                   firm already has the same client reference, in any spelling, and
                                   (400 invalid_field, with the list of problems) when a value breaks
                                   the field rules in validate.js; the same on save
+   Every call first checks the roles in ctx against services/access.js: 403 forbidden (or, for the
+   review sign-off, 403 sign_off_identity / separation_of_duties, 400 four_eyes) before anything is
+   read or written. The review sign-off is the signed-in compliance reviewer's: the server puts their
+   name and today's date on it, and keeps with it the version and a fingerprint of the onboarding
+   assessment it was recorded on (services/signoff.js). get() adds review ({ by, at, version }) and
+   reviewStale to a record that has one; a save that changes a record's sign-off or whether it is
+   stale says so in its reply. Each record also keeps the accounts that have changed it, which is what
+   separation of duties is judged on (never sent to the browser).
      get(ctx, id)                 the record, or null
      audit(ctx, id)               audit entries newest first (at most 5000), or null if no household
      save(ctx, id, { version, state })
@@ -21,6 +29,8 @@
 'use strict';
 const crypto = require('crypto');
 const { validateHousehold, invalidError } = require('./validate.js');
+const { authorize, guardSave, guardCreate, touchesSignOff, stampSignOff, withContributor, SIGN_OFF_FIELDS } = require('./access.js');
+const signoff = require('./signoff.js');
 
 const AUDIT_LIMIT = 5000;
 
@@ -52,6 +62,7 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
 
   return {
     async list(ctx) {
+      authorize(ctx, 'households.read');
       const records = await forFirm(ctx).list({ onUnreadable: (id, e) => log(`unreadable household ${id}: ${e.message}`) });
       const list = records.map(rec => summarise(HWP, rec));
       list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
@@ -60,11 +71,13 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
 
     async create(ctx, state, { idempotencyKey } = {}) {
       const s = clean(state);
+      guardCreate(ctx, s, HWP);
       refuseSample(s);
       refuseInvalid(s);
       const scoped = forFirm(ctx);
       const ts = now();
       const rec = { id: newId(), version: 1, state: s, createdAt: ts, createdBy: ctx.user, updatedAt: ts, updatedBy: ctx.user };
+      const authors = withContributor({}, ctx); if (authors) rec.contributors = authors;
       // The request goes with the key: the same key with a different request is refused (422), not replayed
       const idem = idempotencyKey ? { user: ctx.user, key: idempotencyKey, request: JSON.stringify(s) } : null;
       // Repeats with the same key queue behind each other, so the second sees the first's reply
@@ -76,15 +89,24 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
       });
     },
 
-    get: (ctx, id) => forFirm(ctx).get(id),
+    async get(ctx, id) {
+      authorize(ctx, 'households.read');
+      const rec = await forFirm(ctx).get(id);
+      if (!rec) return rec;
+      const { contributors, review, ...out } = rec; // who changed the file is for the server's rules, not the browser
+      if (review) { out.review = signoff.publicReview(rec); out.reviewStale = signoff.isStale(HWP, rec); }
+      return out;
+    },
 
     async audit(ctx, id) {
+      authorize(ctx, 'households.audit');
       const scoped = forFirm(ctx);
       if (!(await scoped.get(id))) return null;
       return (await scoped.audit(id)).slice(0, AUDIT_LIMIT);
     },
 
     async save(ctx, id, { version, state } = {}) {
+      authorize(ctx, 'households.read'); // before anything is looked up; what the role may change is decided below, against the stored record
       const s = clean(state);
       refuseSample(s);
       refuseInvalid(s);
@@ -94,10 +116,19 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
         if (!rec) return { result: { notFound: true } };
         if (+version !== rec.version) return { result: { conflict: { version: rec.version, updatedBy: rec.updatedBy, updatedAt: rec.updatedAt } } };
         const ts = now();
-        const changes = HWP.diff(rec.state, s).map(c => ({ ts, user: ctx.user, ...c, version: rec.version + 1 }));
+        let diff = HWP.diff(rec.state, s);
+        // The reviewer and the review date are not typed: the server puts the signed-in reviewer and today on a sign-off
+        if (touchesSignOff(diff)) { stampSignOff(ctx, s, ts.slice(0, 10)); diff = HWP.diff(rec.state, s); }
+        guardSave(ctx, diff, s, rec); // what these roles may change, and separation of duties; throwing here rolls the transaction back
+        const changes = diff.map(c => ({ ts, user: ctx.user, ...c, version: rec.version + 1 }));
         if (!changes.length) return { result: { version: rec.version, changes: 0 } };
         const next = { ...rec, version: rec.version + 1, state: s, updatedAt: ts, updatedBy: ctx.user };
-        return { next, audit: changes, result: { version: next.version, changes: changes.length } };
+        if (diff.some(c => !SIGN_OFF_FIELDS.includes(c.field))) { const who = withContributor(rec, ctx); if (who) next.contributors = who; }
+        const review = signoff.reviewAfter({ HWP, rec, next, diff, ctx, at: ts });
+        if (review === null) delete next.review; else if (review) next.review = review;
+        const result = { version: next.version, changes: changes.length };
+        if (next.review) { result.review = signoff.publicReview(next); result.reviewStale = signoff.isStale(HWP, next); } else if (rec.review) result.review = null;
+        return { next, audit: changes, result };
       })));
     },
   };

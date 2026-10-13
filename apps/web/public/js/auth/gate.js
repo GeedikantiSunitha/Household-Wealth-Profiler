@@ -156,11 +156,30 @@ export async function enrol({ withPassword = false } = {}) {
   }
 }
 
+// Invitations to a firm that this account has not answered: accept or decline each, before anything is chosen for the person
+async function invitations() {
+  for (;;) {
+    const list = await api('GET', 'invitations');
+    if (!list.length) return { stage: 'full', next: 'firm' };
+    const v = await screen({ title: 'You have been invited', intro: 'Nothing is open to you in a firm until you accept its invitation.', submit: '',
+      before: `<div class="firm-list">${list.map(i => `<div class="invite-row"><p><b>${esc(i.firmName)}</b> <span class="muted">as ${esc((i.roles || [i.role]).join(' + '))}</span></p>
+        <button type="button" class="btn primary" data-gate="accept:${esc(i.firmId)}">Accept</button> <button type="button" class="btn" data-gate="decline:${esc(i.firmId)}">Decline</button></div>`).join('')}</div>` });
+    const m = v.action && /^(accept|decline):(.+)$/.exec(v.action);
+    if (!m) continue;
+    try {
+      const r = await api('POST', 'invitations/' + m[1], { firmId: m[2] });
+      if (r.next === 'invitations') continue;
+      if (r.next === 'none') { try { await api('POST', 'sign-out', {}); } catch (e) { /* already ended */ } await message('No firm to work in', 'You declined the invitation, and there is no other firm on your account. Ask your administrator if you were invited by mistake.'); return { state: 'out' }; }
+      return r.stage ? r : { stage: 'full', next: r.next };
+    } catch (e) { fail(e.message); }
+  }
+}
+
 export async function firmPicker() {
   const firms = await api('GET', 'firms');
   for (;;) {
     const v = await screen({ title: 'Choose a firm', intro: 'You belong to more than one firm. Which one are you working in now?', submit: '',
-      before: `<div class="firm-list">${firms.map(f => `<button type="button" class="btn" data-gate="firm:${esc(f.firmId)}">${esc(f.firmName)} <span class="muted">${esc(f.role)}</span></button>`).join('')}</div>` });
+      before: `<div class="firm-list">${firms.map(f => `<button type="button" class="btn" data-gate="firm:${esc(f.firmId)}">${esc(f.firmName)} <span class="muted">${esc((f.roles||[f.role]).join(' + '))}</span></button>`).join('')}</div>` });
     if (v.action && v.action.startsWith('firm:')) {
       try { return await api('POST', 'firm', { firmId: v.action.slice(5) }); } catch (e) { fail(e.message); }
     }
@@ -183,6 +202,7 @@ export async function runGate(probe) {
     else if (st.stage === 'password' && st.next === 'enrol') st = await enrol();
     else if (st.stage === 'password') st = await totp(st);
     else if (st.stage === 'full' && st.next === 'enrol') st = (await enrol({ withPassword: true })) || { state: 'out' };
+    else if (st.stage === 'full' && st.next === 'invitations') st = await invitations();
     else if (st.stage === 'full' && st.next === 'firm') st = await firmPicker();
     else { document.body.classList.remove('gated'); $('#main').innerHTML = ''; return st; }
   }

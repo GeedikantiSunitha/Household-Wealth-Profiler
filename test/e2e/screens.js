@@ -401,6 +401,152 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
           await fill('#g-code', nextCode()); await submit();
           await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list', 15000);
         });
+        // ---- Roles (Phase 3): the same app, signed in as each role. Sessions are issued straight into the scratch database
+        // (the sign-in itself is covered above); what is checked here is what each role is shown and allowed to do, a sign-off
+        // that fills in its own reviewer and goes stale, several roles on one membership, and an invitation answered at sign-in.
+        await step('roles: an administrator, an adviser and a compliance reviewer each see only what their role allows', async () => {
+          const H = require('../../packages/core/core.js');
+          const { createAuthStore } = require('../../apps/api/src/auth/store.js');
+          const { createSessions, sessionSecretFrom } = require('../../apps/api/src/auth/sessions.js');
+          const FIRM = 'f1a00000-0000-4000-8000-000000000001';
+          const pool = new (require('pg').Pool)({ connectionString: DB });
+          const cli = (...args) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: env2, stdio: 'pipe' }).toString();
+          try {
+            const sess2 = createSessions({ store: createAuthStore({ pool }), secret: sessionSecretFrom(Buffer.from(key, 'base64')), secure: false });
+            // more seats for the invitations below, and a second firm where one person already has an account
+            cli('firm-seats', FIRM, '8');
+            const OTHER = /Firm created: ([0-9a-f-]{36})/.exec(cli('firm-create', 'Other firm', '3'))[1];
+            const uid = {};
+            for (const [email, name, role, firm] of [['dana@example.com', 'Dana Admin', 'admin', FIRM], ['sam@example.com', 'Sam Adviser', 'adviser', FIRM], ['casey@example.com', 'Casey Compliance', 'compliance', FIRM], ['ned@example.com', 'Ned Other', 'admin', OTHER]]) {
+              cli('create-user', email, name, firm, role);
+              uid[email] = (await pool.query('select id from users where email = $1', [email])).rows[0].id;
+            }
+            // One household to work on, made by the administrator through the API (so she is one of the people who worked on it)
+            const adm = await sess2.issue({ userId: uid['dana@example.com'], firmId: FIRM, stage: 'full' });
+            const st = H.sample(); st.isSample = false; st.household.reference = 'ROLE-1';
+            Object.assign(st.compliance, { preparer: 'Sam Adviser', reviewer: '', reviewDate: '', outcome: 'pending', reviewNotes: '' });
+            const made = await fetch(BASE2 + 'api/households', { method: 'POST', headers: { Cookie: 'hwp_session=' + adm.id, 'Content-Type': 'application/json', 'X-CSRF-Token': adm.csrf }, body: JSON.stringify({ state: st }) });
+            if (made.status !== 201) throw new Error('could not make the household: ' + made.status);
+
+            const cookieFor = async (email, firm) => {
+              const sess = await sess2.issue({ userId: uid[email], firmId: firm, stage: 'full' });
+              await page.send('Network.enable'); await page.send('Network.clearBrowserCookies');
+              await page.send('Network.setCookie', { name: 'hwp_session', value: sess.id, url: BASE2, httpOnly: true, sameSite: 'Strict' });
+            };
+            const signInAs = async email => { await cookieFor(email, FIRM); await go2(); await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list', 15000); };
+            const enabled = sel => js(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) throw new Error('No field ' + ${JSON.stringify(sel)}); return !e.disabled; })()`);
+            const present = sel => js(`!!document.querySelector(${JSON.stringify(sel)})`);
+            const expectTrue = async (ok, what) => { if (!(await ok)) throw new Error(what); };
+            const openHousehold = async () => { await until(`!!document.querySelector('[data-act="openHousehold"]')`, 'the household in the list', 10000); await click('[data-act="openHousehold"]'); await until(`/ROLE-1/.test(document.querySelector('#hhName').textContent)`, 'the household to open'); };
+            const saved = () => until(`document.querySelector('#saveState').textContent === 'All changes saved'`, 'the change to save', 10000);
+            const addHidden = `!document.querySelector('[data-act="add"]') || getComputedStyle(document.querySelector('[data-act="add"]')).display === 'none'`;
+            const compliance = async () => { await nav('compliance'); await until(`!!document.querySelector('#f-compliance-0-reviewer')`, 'the sign-off fields'); };
+
+            // -- a compliance reviewer: reads everything, signs off as themselves (not typed), changes nothing else
+            await signInAs('casey@example.com');
+            await expectTrue(js(`!document.querySelector('[data-act="newBlank"]')`), 'a compliance reviewer is offered "New household"');
+            await expectTrue(js(`/Compliance reviewer/.test(document.querySelector('#who').textContent)`), 'the role is not shown in the top bar');
+            await openHousehold();
+            await expectTrue(js(`document.querySelector('#btnImport').hidden`), 'Import is offered to a reviewer');
+            await nav('household'); await until(`!!document.querySelector('#f-household-0-reference')`, 'the reference field');
+            await expectTrue(js(`document.querySelector('#f-household-0-reference').disabled`), 'a household field is open to a reviewer');
+            await expectTrue(js(`document.querySelector('#main').classList.contains('ro') && /You can read this file/.test(document.querySelector('.lock-note')?.textContent || '')`), 'no read-only note');
+            await nav('members'); await until(`!!document.querySelector('[data-act="toggleAll"]')`, 'the People screen');
+            await expectTrue(js(addHidden), 'Add is offered to a reviewer');
+            await compliance();
+            for (const k of ['outcome', 'reviewNotes']) await expectTrue(enabled(`#f-compliance-0-${k}`), `sign-off field ${k} is locked for a reviewer`);
+            for (const k of ['reviewer', 'reviewDate', 'serviceType', 'preparer', 'termsDate']) await expectTrue(js(`document.querySelector('#f-compliance-0-${k}').disabled`), `field ${k} is open to a reviewer`);
+            // the outcome is all they choose: the reviewer (their own account) and the date fill themselves in, and are saved
+            await type('#f-compliance-0-outcome', 'approved');
+            await until(`document.querySelector('#f-compliance-0-reviewer').value === 'Casey Compliance' && /^\\d{4}-\\d\\d-\\d\\d$/.test(document.querySelector('#f-compliance-0-reviewDate').value)`, 'the reviewer and date to fill in');
+            await saved();
+            await until(`/Signed off by Casey Compliance/.test(document.querySelector('#reviewNote')?.textContent || '') && /current/.test(document.querySelector('#reviewNote').textContent)`, 'the sign-off note');
+            await shot('roles-compliance-signoff');
+            await go2(); await openHousehold(); await compliance();
+            await expectTrue(js(`document.querySelector('#f-compliance-0-reviewer').value === 'Casey Compliance' && document.querySelector('#f-compliance-0-outcome').value === 'approved'`), 'the sign-off was not kept');
+
+            // -- an adviser: works on the file, cannot sign off, cannot change the firm; changing a client's details makes the sign-off out of date
+            await signInAs('sam@example.com');
+            await expectTrue(present('[data-act="newBlank"]'), 'an adviser cannot create a household');
+            await openHousehold(); await compliance();
+            await expectTrue(js(`document.querySelector('#f-compliance-0-reviewer').disabled && document.querySelector('#f-compliance-0-outcome').disabled`), 'an adviser can edit the sign-off');
+            await expectTrue(enabled('#f-compliance-0-serviceType'), 'an adviser cannot edit the rest of the file');
+            await expectTrue(js(`/recorded by a compliance reviewer/.test(document.querySelector('.lock-note')?.textContent || '')`), 'no note on the sign-off');
+            await expectTrue(js(`/The sign-off is current/.test(document.querySelector('#reviewNote')?.textContent || '')`), 'the sign-off should be current before the edit');
+            await nav('members'); await until(`!!document.querySelector('#f-members-0-niNumber')`, 'the first person');
+            await type('#f-members-0-niNumber', 'QQ123456C');
+            await saved();
+            await compliance();
+            await until(`/The sign-off is out of date/.test(document.querySelector('#reviewNote')?.textContent || '')`, 'the sign-off to be marked out of date', 5000);
+            await expectTrue(js(`document.querySelector('#f-compliance-0-outcome').value === 'approved'`), 'the stale sign-off was erased: it should be kept as evidence');
+            await shot('roles-adviser-stale-signoff');
+            await click('#btnClients'); await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list');
+            await expectTrue(js(`!document.querySelector('[data-act="team"]')`), 'an adviser is offered User accounts');
+            await click('[data-act="firmSettings"]'); await until(`document.querySelector('#main h2')?.textContent === 'Firm settings'`, 'Firm settings');
+            await expectTrue(js(`document.querySelector('#f-firm-0-name').disabled && /Only a firm administrator/.test(document.querySelector('.lock-note')?.textContent || '')`), 'an adviser can change the firm settings');
+            await expectTrue(js(addHidden), 'an adviser is offered "Add" in the firm settings');
+            await shot('roles-adviser-firm-readonly');
+
+            // -- an administrator: the team (roles to tick, invitations) and the firm settings; not the sign-off
+            await signInAs('dana@example.com');
+            await expectTrue(present('[data-act="team"]'), 'an administrator is not offered User accounts');
+            await click('[data-act="team"]'); await until(`document.querySelector('#main h2')?.textContent === 'User accounts' && document.querySelectorAll('#main tbody tr').length >= 4`, 'the team', 10000);
+            await expectTrue(js(`document.querySelectorAll('#main tbody tr').length === 4 && document.querySelectorAll('input[data-act="memberRoles"]').length === 3 * 3`), 'three boxes of roles for everyone but yourself');
+            // a new person with two roles (adviser is ticked already: add compliance)
+            await type('#invName', 'Pat Newcomer'); await type('#invEmail', 'pat@example.com');
+            await js(`(() => { document.querySelector('#invRoles input[value="compliance"]').click(); return true; })()`);
+            await click('[data-act="invite"]');
+            await until(`/Invitation sent to pat@example.com/.test(document.querySelector('#main .banner')?.textContent || '')`, 'the invitation', 10000);
+            await until(`[...document.querySelectorAll('#main tbody tr')].some(tr => /pat@example.com/.test(tr.textContent) && tr.querySelectorAll('input:checked').length === 2)`, 'the new person with both roles');
+            // roles ticked and unticked in the table apply at once; a person always keeps one
+            const tick = async (email, role) => {
+              await js(`(() => { document.querySelector('input[data-act="memberRoles"][data-uid="${uid[email]}"][value="${role}"]').click(); return true; })()`);
+              await until(`/Roles changed/.test(document.querySelector('#main .banner')?.textContent || '') && document.querySelector('input[data-act="memberRoles"][data-uid="${uid[email]}"][value="${role}"]') !== null`, 'the roles to change', 10000);
+            };
+            const checked = email => js(`[...document.querySelectorAll('input[data-act="memberRoles"][data-uid="${uid[email]}"]:checked')].map(x => x.value).join('+')`);
+            await tick('sam@example.com', 'compliance');
+            if (await checked('sam@example.com') !== 'adviser+compliance') throw new Error('Sam\'s roles: ' + await checked('sam@example.com'));
+            await shot('roles-admin-team');
+            await tick('sam@example.com', 'compliance'); // untick
+            await tick('sam@example.com', 'adviser');    // untick the last one: refused, nothing changes
+            await until(`/needs at least one role/.test(document.querySelector('#main .banner')?.textContent || '')`, 'the refusal to leave someone with no role', 5000).catch(() => {});
+            if (await checked('sam@example.com') !== 'adviser') throw new Error('Sam should still have adviser: ' + await checked('sam@example.com'));
+            // an existing account (Ned, administrator of another firm) is invited: pending, nothing open to him yet
+            await type('#invName', 'Ned Other'); await type('#invEmail', 'ned@example.com');
+            await js(`(() => { document.querySelector('#invRoles input[value="compliance"]').click(); return true; })()`); // adviser is ticked already: both
+            await click('[data-act="invite"]');
+            await until(`/Invitation sent to ned@example.com/.test(document.querySelector('#main .banner')?.textContent || '')`, 'the invitation to Ned', 10000);
+            await until(`[...document.querySelectorAll('#main tbody tr')].some(tr => /ned@example.com/.test(tr.textContent) && /Invitation pending/.test(tr.textContent))`, 'the pending invitation in the table');
+            await click('[data-act="firmSettings"]'); await until(`document.querySelector('#main h2')?.textContent === 'Firm settings'`, 'Firm settings');
+            await expectTrue(enabled('#f-firm-0-name'), 'an administrator cannot edit the firm settings');
+            await expectTrue(js(`!document.querySelector('.lock-note')`), 'a read-only note on the administrator\'s firm settings');
+
+            // -- Ned signs in: the invitation is put to him before any firm is chosen; accepting it opens the firm with the roles he was given
+            await cookieFor('ned@example.com', null);
+            await page.send('Page.navigate', { url: BASE2 });
+            await until(`document.querySelector('#gate h2')?.textContent === 'You have been invited'`, 'the invitation screen', 30000);
+            await expectTrue(js(`/Default firm/.test(document.querySelector('#gate').textContent) && /adviser/.test(document.querySelector('#gate').textContent)`), 'the invitation does not say which firm and roles');
+            await expectTrue(js(`!document.querySelector('[data-k]') && !document.querySelector('#main .panel:not(#gate)')`), 'data is on screen before the invitation is accepted');
+            await shot('roles-invitation');
+            await click('[data-gate^="accept:"]');
+            await until(`document.querySelector('#gate h2')?.textContent === 'Choose a firm'`, 'the firm picker (he belongs to two firms now)', 15000);
+            await click(`[data-gate="firm:${FIRM}"]`);
+            await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list', 15000);
+            await expectTrue(js(`/Adviser \\+ Compliance reviewer/.test(document.querySelector('#who').textContent)`), 'the roles he was invited with are not shown');
+
+            // -- someone who holds admin and compliance, and worked on the file, cannot sign it off: someone else must
+            await pool.query(`update memberships set extra_roles = array['compliance'] where user_id = $1 and firm_id = $2`, [uid['dana@example.com'], FIRM]);
+            await signInAs('dana@example.com');
+            await expectTrue(js(`/Administrator \\+ Compliance reviewer/.test(document.querySelector('#who').textContent)`), 'both of her roles are not shown');
+            await openHousehold(); await compliance();
+            await expectTrue(enabled('#f-compliance-0-outcome'), 'she holds the compliance role, so the sign-off should be open to her');
+            await type('#f-compliance-0-outcome', 'declined');
+            await until(`document.querySelector('#saveState').textContent === 'Not saved: not permitted'`, 'the refusal', 10000);
+            await expectTrue(js(`/worked on this file/.test([...document.querySelectorAll('#main .banner')].map(x => x.textContent).join(' '))`), 'the refusal does not say why');
+            await shot('roles-dual-refused');
+            await pool.query(`update memberships set extra_roles = '{}' where user_id = $1 and firm_id = $2`, [uid['dana@example.com'], FIRM]);
+          } finally { await pool.end(); }
+        });
       } finally { expectAuth = false; app2.kill(); }
     } else results.push('INFO  the sign-in screens (session mode) were not checked: set TEST_DATABASE_URL to a scratch database');
   } catch (e) { fail('run stopped: ' + e.message); }

@@ -46,7 +46,7 @@ test.describe('sign-in store', { skip: !BASE_URL && 'set TEST_DATABASE_URL to ru
     assert.equal(u.id, uid); assert.equal(u.email, 'sam@example.com'); assert.equal(u.password_hash, null); assert.equal(u.failed_attempts, 0);
     assert.equal(await store.findUserByEmail('nobody@example.com'), null);
     assert.equal((await pool.query('select count(*)::int n from users')).rows[0].n, 0, 'a bare query as the app role sees no account');
-    assert.deepEqual(await store.memberships(uid), [{ firmId: DEFAULT_FIRM_ID, firmName: 'Default firm', role: 'adviser' }]);
+    assert.deepEqual(await store.memberships(uid), [{ firmId: DEFAULT_FIRM_ID, firmName: 'Default firm', role: 'adviser', roles: ['adviser'] }]);
   });
 
   test('failures count up with a progressive delay; a success clears them and records the time', async () => {

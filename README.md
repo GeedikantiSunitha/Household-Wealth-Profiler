@@ -236,14 +236,99 @@ node server.js check-records            # every firm (as the owner on PostgreSQL
 node server.js check-records FIRM_ID    # one firm
 ```
 
-Sign-in accounts (Phase 2) are made by the operator as the owner; the app role cannot create them.
-The password is read from standard input so it never appears on a command line, and the account is
-asked to set up its authenticator app at its first sign-in:
+Sign-in accounts are made by the platform operator (below) for a firm's first administrator, and
+after that by the firm's own administrators from the **User accounts** screen. The password is read
+from standard input so it never appears on a command line, and the account is asked to set up its
+authenticator app at its first sign-in:
 
 ```sh
 node server.js create-user dana@example.com "Dana Adviser" [FIRM_ID] [admin|adviser|compliance]
 echo "a passphrase of at least 12 characters" | node server.js set-password dana@example.com
 ```
+
+**Roles.** A person has one or more roles in a firm (a primary role, and any extra ones, for example an
+administrator who is also a compliance reviewer). They can do whatever any of their roles allows, and
+the services check this on every call (the table is in `apps/api/src/services/access.js`; the screens
+only mirror it):
+
+| | Administrator | Adviser | Compliance reviewer |
+|---|---|---|---|
+| Read households and their audit trails | yes | yes | yes |
+| Create and change households | yes | yes | no, except the review sign-off |
+| Record the review sign-off (outcome and notes) | no | no | yes |
+| Read the firm settings | yes | yes | yes |
+| Change the firm settings | yes | no | no |
+| Read the firm settings audit trail | yes | no | yes |
+| User accounts: invite, change roles, deactivate | yes | no | no |
+
+**The review sign-off** is the four-eyes check, and it is built so that it cannot be done by the person
+who prepared the file:
+
+- The reviewer and the review date are not typed. When a compliance reviewer chooses the outcome, the
+  server puts on their own account (name) and today's date; anything sent for those two fields is
+  replaced. Setting the outcome back to pending withdraws the sign-off, and both go.
+- Separation of duties is by account, per file. The server keeps, on each file, the accounts that have
+  changed it. An account that has changed a file cannot sign it off, whatever roles it holds, and a
+  save cannot both change the file and sign it off. Another account with the same name is a different
+  person. A file saved before this was kept has no such list; for those, only saves from now on count.
+  The named preparer is also still compared by name (the existing four-eyes rule).
+- A sign-off belongs to the assessment it was recorded on. The server keeps the version and a
+  fingerprint of the onboarding assessment (the AML rating and every KYC, document, due diligence and
+  suitability finding). If a later edit changes that assessment, the sign-off is marked out of date: it
+  is kept as evidence of what was reviewed, shown as out of date on the Onboarding and compliance and KYC
+  screens (and as `reviewStale` on the record), and stays so until a reviewer records it again. Edits
+  that do not change the assessment (a contact note, a task, the address) leave it current.
+- A firm that wants to sign files off needs a compliance reviewer who has not worked on them. A firm
+  of one or two people cannot meet this on its own; how small firms should sign files off is an open
+  decision, not settled here.
+
+A change of roles or a deactivation applies at once: the roles are read from the database on every
+request, and deactivating someone ends their sessions in that firm in the same step. Each firm always
+keeps at least one active administrator who has accepted, a reactivation or invitation needs a free
+seat, and nobody can change their own roles or access (another administrator does that). HTTP Basic
+sign-in (`AUTH_USERS`, development only) is not restricted by role.
+
+**Inviting someone.** A new email gets an account and an invitation link, and is on the team at once.
+An email that already has an account (for example in another firm) is added as a *pending* membership:
+it gives no access until that person accepts it. At their next sign-in, after the password and the
+authenticator code, they are shown the invitation (firm and roles) and choose to accept or decline;
+only then is a firm chosen for them. Declining closes it and frees the seat, and the administrator can
+invite them again. The administrator sees "Invitation pending" or "Declined" in User accounts, and the
+reply to the invitation is the same either way, so it says nothing about other firms.
+
+**The platform operator** runs the service for several firms: creates firms, sets seats, suspends a
+firm, creates accounts, reviews access. The operator uses a database role that cannot read client
+records or any account secret, enforced by the database (`db/operator.sql`), and needs no `DATA_KEY`.
+An administrator creates the login once, then the owner applies the grants (repeat after a migration
+that adds tables):
+
+```sql
+create user hwp_operator with password 'a third long random password' nosuperuser nobypassrls nocreatedb nocreaterole;
+```
+
+```sh
+node server.js grant-operator                    # as the owner (DATABASE_OWNER_URL)
+```
+
+```ini
+DATABASE_OPERATOR_URL=postgres://hwp_operator:PASSWORD@localhost:5432/wealth_profiler
+```
+
+```sh
+node server.js firm-create "Alder Wealth" 5      # prints the firm id
+node server.js create-user jo@alder.example "Jo Alder" FIRM_ID admin
+echo "a passphrase of at least 12 characters" | node server.js set-password jo@alder.example
+node server.js firm-list                         # status and seats in use
+node server.js firm-seats FIRM_ID 10             # not below the seats in use
+node server.js firm-status FIRM_ID suspended     # ends every session in the firm; nothing is deleted
+node server.js firm-status FIRM_ID active
+node server.js access-review [FIRM_ID]           # who has access: role, authenticator, last sign-in, open sessions
+```
+
+These commands (and `create-user` and `set-password`) use `DATABASE_OPERATOR_URL`. In production
+they refuse to run without it; in development without it they run as the owner and say so. Every
+change is recorded in the sign-in event log. Use `access-review` as the periodic review of who can
+reach each firm's records, and keep what you decide.
 
 Back up the database (for example `pg_dump` on a schedule, or your provider's backups) and
 keep `DATA_KEY` in a different place from the backups. Row-level security is forced on every

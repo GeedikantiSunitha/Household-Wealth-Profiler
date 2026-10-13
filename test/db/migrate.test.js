@@ -161,11 +161,47 @@ test('0011: within sign-in the app role can make an account with a membership an
     await assert.rejects(pg.query(`update users set email = 'x@example.com'`), /permission denied/);
     await assert.rejects(pg.query(`update users set active = false`), /permission denied/, 'deactivation is not the app role\'s (Phase 3)');
     await assert.rejects(pg.query(`update users set name = 'x'`), /permission denied/);
-    await assert.rejects(pg.query(`update memberships set role = 'admin'`), /permission denied/, 'roles are not the app role\'s (Phase 3)');
-    await assert.rejects(pg.query(`update memberships set active = false`), /permission denied/);
+    // Phase 3 (0014): a membership's role and active flag are the app role's to change, but only for the firm the transaction works in.
+    // Which account and which firm a membership belongs to never are.
+    assert.equal((await pg.query(`update memberships set role = 'admin'`)).affectedRows, 0, 'outside sign-in no membership is visible, so none changes');
+    const noFirm = await pg.exec(`begin; select set_config('app.auth', 'on', true); update memberships set role = 'admin'; rollback`);
+    assert.equal(noFirm[2].affectedRows, 0, 'inside sign-in but with no firm set: nothing changes (fails closed)');
+    const withFirm = await pg.exec(`begin; select set_config('app.auth', 'on', true); select set_config('app.firm_id', '${DEFAULT_FIRM}', true); update memberships set role = 'admin', active = false; rollback`);
+    assert.equal(withFirm[3].affectedRows, 1, "with the firm set: that firm's membership changes");
+    const otherFirm = await pg.exec(`begin; select set_config('app.auth', 'on', true); select set_config('app.firm_id', '${crypto.randomUUID()}', true); update memberships set role = 'admin'; rollback`);
+    assert.equal(otherFirm[3].affectedRows, 0, 'working for another firm: nothing of this firm changes');
+    await assert.rejects(pg.query(`update memberships set firm_id = firm_id`), /permission denied/, "which firm is never the app role's");
+    await assert.rejects(pg.query(`update memberships set user_id = user_id`), /permission denied/, "which account is never the app role's");
     for (const t of ['users', 'memberships', 'access_requests', 'sessions', 'recovery_codes', 'one_time_tokens']) await assert.rejects(pg.query(`delete from ${t}`), /permission denied/, 'delete ' + t);
     await pg.exec('reset role');
     assert.equal((await db.query(`select status from access_requests`))[0].status, 'approved');
+  } finally { await pg.close(); }
+});
+
+test('0014: several roles and pending invitations: every existing membership is accepted, new ones default to accepted, and the roles are constrained', async () => {
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    await upTo(pg, '0011_auth_invites.sql');
+    const u = (await pg.query(`insert into users (email, name) values ('old@example.com', 'Old') returning id`)).rows[0].id;
+    await pg.query(`insert into memberships (user_id, firm_id, role, created_at) values ($1, '${DEFAULT_FIRM}', 'admin', '2026-01-02T03:04:05Z')`, [u]);
+    const applied = await migrate(db, { dir: DIR });
+    assert.ok(applied.includes('0014_member_management.sql'), applied.join());
+    const m = (await db.query(`select role, extra_roles, accepted_at, declined_at, created_at from memberships`))[0];
+    assert.deepEqual(m.extra_roles, []); assert.equal(m.declined_at, null);
+    assert.equal(new Date(m.accepted_at).toISOString(), new Date(m.created_at).toISOString(), 'a membership made before the change counts as accepted when it was made');
+    // a membership made without saying (the operator's commands, a new account) is accepted at once; one made pending is not
+    const v = (await pg.query(`insert into users (email, name) values ('new@example.com', 'New') returning id`)).rows[0].id;
+    await pg.query(`insert into memberships (user_id, firm_id, role) values ($1, '${DEFAULT_FIRM}', 'adviser')`, [v]);
+    assert.ok((await db.query(`select accepted_at from memberships where user_id = '${v}'`))[0].accepted_at);
+    const w = (await pg.query(`insert into users (email, name) values ('pend@example.com', 'Pend') returning id`)).rows[0].id;
+    await pg.query(`insert into memberships (user_id, firm_id, role, accepted_at) values ($1, '${DEFAULT_FIRM}', 'adviser', null)`, [w]);
+    assert.equal((await db.query(`select accepted_at from memberships where user_id = '${w}'`))[0].accepted_at, null);
+    // the roles are a set of the three, without the primary one repeated
+    await pg.query(`update memberships set extra_roles = array['compliance'] where user_id = $1`, [u]);
+    for (const bad of [`array['owner']`, `array['admin']`, `array['compliance','compliance','x']`])
+      await assert.rejects(pg.query(`update memberships set extra_roles = ${bad} where user_id = $1`, [u]), /memberships_extra_roles_valid/, bad);
+    // running it again changes nothing
+    assert.deepEqual(await migrate(db, { dir: DIR }), []);
   } finally { await pg.close(); }
 });
 

@@ -20,6 +20,7 @@ export function onEdit(e){const el=e.target;
     if(!s.single){const card=document.querySelector(`[data-card="${col}:${idx}"]`);if(card){const [t,meta,val]=summary(col,rec);card.querySelector('.sum').innerHTML=`<b>${esc(t)}</b><span class="meta">${esc(meta)}</span>`;card.querySelector('.val').textContent=val}}return}
   const v=parseVal(f,el.value,el.type==='checkbox'?el:null);const rec=s.single?state.S[col]:state.S[col][+idx];const old=rec[k];if(old===v)return;rec[k]=v;
   logChange(s.single?`${col}.${k}`:`${col}[${idx}].${k}`,old,v);Store.touch();
+  if(col==='compliance'&&(k==='outcome'||k==='reviewNotes')&&Store.session&&Store.canSignOff())signOffFill(rec);
   clearTimeout(impT);impT=setTimeout(()=>refreshImpact(`${s.title}: ${f.l}`,f),120);
   if(VALIDATE[k]){const msg=VALIDATE[k](v);const h=document.getElementById(el.id+'-h');el.setAttribute('aria-invalid',msg?'true':'false');if(h){h.textContent=msg||f.h||'';h.className='hint'+(msg?' err':'')}}
   if(!s.single){const card=document.querySelector(`[data-card="${col}:${idx}"]`);if(card){const [t,meta,val]=summary(col,rec);card.querySelector('.sum').innerHTML=`<b>${esc(t)}</b><span class="meta">${esc(meta)}</span>`;card.querySelector('.val').textContent=val}}
@@ -28,6 +29,10 @@ export function onEdit(e){const el=e.target;
   if(col==='rtq'&&e.type==='change'){applyRtq(rec);render()}
   if(col==='scen'&&e.type==='change'){state.OPEN.add('scen:settings');render()}
 }
+// The reviewer and the review date are not typed. They are the signed-in reviewer and today, shown here as the outcome
+// is chosen and put on by the server when it saves; setting the outcome back to pending withdraws the sign-off, and both go.
+function signOffFill(rec){const pending=!rec.outcome||rec.outcome==='pending';
+  for(const [k,v] of [['reviewer',pending?'':(Store.name||'')],['reviewDate',pending?'':H.today()]]){if(rec[k]===v)continue;rec[k]=v;const el=document.getElementById('f-compliance-0-'+k);if(el)el.value=v}}
 document.addEventListener('input',onEdit);
 document.addEventListener('change',onEdit);
 export function applyRtq(q){const r=H.rtqResult(q);if(!r)return;const m=state.S.members.find(x=>x.ref===q.owner);if(!m)return;const i=state.S.members.indexOf(m);

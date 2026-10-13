@@ -173,7 +173,7 @@ test.describe('sign-in API', { skip: !BASE_URL && 'set TEST_DATABASE_URL to run'
     const cookieA = a.cookie.split(';')[0], cookieB = b.cookie.split(';')[0];
     const firms = await get('/api/auth/firms', { cookie: cookieA });
     assert.equal(firms.status, 200);
-    assert.deepEqual(await firms.json(), [{ firmId: DEFAULT_FIRM_ID, firmName: 'Default firm', role: 'adviser' }, { firmId: FIRM_B, firmName: 'Firm B', role: 'admin' }]);
+    assert.deepEqual(await firms.json(), [{ firmId: DEFAULT_FIRM_ID, firmName: 'Default firm', role: 'adviser', roles: ['adviser'] }, { firmId: FIRM_B, firmName: 'Firm B', role: 'admin', roles: ['admin'] }]);
     let r = await post('/api/auth/firm', { firmId: FIRM_B }, { cookie: cookieA });
     assert.equal(r.status, 403, 'a write needs the CSRF token'); assert.equal((await r.json()).code, 'csrf');
     r = await post('/api/auth/firm', { firmId: '0f1e0000-0000-4000-8000-00000000000c' }, { cookie: cookieA, csrf: a.csrf });

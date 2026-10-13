@@ -7,7 +7,7 @@
 function createMeRoute({ send, encrypted, production = false }) {
   return function me(req, res, p, ctx) {
     if (p !== '/api/me' || req.method !== 'GET') return false;
-    if (ctx.session) send(res, 200, { user: ctx.user, email: ctx.email, name: ctx.name, firmId: ctx.firmId, firmName: ctx.firmName, role: ctx.role, stage: ctx.stage, csrf: ctx.csrf, encrypted, production });
+    if (ctx.session) send(res, 200, { user: ctx.user, email: ctx.email, name: ctx.name, firmId: ctx.firmId, firmName: ctx.firmName, role: ctx.role, roles: ctx.roles, stage: ctx.stage, csrf: ctx.csrf, encrypted, production });
     else send(res, 200, { user: ctx.user, encrypted, production });
     return true;
   };

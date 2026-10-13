@@ -7,6 +7,8 @@ const path = require('path');
 const util = require('util');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+// Commands run by the platform operator (cli/accounts.js, cli/platform.js): they need no sign-in users and no DATA_KEY
+const OPERATOR_COMMANDS = ['create-user', 'set-password', 'firm-create', 'firm-list', 'firm-seats', 'firm-status', 'access-review', 'grant-operator'];
 
 // Same rule as process.loadEnvFile: a variable already set (even to '') is never replaced
 function readEnvFile(file, env) {
@@ -44,7 +46,8 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   // NODE_ENV=production: the settings that are fine on a developer's machine but never in production
   const production = env.NODE_ENV === 'production';
   if (production) {
-    if (!env.DATABASE_URL) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
+    // (the operator commands use their own connection, so the operator's machine never holds the app's password)
+    if (!env.DATABASE_URL && !OPERATOR_COMMANDS.includes(command)) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
     if (env.ALLOW_PLAINTEXT === '1') throw new Error('NODE_ENV=production: ALLOW_PLAINTEXT is not accepted. Set DATA_KEY so client records are encrypted.');
     if (env.HSTS === '0') throw new Error('NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.');
     if (env.AUTH_USERS) throw new Error("NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in.");
@@ -56,10 +59,10 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     if (newKey.length !== 32) throw new Error('NEW_DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key');
   }
   // The owner connection must be to the same database as the app's: migrations run where the data is
-  if (env.DATABASE_URL && env.DATABASE_OWNER_URL) {
-    const same = (a, b) => { try { const x = new URL(a), y = new URL(b); return x.host === y.host && x.pathname === y.pathname; } catch (e) { return false; } };
-    if (!same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
-  }
+  const same = (a, b) => { try { const x = new URL(a), y = new URL(b); return x.host === y.host && x.pathname === y.pathname; } catch (e) { return false; } };
+  if (env.DATABASE_URL && env.DATABASE_OWNER_URL && !same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
+  // The platform operator's connection (operator commands only, as the operator role) is checked the same way
+  if (env.DATABASE_URL && env.DATABASE_OPERATOR_URL && !same(env.DATABASE_URL, env.DATABASE_OPERATOR_URL)) throw new Error('DATABASE_OPERATOR_URL must point at the same host and database as DATABASE_URL (only the user differs).');
   const users = parseUsers(env.AUTH_USERS);
   // Sessions (the app's own sign-in): idle and absolute limits; cookies are Secure with the __Host-
   // prefix in production or whenever the app is served over HTTPS (PUBLIC_URL)
@@ -75,8 +78,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   if (publicUrl && !/^https?:\/\/[^/]+$/i.test(publicUrl)) throw new Error('PUBLIC_URL must be the address the app is served at, e.g. https://profiler.example.com');
   // With PostgreSQL the app's own sign-in (accounts in the database) is the way in and AUTH_USERS is
   // optional (development only). With files, Basic sign-in is the only way in. The data commands run without either.
-  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
-  if (!key && env.ALLOW_PLAINTEXT !== '1') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
+  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
+  // The operator commands never touch a client record, so the operator's machine does not need the key
+  if (!key && env.ALLOW_PLAINTEXT !== '1' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
     root,
@@ -88,6 +92,8 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     // The owner connection for migrations (node server.js migrate); the server itself runs as the
     // app role in DATABASE_URL, which cannot change the schema or bypass row-level security
     databaseOwnerUrl: env.DATABASE_OWNER_URL || '',
+    // The platform operator's connection: the operator role cannot read client records (db/operator.sql)
+    databaseOperatorUrl: env.DATABASE_OPERATOR_URL || '',
     databasePoolMax: +env.DATABASE_POOL_MAX || 10,
     // Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
     // to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.
@@ -108,4 +114,4 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   };
 }
 
-module.exports = { load, parseUsers, ROOT };
+module.exports = { load, parseUsers, ROOT, OPERATOR_COMMANDS };

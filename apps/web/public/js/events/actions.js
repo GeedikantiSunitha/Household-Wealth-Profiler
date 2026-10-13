@@ -33,7 +33,9 @@ document.addEventListener('click',async e=>{
     await Store.cloud.signOut();location.reload();return}
   if(act==='account'){await Store.flush();state.VIEW='account';state.banner=null;render();window.scrollTo({top:0});return}
   if(act==='switchFirm'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}const {firmPicker}=await import('../auth/gate.js');await firmPicker();location.reload();return}
-  if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
+  if(act==='invite'){const roles=[...document.querySelectorAll('#invRoles input:checked')].map(x=>x.value);
+    if(!roles.length){state.banner={cls:'bad',html:'Tick at least one role.'};render();return}
+    const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:roles[0],...(Store.session?{roles}:{})};b.disabled=true;
     try{await Store.api('POST','members',body);state.banner={cls:'good',html:`Invitation sent to ${esc(body.email)}.`}}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}
   if(act==='memberActive'){try{await Store.api('PATCH','members/'+encodeURIComponent(b.dataset.uid),{active:b.dataset.on==='1'});state.banner=null}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render();return}
   if(act==='toggle'){if(e.target.closest('[data-act="del"]'))return;const key=col+':'+idx;state.OPEN.has(key)?state.OPEN.delete(key):state.OPEN.add(key);const card=b.closest('.card');card.dataset.open=state.OPEN.has(key);b.setAttribute('aria-expanded',state.OPEN.has(key));return}
@@ -69,4 +71,10 @@ document.addEventListener('click',async e=>{
     finally{creating=false;b.disabled=false}return}
   if(act==='reloadHousehold'){try{await Store.open(Store.id);Store.err=null;state.banner=null;render();toast('Loaded the latest version')}catch(err){toast(err.message)}return}
 });
+// A role ticked or unticked in the User accounts table applies at once (the server refuses your own, and the last administrator's).
+// A person needs at least one role.
+document.addEventListener('change',async e=>{const box=e.target.closest&&e.target.closest('input[data-act="memberRoles"]');if(!box)return;
+  const roles=[...document.querySelectorAll(`input[data-act="memberRoles"][data-uid="${box.dataset.uid}"]:checked`)].map(x=>x.value);
+  try{if(!roles.length)throw new Error('A person needs at least one role. Deactivate them instead to remove their access.');
+    await Store.api('PATCH','members/'+encodeURIComponent(box.dataset.uid),{roles});state.banner={cls:'good',html:'Roles changed. They apply to their next request.'}}catch(err){state.banner={cls:'bad',html:esc(err.message)}}render()});
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.card-h')){e.preventDefault();e.target.click()}});
