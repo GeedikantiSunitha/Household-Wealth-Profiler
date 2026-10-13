@@ -93,11 +93,11 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     // Script errors anywhere fail the run, except the 409 in the conflict step (expect409) and the
     // failed start-up call in the "server unreachable" steps (breakMe: { how, url }; 'down' fails
     // the call, 'html' answers a non-JSON page).
-    let expect409 = false, breakMe = null;
+    let expect409 = false, breakMe = null; let expect400 = false;
     page.on((method, p) => {
       if (method === 'Runtime.exceptionThrown') problems.push('Script error: ' + (p.exceptionDetails.exception?.description || p.exceptionDetails.text));
       if (method === 'Runtime.consoleAPICalled' && p.type === 'error') problems.push('console.error: ' + p.args.map(a => a.value ?? a.description).join(' '));
-      if (method === 'Log.entryAdded' && p.entry.level === 'error' && !(expect409 && /status of 409/.test(p.entry.text)) && !(breakMe && breakMe.url.test(p.entry.url || ''))) problems.push('Browser error: ' + p.entry.text + ' ' + (p.entry.url || ''));
+      if (method === 'Log.entryAdded' && p.entry.level === 'error' && !(expect409 && /status of 409/.test(p.entry.text)) && !(expect400 && /status of 400/.test(p.entry.text)) && !(breakMe && breakMe.url.test(p.entry.url || ''))) problems.push('Browser error: ' + p.entry.text + ' ' + (p.entry.url || ''));
     });
     for (const d of ['Page', 'Runtime', 'Log']) await page.send(d + '.enable');
     // Sign in as a browser does: the Basic header goes to the app's own address only
@@ -269,6 +269,37 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       await until(`document.querySelectorAll('.clients tbody tr').length > ${before}`, 'the list to grow');
       const after = await js(`document.querySelectorAll('.clients tbody tr').length`);
       if (after !== before + 1) throw new Error(`${after - before} households were created`);
+    });
+    // The server refuses a save by code; the app names what to change, not the conflict warning, and retries on the next edit
+    await step('a save refused as a duplicate client reference says so (not the conflict warning) and goes through once the reference is changed', async () => {
+      await click('[data-act="openHousehold"]'); // the newest household: the blank one just created
+      await until(`!!document.querySelector('#hhName') && !document.querySelector('.clients')`, 'the household');
+      await nav('household');
+      await until(`!!document.querySelector('#f-household-0-reference')`, 'the form');
+      expect409 = true;
+      await type('#f-household-0-reference', 'HH-OTHER'); // the Harrington household's reference
+      await until(`/another household in this firm already uses this client reference/.test(document.body.textContent)`, 'the duplicate-reference banner', 10000);
+      expect409 = false;
+      if (/Someone else saved this household/.test(await text('body'))) throw new Error('the conflict warning was shown for a duplicate reference');
+      if (await text('#saveState') !== 'Not saved: client reference already in use') throw new Error('save state: ' + await text('#saveState'));
+      await shot('duplicate-reference');
+      await type('#f-household-0-reference', 'HH-UNIQUE');
+      await until(`document.querySelector('#saveState').textContent === 'All changes saved'`, 'the save after the correction', 10000);
+      if (/already uses this client reference/.test(await text('body'))) throw new Error('the banner stayed after the save went through');
+    });
+    await step('a value outside the field rules is refused with the screen and field named (never the value), and saved once corrected', async () => {
+      expect400 = true;
+      await type('#f-household-0-giftsLast7', '10000000000000');
+      await until(`/Not saved: some values are outside the rules/.test(document.body.textContent)`, 'the refusal banner', 10000);
+      expect400 = false;
+      const banner = await text('.banner.bad');
+      if (!/Household, Gifts in last 7 years \(£\): must be between -1,000,000,000,000 and 1,000,000,000,000/.test(banner)) throw new Error('the problem is not named: ' + banner);
+      if (/10000000000000/.test(banner)) throw new Error('the banner echoes the submitted value');
+      if (await text('#saveState') !== 'Not saved: see the message above') throw new Error('save state: ' + await text('#saveState'));
+      await shot('refused-value');
+      await type('#f-household-0-giftsLast7', '1000');
+      await until(`document.querySelector('#saveState').textContent === 'All changes saved'`, 'the save after the correction', 10000);
+      if (/outside the rules/.test(await text('body'))) throw new Error('the banner stayed after the save went through');
     });
     for (const [how, url, label, message] of [
       ['down', /\/api\/me$/, 'the server is unreachable', /The server could not be reached, so nothing you enter would be saved/],
