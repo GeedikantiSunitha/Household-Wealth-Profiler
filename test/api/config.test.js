@@ -60,7 +60,10 @@ test('start-up refusals keep their exact messages', () => {
   assert.throws(() => load({ env: { AUTH_USERS: USER, DATA_KEY: 'c2hvcnQ=' }, root: root() }),
     { message: 'DATA_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key' });
   assert.throws(() => load({ env: { DATA_KEY: KEY }, root: root() }),
-    { message: 'No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).' });
+    { message: 'No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).' });
+  // With PostgreSQL the accounts live in the database: no AUTH_USERS needed, in development or production
+  assert.equal(load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://x' }, root: root() }).users.size, 0);
+  assert.equal(load({ env: { NODE_ENV: 'production', DATA_KEY: KEY, DATABASE_URL: 'postgres://x' }, root: root() }).users.size, 0, 'a production server starts without Basic users');
   assert.throws(() => load({ env: { AUTH_USERS: USER }, root: root() }),
     { message: 'DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.' });
 });
@@ -76,7 +79,7 @@ test('NODE_ENV=production refuses files, plaintext, plain HTTP and Basic sign-in
   assert.throws(() => prod({ AUTH_USERS: USER }),
     { message: "NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in." });
   // Until the app's own sign-in exists (Phase 2) there is no way to sign in to a production server
-  assert.throws(() => prod({}), /No users configured/);
+  assert.equal(prod({}).users.size, 0, 'production starts without Basic users: accounts sign in through the app');
   assert.equal(ok().production, false, 'NODE_ENV unset is not production');
   assert.equal(ok({ NODE_ENV: 'development', ALLOW_PLAINTEXT: '1', DATA_KEY: '' }).production, false);
 });
