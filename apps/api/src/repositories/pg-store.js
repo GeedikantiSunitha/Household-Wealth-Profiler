@@ -22,6 +22,15 @@ const { requestHash, replay } = require('./idempotency.js');
 const logUnreadable = (id, e) => console.error(new Date().toISOString(), `unreadable household ${id}:`, e.message);
 const refOf = rec => rec && rec.state && rec.state.household ? rec.state.household.reference : undefined;
 
+const ACCESS_LIMIT = 5000;
+const RETENTION_COLUMNS = 'household_id, ended_on::text as ended_on, retention_until::text as retention_until, changed_by, changed_at';
+const retentionRow = r => ({ householdId: r.household_id, endedOn: r.ended_on, retentionUntil: r.retention_until, changedBy: r.changed_by, changedAt: r.changed_at.toISOString() });
+const PURGE_COLUMNS = 'id, household_id, retention_until::text as retention_until, reason, requested_by, requested_by_id, requested_at, status, decided_by, decided_by_id, decided_at, decision_note, counts';
+const purgeRow = (sealer, r) => ({ id: r.id, householdId: r.household_id, retentionUntil: r.retention_until, reason: sealer.open(r.reason), requestedBy: r.requested_by, requestedById: r.requested_by_id,
+  requestedAt: r.requested_at.toISOString(), status: r.status, decidedBy: r.decided_by, decidedById: r.decided_by_id, decidedAt: r.decided_at ? r.decided_at.toISOString() : null, note: sealer.open(r.decision_note), counts: r.counts });
+const relationshipOpen = () => Object.assign(new Error("This household's relationship has not ended"), { status: 409, code: 'relationship_open' });
+const purgePending = () => Object.assign(new Error('A purge request for this household is already waiting for a decision'), { status: 409, code: 'purge_pending' });
+
 function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = '', production = false }) {
   const pool = createPool(url, poolMax);
   const tx = fn => inTx(pool, fn);
@@ -164,6 +173,72 @@ function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = ''
           }
           return n;
         });
+      },
+      // The access log (migration 0012): who read what. Entries hold no client data and are never changed
+      logAccess(e) {
+        return inFirm(c => c.query('insert into access_log (firm_id, actor, user_id, action, household_id, outcome, detail) values ($1, $2, $3, $4, $5, $6, $7)',
+          [firmId, e.actor, e.userId || null, e.action, e.householdId || null, e.outcome || 'ok', String(e.detail || '').slice(0, 200)]));
+      },
+      accessLog(householdId, { limit = ACCESS_LIMIT } = {}) {
+        const cap = Number.isFinite(limit) ? ` limit ${Math.max(0, Math.floor(limit))}` : '';
+        return inFirm(async c => (await c.query(`select at, actor, action, outcome, detail from access_log where firm_id = $1 and household_id = $2 order by id desc${cap}`, [firmId, householdId])).rows
+          .map(r => ({ at: r.at.toISOString(), actor: r.actor, action: r.action, outcome: r.outcome, detail: r.detail })));
+      },
+      // The retention clock (migration 0013), one row per household whose relationship has ended (or was reopened)
+      retention: {
+        all() { return inFirm(async c => (await c.query(`select ${RETENTION_COLUMNS} from household_retention where firm_id = $1`, [firmId])).rows.map(retentionRow)); },
+        get(id) { return inFirm(async c => { const r = (await c.query(`select ${RETENTION_COLUMNS} from household_retention where household_id = $1 and firm_id = $2`, [id, firmId])).rows[0]; return r ? retentionRow(r) : null; }); },
+        // decide({ current, pending }) returns { result, next?, audit? }: next = { endedOn, retentionUntil, by } is stored
+        // with its change-audit entries, atomically. The household row is locked, so a purge cannot run meanwhile;
+        // decide(null) when there is no such household. pending: a purge request is waiting for a decision.
+        update(id, decide) {
+          return inFirm(async (c, sealer) => {
+            if (!(await c.query('select 1 from households where id = $1 and firm_id = $2 for update', [id, firmId])).rows.length) return (await decide(null)).result;
+            const cur = (await c.query(`select ${RETENTION_COLUMNS} from household_retention where household_id = $1 and firm_id = $2`, [id, firmId])).rows[0];
+            const pending = (await c.query(`select 1 from purge_requests where household_id = $1 and firm_id = $2 and status = 'pending'`, [id, firmId])).rows.length > 0;
+            const out = await decide({ current: cur ? retentionRow(cur) : null, pending });
+            if (out.next) {
+              const n = out.next;
+              await c.query(`insert into household_retention (household_id, firm_id, ended_on, retention_until, changed_by, changed_at) values ($1, $2, $3, $4, $5, now())
+                on conflict (household_id) do update set ended_on = excluded.ended_on, retention_until = excluded.retention_until, changed_by = excluded.changed_by, changed_at = excluded.changed_at`,
+              [id, firmId, n.endedOn, n.retentionUntil, n.by]);
+              if (out.audit && out.audit.length) await c.query('insert into audit_log (household_id, entry, firm_id) select $1, unnest($2::text[]), $3', [id, sealAll(sealer, out.audit), firmId]);
+            }
+            return out.result;
+          });
+        },
+      },
+      // Purge requests and the purge register (migration 0013). The reason and the decision note are sealed.
+      purge: {
+        list() { return inFirm(async (c, sealer) => (await c.query(`select ${PURGE_COLUMNS} from purge_requests where firm_id = $1 order by requested_at desc`, [firmId])).rows.map(r => purgeRow(sealer, r))); },
+        get(reqId) { return inFirm(async (c, sealer) => { const r = (await c.query(`select ${PURGE_COLUMNS} from purge_requests where id = $1 and firm_id = $2`, [reqId, firmId])).rows[0]; return r ? purgeRow(sealer, r) : null; }); },
+        // A request for a household whose retention has ended; at most one waits per household (409 purge_pending)
+        request({ householdId, reason, by, byId }) {
+          return inFirm(async (c, sealer) => {
+            const ret = (await c.query('select retention_until::text as until from household_retention where household_id = $1 and firm_id = $2 and ended_on is not null', [householdId, firmId])).rows[0];
+            if (!ret) throw relationshipOpen();
+            try {
+              const r = (await c.query(`insert into purge_requests (firm_id, household_id, retention_until, reason, requested_by, requested_by_id) values ($1, $2, $3, $4, $5, $6) returning ${PURGE_COLUMNS}`,
+                [firmId, householdId, ret.until, sealer.seal(reason || ''), by, byId || null])).rows[0];
+              return purgeRow(sealer, r);
+            } catch (e) { if (e.code === '23505') throw purgePending(); throw e; }
+          });
+        },
+        // Rejected (or withdrawn); null when there is no such pending request
+        reject(reqId, { by, byId, note }) {
+          return inFirm(async (c, sealer) => {
+            const r = (await c.query(`update purge_requests set status = 'rejected', decided_by = $3, decided_by_id = $4, decided_at = now(), decision_note = $5
+              where id = $1 and firm_id = $2 and status = 'pending' returning ${PURGE_COLUMNS}`, [reqId, firmId, by, byId || null, sealer.seal(note || '')])).rows[0];
+            return r ? purgeRow(sealer, r) : null;
+          });
+        },
+        // Approved: purge_household() checks everything again and deletes, in this transaction; the rows removed
+        execute(reqId, { by, byId, note }) {
+          return inFirm(async (c, sealer) => {
+            try { return (await c.query('select purge_household($1, $2, $3, $4) as counts', [reqId, by, byId || null, sealer.seal(note || '')])).rows[0].counts; }
+            catch (e) { if (e.code === '42501' || e.code === 'P0002') throw Object.assign(new Error(e.message), { status: 409, code: 'purge_refused' }); throw e; }
+          });
+        },
       },
       firm: {
         get() { return inFirm(async (c, sealer) => { const r = (await c.query('select doc from firm_records where firm_id = $1', [firmId])).rows[0]; return r ? JSON.parse(sealer.open(r.doc)) : null; }); },

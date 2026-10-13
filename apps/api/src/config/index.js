@@ -7,6 +7,7 @@ const path = require('path');
 const util = require('util');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const BACKUP_COMMANDS = ['backup', 'restore-drill'];
 
 // Same rule as process.loadEnvFile: a variable already set (even to '') is never replaced
 function readEnvFile(file, env) {
@@ -43,7 +44,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   }
   // NODE_ENV=production: the settings that are fine on a developer's machine but never in production
   const production = env.NODE_ENV === 'production';
-  if (production) {
+  // The backup commands run as a job of their own, apart from the server: the server's settings do not apply to them
+  const backupCommand = BACKUP_COMMANDS.includes(command);
+  if (production && !backupCommand) {
     if (!env.DATABASE_URL) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
     if (env.ALLOW_PLAINTEXT === '1') throw new Error('NODE_ENV=production: ALLOW_PLAINTEXT is not accepted. Set DATA_KEY so client records are encrypted.');
     if (env.HSTS === '0') throw new Error('NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.');
@@ -76,11 +79,27 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   if (smtpUrl) require('../auth/mail.js').parseSmtpUrl(smtpUrl);
   const smtpFrom = env.SMTP_FROM || 'Household Wealth Profiler <no-reply@localhost>';
   const operatorEmail = env.OPERATOR_EMAIL || '';
+  // How long a household is kept after its relationship ends, in whole years. The Money Laundering
+  // Regulations 2017 (regulation 40) set five; a firm may have reason to keep longer, never shorter.
+  const retentionYears = env.RETENTION_YEARS === undefined || env.RETENTION_YEARS === '' ? 5 : +env.RETENTION_YEARS;
+  if (!Number.isInteger(retentionYears) || retentionYears < 5 || retentionYears > 100) throw new Error('RETENTION_YEARS must be a whole number of years from 5 (the Money Laundering Regulations 2017 minimum) to 100');
   if (publicUrl && !/^https?:\/\/[^/]+$/i.test(publicUrl)) throw new Error('PUBLIC_URL must be the address the app is served at, e.g. https://profiler.example.com');
   // With PostgreSQL the app's own sign-in (accounts in the database) is the way in and AUTH_USERS is
   // optional (development only). With files, Basic sign-in is the only way in. The data commands run without either.
-  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
-  if (!key && env.ALLOW_PLAINTEXT !== '1') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
+  // Backups (node server.js backup, restore-drill): BACKUP_KEY is a key of its own, never DATA_KEY, so a
+  // stolen backup and a stolen server key are separate losses; the backup job does not need DATA_KEY at
+  // all (the restore drill does, to prove records still open). BACKUP_DATABASE_URL is a role that may
+  // read every row (superuser or BYPASSRLS), never hwp_app or hwp_owner, for which row security hides rows.
+  let backupKey = null;
+  if (env.BACKUP_KEY) {
+    backupKey = Buffer.from(env.BACKUP_KEY, 'base64');
+    if (backupKey.length !== 32) throw new Error('BACKUP_KEY must be 32 bytes, base64-encoded. Run: node server.js gen-key');
+    if (key && backupKey.equals(key)) throw new Error('BACKUP_KEY must not be the same as DATA_KEY: keep them apart, so one stolen key never opens both the server and its backups.');
+  }
+  const backupRetentionDays = env.BACKUP_RETENTION_DAYS === undefined || env.BACKUP_RETENTION_DAYS === '' ? 35 : +env.BACKUP_RETENTION_DAYS;
+  if (!Number.isInteger(backupRetentionDays) || backupRetentionDays < 1 || backupRetentionDays > 3650) throw new Error('BACKUP_RETENTION_DAYS must be a whole number of days from 1 to 3650');
+  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password', 'subject-access-user', ...BACKUP_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
+  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
     root,
@@ -109,6 +128,13 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     smtpUrl,
     smtpFrom,
     operatorEmail,
+    retentionYears,
+    backupUrl: env.BACKUP_DATABASE_URL || '',
+    backupDir: env.BACKUP_DIR ? path.resolve(env.BACKUP_DIR) : '',
+    backupKey,
+    backupRetentionDays,
+    // Where pg_dump and pg_restore are, when they are not on the PATH (their major version must be at least the server's)
+    pgBin: env.PG_BIN || '',
   };
 }
 

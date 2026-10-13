@@ -401,6 +401,27 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
           await fill('#g-code', nextCode()); await submit();
           await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list', 15000);
         });
+        await step('records and retention (Phase 4): hidden from an adviser; a compliance user ends a relationship, requests a purge, and cannot approve it alone', async () => {
+          if (await js(`!!document.querySelector('[data-act="records"]')`)) throw new Error('an adviser sees Records and retention');
+          await click('[data-act="newBlank"]');
+          await until(`document.querySelector('#main h2') && document.querySelector('#main h2').textContent !== 'Households'`, 'the new household', 15000);
+          execFileSync(process.execPath, ['server.js', 'create-user', 'ava@example.com', 'Ava Adviser', 'f1a00000-0000-4000-8000-000000000001', 'compliance'], { cwd: ROOT, env: env2 });
+          await go2();
+          await until(`!!document.querySelector('[data-act="records"]')`, 'the Records and retention entry for a compliance user', 15000);
+          await click('[data-act="records"]');
+          await until(`document.querySelector('#main h2')?.textContent === 'Records and retention' && !!document.querySelector('[data-rec="end"]')`, 'the records page', 15000);
+          await shot('records');
+          await js(`(() => { const el = document.querySelector('input[type=date][id^="end-"]'); el.value = '2015-01-10'; return true; })()`);
+          await click('[data-rec="end"]');
+          await until(`!!document.querySelector('[data-rec="request"]')`, 'the purge request form (retention ended 2020-01-10)', 15000);
+          await fill('[id^="why-"]', 'Retention period over');
+          await click('[data-rec="request"]');
+          await until(`/Your request: someone else must approve/.test(document.querySelector('#main').textContent)`, 'the waiting request, with no approve button for the requester', 15000);
+          if (await js(`!!document.querySelector('[data-rec="ask"], [data-rec="approve"]')`)) throw new Error('the requester is offered approval');
+          await shot('records-requested');
+          await click('[data-rec="log"]');
+          await until(`/Hide access log/.test(document.querySelector('#main').textContent)`, 'the access log', 15000);
+        });
       } finally { expectAuth = false; app2.kill(); }
     } else results.push('INFO  the sign-in screens (session mode) were not checked: set TEST_DATABASE_URL to a scratch database');
   } catch (e) { fail('run stopped: ' + e.message); }

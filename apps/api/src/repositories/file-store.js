@@ -7,6 +7,9 @@
      households/firm/...                 the firm settings, in the same three forms (the list only
                                          reads folders named by a household id, so it never shows)
      idempotency/<sha256(user:key)>.json the reply to a create, kept a day so a repeat returns it
+     access.log                          who read what: one JSON line per entry (no client data)
+     retention/<id>.json                 the day a household's relationship ended and its retention ends
+     purge-requests/<id>.json            purge requests and the purge register (reason and note sealed)
    Records and audit entries are sealed with the master key before they are written. Writes go
    to a temporary file first and are then renamed, so a crash never leaves half a file. */
 'use strict';
@@ -19,6 +22,7 @@ const { requestHash, replay } = require('./idempotency.js');
 const { referenceIndex, indexKeyFor } = require('../crypto/seal.js');
 
 const IDEM_TTL_MS = 24 * 3600e3;
+const ACCESS_LIMIT = 5000;
 const logUnreadable = (id, e) => console.error(new Date().toISOString(), `unreadable household ${id}:`, e.message);
 
 function createFileStore(root, { seal, open, key }) {
@@ -97,6 +101,22 @@ function createFileStore(root, { seal, open, key }) {
       await writeAtomic(path.join(hhDir(FIRM), 'current.json'), text);
     }
     const indexReference = async ref => referenceIndex(indexKey, ref);
+    // Phase 4: the access log, the retention clock and purge requests (reason and note sealed)
+    const accessFile = path.join(dir, 'access.log');
+    const retentionDir = path.join(dir, 'retention');
+    const requestsDir = path.join(dir, 'purge-requests');
+    async function readRetention(id) {
+      try { return JSON.parse(await fsp.readFile(path.join(retentionDir, id + '.json'), 'utf8')); }
+      catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+    }
+    async function readRequests() {
+      let names = [];
+      try { names = (await fsp.readdir(requestsDir)).filter(f => f.endsWith('.json')); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+      const out = [];
+      for (const f of names) { const r = JSON.parse(await fsp.readFile(path.join(requestsDir, f), 'utf8')); out.push({ ...r, reason: open(r.reason), note: open(r.note) }); }
+      return out;
+    }
+    const writeRequest = r => writeAtomic(path.join(requestsDir, r.id + '.json'), JSON.stringify({ ...r, reason: seal(r.reason), note: seal(r.note) }));
 
     return {
       ids,
@@ -133,6 +153,75 @@ function createFileStore(root, { seal, open, key }) {
         return out.result;
       },
       audit: readAudit,
+      // The access log: one JSON line per entry, oldest first (no client data, as in PostgreSQL)
+      async logAccess(e) {
+        await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
+        const entry = { at: new Date().toISOString(), actor: e.actor, userId: e.userId || null, action: e.action, householdId: e.householdId || null, outcome: e.outcome || 'ok', detail: String(e.detail || '').slice(0, 200) };
+        await fsp.appendFile(accessFile, JSON.stringify(entry) + '\n', { mode: 0o600 });
+      },
+      async accessLog(householdId, { limit = ACCESS_LIMIT } = {}) {
+        let text = '';
+        try { text = await fsp.readFile(accessFile, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+        return text.split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(e => e.householdId === householdId).reverse().slice(0, limit)
+          .map(e => ({ at: e.at, actor: e.actor, action: e.action, outcome: e.outcome, detail: e.detail }));
+      },
+      retention: {
+        async all() {
+          let names = [];
+          try { names = (await fsp.readdir(retentionDir)).filter(f => ID_RE.test(f.replace(/\.json$/, ''))); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+          const out = [];
+          for (const f of names) out.push(JSON.parse(await fsp.readFile(path.join(retentionDir, f), 'utf8')));
+          return out;
+        },
+        get: readRetention,
+        // As in PostgreSQL: decide({ current, pending }) or decide(null) for no such household
+        async update(id, decide) {
+          if (!(await readRecord(id))) return (await decide(null)).result;
+          const pending = (await readRequests()).some(r => r.householdId === id && r.status === 'pending');
+          const out = await decide({ current: await readRetention(id), pending });
+          if (out.next) {
+            await writeAtomic(path.join(retentionDir, id + '.json'), JSON.stringify({ householdId: id, endedOn: out.next.endedOn, retentionUntil: out.next.retentionUntil, changedBy: out.next.by, changedAt: new Date().toISOString() }));
+            await appendAudit(id, out.audit || []);
+          }
+          return out.result;
+        },
+      },
+      purge: {
+        async list() { return (await readRequests()).sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)); },
+        async get(reqId) { return ID_RE.test(reqId) ? (await readRequests()).find(r => r.id === reqId) || null : null; },
+        async request({ householdId, reason, by, byId }) {
+          const ret = await readRetention(householdId);
+          if (!ret || !ret.endedOn) throw Object.assign(new Error("This household's relationship has not ended"), { status: 409, code: 'relationship_open' });
+          if ((await readRequests()).some(r => r.householdId === householdId && r.status === 'pending')) throw Object.assign(new Error('A purge request for this household is already waiting for a decision'), { status: 409, code: 'purge_pending' });
+          const r = { id: crypto.randomUUID(), householdId, retentionUntil: ret.retentionUntil, reason: reason || '', requestedBy: by, requestedById: byId || null, requestedAt: new Date().toISOString(), status: 'pending', decidedBy: null, decidedById: null, decidedAt: null, note: '', counts: null };
+          await writeRequest(r);
+          return r;
+        },
+        async reject(reqId, { by, byId, note }) {
+          const r = await this.get(reqId);
+          if (!r || r.status !== 'pending') return null;
+          Object.assign(r, { status: 'rejected', decidedBy: by, decidedById: byId || null, decidedAt: new Date().toISOString(), note: note || '' });
+          await writeRequest(r);
+          return r;
+        },
+        // The same checks as purge_household() in PostgreSQL, then the household's folder and retention file go
+        async execute(reqId, { by, byId, note }) {
+          const refuse = m => Object.assign(new Error(m), { status: 409, code: 'purge_refused' });
+          const r = await this.get(reqId);
+          if (!r) throw refuse(`no purge request ${reqId} in this firm`);
+          if (r.status !== 'pending') throw refuse(`purge request ${reqId} was already decided (${r.status})`);
+          if (!by || by === r.requestedBy || (byId && byId === r.requestedById)) throw refuse('a purge is approved by a different person from the one who requested it');
+          const ret = await readRetention(r.householdId);
+          if (!ret || !ret.endedOn || ret.retentionUntil >= new Date().toISOString().slice(0, 10)) throw refuse(`the retention period of household ${r.householdId} has not ended`);
+          const versions = (await readVersions(r.householdId)).length, auditEntries = (await readAudit(r.householdId)).length;
+          await fsp.rm(hhDir(r.householdId), { recursive: true, force: true });
+          await fsp.rm(path.join(retentionDir, r.householdId + '.json'), { force: true });
+          const counts = { households: 1, versions, auditEntries, retention: 1 };
+          Object.assign(r, { status: 'purged', decidedBy: by, decidedById: byId || null, decidedAt: new Date().toISOString(), note: note || '', counts });
+          await writeRequest(r);
+          return counts;
+        },
+      },
       firm: {
         get: readFirm,
         async update(decide) {

@@ -23,6 +23,25 @@
      firm.get()           the firm settings record, or null before the first save
      firm.update(decide)  as update(), for the firm settings record
      firm.audit()         the firm settings audit entries, newest first
+     logAccess({ actor, userId, action, householdId, outcome, detail })
+                          one access-log entry (who read what; no client data; never changed)
+     accessLog(householdId, { limit })  that household's access-log entries, newest first (at most
+                          5000 unless limit says otherwise; Infinity for all)
+     retention.all() / retention.get(id)
+                          { householdId, endedOn, retentionUntil, changedBy, changedAt } per household
+                          whose relationship has ended (or was reopened: endedOn null)
+     retention.update(id, decide)
+                          decide({ current, pending }) (or decide(null): no such household) returns
+                          { result, next?, audit? }; next = { endedOn, retentionUntil, by } is stored
+                          with its change-audit entries, atomically
+     purge.list() / purge.get(reqId)
+                          purge requests, newest first: pending, rejected, and purged (the register)
+     purge.request({ householdId, reason, by, byId })   409 relationship_open | purge_pending
+     purge.reject(reqId, { by, byId, note })            the request, or null if not pending
+     purge.execute(reqId, { by, byId, note })           deletes the household with every version,
+                          its change audit and its retention row, after checking again that the
+                          request is pending, the approver is not the requester and the retention
+                          period has ended (409 purge_refused otherwise); the counts removed
    Records and audit entries are sealed before they are stored. */
 'use strict';
 const path = require('path');

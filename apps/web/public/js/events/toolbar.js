@@ -23,6 +23,6 @@ $('#fileIn').onchange=async e=>{const file=e.target.files[0];e.target.value='';i
     state.banner={cls:'ok',html:`<b>Imported ${esc(file.name)}.</b> ${esc(res.report.join(' · '))}. Check KYC and onboarding status for gaps.`};state.VIEW='members';render();
   }catch(err){state.banner={cls:'bad',html:`<b>Could not import ${esc(file.name)}.</b> ${esc(err.message)}`};render()}};
 $('#btnTemplate').onclick=async()=>{try{save('household-data-template.xlsx',new Blob([await buildWorkbook(false)]))}catch(e){toast(e.message)}};
-$('#btnExport').onclick=async()=>{try{save(stamp()+'-profile.xlsx',new Blob([await buildWorkbook(true)]))}catch(e){toast(e.message)}};
-$('#btnJson').onclick=()=>save(stamp()+'-profile.json',JSON.stringify(state.S,null,2));
+$('#btnExport').onclick=async()=>{try{Store.logExport('excel');save(stamp()+'-profile.xlsx',new Blob([await buildWorkbook(true)]))}catch(e){toast(e.message)}};
+$('#btnJson').onclick=()=>{Store.logExport('json');save(stamp()+'-profile.json',JSON.stringify(state.S,null,2))};
 $('#btnClients').onclick=async()=>{await Store.flush();state.VIEW='clients';state.banner=null;render()};

@@ -213,7 +213,7 @@ test('in production a sample household is refused on create and on save (400); e
 test('audit is capped at 5000 entries, newest first', async () => {
   assert.equal(AUDIT_LIMIT, 5000);
   const audit = Array.from({ length: 5003 }, (_, i) => ({ i }));
-  const store = { forFirm: () => ({ get: async () => ({ id: 'x' }), audit: async () => audit }) };
+  const store = { forFirm: () => ({ get: async () => ({ id: 'x' }), audit: async () => audit, logAccess: async () => {} }) };
   const svc = createHouseholdService({ store, HWP: H });
   const out = await svc.audit(SAM, 'x');
   assert.equal(out.length, 5000); assert.equal(out[0].i, 0);

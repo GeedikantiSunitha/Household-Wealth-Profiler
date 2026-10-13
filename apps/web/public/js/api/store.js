@@ -79,6 +79,9 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
   // Each create carries a fresh key, so a double-click or a retried request cannot make a second household
   async create(household){const key=crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2);
     const j=await this.api('POST','households',{state:household},{'Idempotency-Key':key});this.id=j.id;this.version=j.version;return j},
+  // An export of the open household made in this browser (Excel, JSON, print) is recorded in the server's
+  // access log. Best effort: the export goes ahead even if the log cannot be written (decided 2026-10-13)
+  logExport(kind){if(this.mode!=='server'||this.cloud||!this.id)return;this.api('POST','households/'+encodeURIComponent(this.id)+'/exports',{kind}).catch(e=>console.warn('export not logged:',e.message))},
   async audit(){return this.mode==='server'&&this.id?this.api('GET','households/'+encodeURIComponent(this.id)+'/audit'):(state.S.audit||[]).slice().reverse()},
   touch(){if(this.mode==='local'){clearTimeout(this.t);this.t=setTimeout(()=>this.saveLocal(),300);return}
     if(!this.id)return;this.dirty=true;saveStatus();clearTimeout(this.t);this.t=setTimeout(()=>this.flush(),1200)},

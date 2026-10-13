@@ -7,7 +7,7 @@ import { FIRM_KEYS, recs } from '../lib/firm.js';
 import { fmtYM } from '../lib/format.js';
 import { isAdult } from '../lib/people.js';
 import { setState, state } from '../state.js';
-import { NAV, NAV_OPEN, renderNav } from '../views/nav.js';
+import { FIRM_VIEWS, NAV, NAV_OPEN, renderNav } from '../views/nav.js';
 import { PERF } from '../views/performance.js';
 import { render } from '../views/render.js';
 import { TASKF } from '../views/tasks.js';
@@ -31,6 +31,7 @@ document.addEventListener('click',async e=>{
   if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}
     if(Store.session){try{await Store.api('POST','auth/sign-out',{})}catch(err){/* the session may have ended already */}location.reload();return}
     await Store.cloud.signOut();location.reload();return}
+  if(act==='records'){await Store.flush();state.VIEW='records';state.banner=null;render();window.scrollTo({top:0});return}
   if(act==='account'){await Store.flush();state.VIEW='account';state.banner=null;render();window.scrollTo({top:0});return}
   if(act==='switchFirm'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}const {firmPicker}=await import('../auth/gate.js');await firmPicker();location.reload();return}
   if(act==='invite'){const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:$('#invRole').value};b.disabled=true;
@@ -52,7 +53,7 @@ document.addEventListener('click',async e=>{
   if(act==='scenSel'){state.SCEN_SEL=b.dataset.id;render();return}
   if(act==='rtqStart'){const r=Object.assign(H.defaults('rtq'),{owner:b.dataset.ref,by:Store.user||''});state.S.rtq.push(r);logChange('rtq.count',state.S.rtq.length-1,state.S.rtq.length);state.OPEN.add('rtq:'+(state.S.rtq.length-1));Store.touch();render();return}
   if(act==='loaLetter'){e.stopPropagation();state.LOA_IDX=+b.dataset.idx;state.VIEW='letter';state.banner=null;render();window.scrollTo({top:0});return}
-  if(act==='print'){window.print();return}
+  if(act==='print'){if(!FIRM_VIEWS.has(state.VIEW))Store.logExport('print');window.print();return}
   if(act==='reloadFirm'){state.banner=null;Store.firm.err=null;await Store.loadFirm();render();return}
   if(act==='taskFilter'){TASKF[b.dataset.k]=b.dataset.v;render();return}
   if(act==='add'){const r=H.defaults(col);if(col==='members'){const ad=state.S.members.filter(isAdult).length;r.ref=ad<1?'P1':ad<2?'P2':'C'+(state.S.members.filter(m=>m.role==='child').length+1);r.role=ad<1?'primary':ad<2?'partner':'child'}

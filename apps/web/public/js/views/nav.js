@@ -22,6 +22,7 @@ export function renderNav(){
       <button type="button" data-act="diary" aria-current="${state.VIEW==='diary'}" title="Every review, expiry, task and complaint deadline across all households"><span>Reviews due</span></button>
       <button type="button" data-act="firmSettings" aria-current="${state.VIEW==='firmSettings'}" title="Firm details, team members and providers"><span>Firm settings</span></button>
       ${Store.role==='admin'&&!Store.session?`<button type="button" data-act="team" aria-current="${state.VIEW==='team'}" title="Sign-in accounts"><span>User accounts</span></button>`:''}
+      ${Store.session&&['admin','compliance'].includes(Store.role)?`<button type="button" data-act="records" aria-current="${state.VIEW==='records'}" title="Retention, purge requests, access logs and subject access exports"><span>Records and retention</span></button>`:''}
       ${Store.session?`<button type="button" data-act="account" aria-current="${state.VIEW==='account'}" title="Your password, authenticator app and sessions"><span>Account security</span></button>`:''}</div></div>`;
     $('#hhName').textContent={team:'User accounts',diary:'Reviews due across the firm',tasks:'Tasks across the firm',firmSettings:'Firm settings',account:'Account security'}[state.VIEW]||'Choose a household to open';return}
   const O=state.E.onboarding();const bad=state.E.checks().filter(x=>x.lvl==='bad').length;
@@ -46,4 +47,4 @@ export function renderNav(){
   $('#hhName').textContent=(state.S.household.name||'Unnamed household')+(state.S.household.reference?' · '+state.S.household.reference:'')+' · '+O.stage;
 }
 export const NAV_OPEN=new Set();
-export const FIRM_VIEWS=new Set(['clients','team','diary','tasks','firmSettings','account']);
+export const FIRM_VIEWS=new Set(['clients','team','diary','tasks','firmSettings','account','records']);

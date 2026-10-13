@@ -13,6 +13,9 @@
                                   the field rules in validate.js; the same on save
      get(ctx, id)                 the record, or null
      audit(ctx, id)               audit entries newest first (at most 5000), or null if no household
+                                  list, get and audit each add an access-log entry (who read what, or
+                                  tried to: not_found) before they return; a log that cannot be
+                                  written fails the call, so nothing is read unlogged
      save(ctx, id, { version, state })
                                   { version, changes }   saved (changes 0: nothing changed, no new version)
                                   { notFound: true }
@@ -49,12 +52,16 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
   // What is stored for submitted state: only known fields, and never a browser-side audit list
   const clean = state => { const s = HWP.normalise(state); delete s.audit; return s; };
   const forFirm = ctx => store.forFirm(ctx.firmId);
+  // Every read of client data is logged before the data is returned: if the log cannot be written
+  // the request fails and nothing is shown
+  const logRead = (ctx, action, householdId, outcome = 'ok', detail = '') => forFirm(ctx).logAccess({ actor: ctx.user, userId: ctx.userId || null, action, householdId, outcome, detail });
 
   return {
     async list(ctx) {
       const records = await forFirm(ctx).list({ onUnreadable: (id, e) => log(`unreadable household ${id}: ${e.message}`) });
       const list = records.map(rec => summarise(HWP, rec));
       list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+      await logRead(ctx, 'list', null, 'ok', `${list.length} household(s)`);
       return list;
     },
 
@@ -76,12 +83,18 @@ function createHouseholdService({ store, HWP, now = () => new Date().toISOString
       });
     },
 
-    get: (ctx, id) => forFirm(ctx).get(id),
+    async get(ctx, id) {
+      const rec = await forFirm(ctx).get(id);
+      await logRead(ctx, 'read', id, rec ? 'ok' : 'not_found');
+      return rec;
+    },
 
     async audit(ctx, id) {
       const scoped = forFirm(ctx);
-      if (!(await scoped.get(id))) return null;
-      return (await scoped.audit(id)).slice(0, AUDIT_LIMIT);
+      if (!(await scoped.get(id))) { await logRead(ctx, 'audit', id, 'not_found'); return null; }
+      const entries = (await scoped.audit(id)).slice(0, AUDIT_LIMIT);
+      await logRead(ctx, 'audit', id);
+      return entries;
     },
 
     async save(ctx, id, { version, state } = {}) {

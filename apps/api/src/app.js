@@ -23,6 +23,7 @@ const { createMeRoute } = require('./routes/me.js');
 const { createHouseholdRoutes } = require('./routes/households.js');
 const { createFirmRoutes } = require('./routes/firm.js');
 const { createPriceRoute } = require('./routes/prices.js');
+const { createRecordsRoutes } = require('./routes/records.js');
 const { ID_RE } = require('./repositories/ids.js');
 
 const CHALLENGE = { 'WWW-Authenticate': 'Basic realm="Household Wealth Profiler", charset="UTF-8"' };
@@ -36,7 +37,7 @@ function withinTime(promise, ms) {
   return Promise.race([promise, new Promise((_, no) => { timer = setTimeout(() => no(new Error('timed out')), ms); })]).finally(() => clearTimeout(timer));
 }
 
-function createApp({ config, households, firm, prices, authenticate, authRoutes = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers }) {
+function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
@@ -44,6 +45,7 @@ function createApp({ config, households, firm, prices, authenticate, authRoutes 
     createFirmRoutes({ firm, send, readBody }),
     createPriceRoute({ prices, send }),
     createHouseholdRoutes({ households, ID_RE, send, readBody }),
+    ...(records ? [createRecordsRoutes({ records, ID_RE, send, readBody })] : []),
   ];
 
   async function handle(req, res) {
