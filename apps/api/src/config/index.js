@@ -48,6 +48,10 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     if (env.ALLOW_PLAINTEXT === '1') throw new Error('NODE_ENV=production: ALLOW_PLAINTEXT is not accepted. Set DATA_KEY so client records are encrypted.');
     if (env.HSTS === '0') throw new Error('NODE_ENV=production: HSTS=0 is not accepted. The app must be served over HTTPS.');
     if (env.AUTH_USERS) throw new Error("NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in.");
+    // The app's own sign-in: a Secure cookie and links in emails need an https address; the links and warnings need a mail server over TLS
+    if (!/^https:\/\/[^/]+\/?$/i.test(env.PUBLIC_URL || '')) throw new Error('NODE_ENV=production: PUBLIC_URL must be the https address the app is served at (the session cookie is Secure and the sign-in links point there).');
+    if (!env.SMTP_URL) throw new Error('NODE_ENV=production: SMTP_URL is required. Password reset links, invitations and sign-in warnings are sent by email.');
+    if (/[?&]tls=off\b/i.test(env.SMTP_URL)) throw new Error('NODE_ENV=production: SMTP_URL with tls=off is not accepted. Mail must travel over TLS.');
   }
   // NEW_DATA_KEY: only for node server.js rotate-key
   let newKey = null;

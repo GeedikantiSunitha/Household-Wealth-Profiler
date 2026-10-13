@@ -67,13 +67,13 @@ test('start-up refusals keep their exact messages', () => {
     { message: 'No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).' });
   // With PostgreSQL the accounts live in the database: no AUTH_USERS needed, in development or production
   assert.equal(load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://x' }, root: root() }).users.size, 0);
-  assert.equal(load({ env: { NODE_ENV: 'production', DATA_KEY: KEY, DATABASE_URL: 'postgres://x' }, root: root() }).users.size, 0, 'a production server starts without Basic users');
+  assert.equal(load({ env: { NODE_ENV: 'production', DATA_KEY: KEY, DATABASE_URL: 'postgres://x', PUBLIC_URL: 'https://profiler.example.com', SMTP_URL: 'smtps://u:p@mail.example.com' }, root: root() }).users.size, 0, 'a production server starts without Basic users');
   assert.throws(() => load({ env: { AUTH_USERS: USER }, root: root() }),
     { message: 'DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.' });
 });
 
 test('NODE_ENV=production refuses files, plaintext, plain HTTP and Basic sign-in', () => {
-  const prod = extra => load({ env: { NODE_ENV: 'production', DATA_KEY: KEY, DATABASE_URL: 'postgres://x', ...extra }, root: root() });
+  const prod = extra => load({ env: { NODE_ENV: 'production', DATA_KEY: KEY, DATABASE_URL: 'postgres://x', PUBLIC_URL: 'https://profiler.example.com', SMTP_URL: 'smtps://u:p@mail.example.com', ...extra }, root: root() });
   assert.throws(() => prod({ DATABASE_URL: '' }),
     { message: 'NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.' });
   assert.throws(() => prod({ DATA_KEY: '', ALLOW_PLAINTEXT: '1' }),
@@ -84,6 +84,15 @@ test('NODE_ENV=production refuses files, plaintext, plain HTTP and Basic sign-in
     { message: "NODE_ENV=production: AUTH_USERS (HTTP Basic sign-in) is not accepted. It is for development only; production uses the app's own sign-in." });
   // Until the app's own sign-in exists (Phase 2) there is no way to sign in to a production server
   assert.equal(prod({}).users.size, 0, 'production starts without Basic users: accounts sign in through the app');
+  // the app's own sign-in needs an https address (Secure cookies, links in emails) and a way to send those emails
+  assert.throws(() => prod({ PUBLIC_URL: '' }), { message: 'NODE_ENV=production: PUBLIC_URL must be the https address the app is served at (the session cookie is Secure and the sign-in links point there).' });
+  assert.throws(() => prod({ PUBLIC_URL: 'http://profiler.example.com' }), { message: 'NODE_ENV=production: PUBLIC_URL must be the https address the app is served at (the session cookie is Secure and the sign-in links point there).' });
+  assert.throws(() => prod({ SMTP_URL: '' }), { message: 'NODE_ENV=production: SMTP_URL is required. Password reset links, invitations and sign-in warnings are sent by email.' });
+  assert.throws(() => prod({ SMTP_URL: 'smtp://mail.example.com?tls=off' }), { message: 'NODE_ENV=production: SMTP_URL with tls=off is not accepted. Mail must travel over TLS.' });
+  const p = prod({});
+  assert.equal(p.secureCookies, true); assert.equal(p.publicUrl, 'https://profiler.example.com');
+  // outside production none of this is required
+  assert.equal(load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://x' }, root: root() }).publicUrl, '');
   assert.equal(ok().production, false, 'NODE_ENV unset is not production');
   assert.equal(ok({ NODE_ENV: 'development', ALLOW_PLAINTEXT: '1', DATA_KEY: '' }).production, false);
 });
