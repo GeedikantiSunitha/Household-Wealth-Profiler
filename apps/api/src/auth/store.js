@@ -72,7 +72,8 @@ function createAuthStore({ pool, now = () => new Date() }) {
       let u = one(await c.query('select id from users where email = $1', [normaliseEmail(email)]));
       const created = !u;
       if (created) u = one(await c.query('insert into users (email, name) values ($1, $2) returning id', [normaliseEmail(email), name]));
-      await c.query('insert into memberships (user_id, firm_id, role) values ($1, $2, $3) on conflict (user_id, firm_id) do update set role = excluded.role, active = true', [u.id, firmId, role]);
+      // an existing membership is left as it is: roles change through RBAC (Phase 3), never through an invitation
+      await c.query('insert into memberships (user_id, firm_id, role) values ($1, $2, $3) on conflict (user_id, firm_id) do nothing', [u.id, firmId, role]);
       return { userId: u.id, created, firmName: firm.name };
     }),
     createAccessRequest: ({ name, email, firm = '', note = '', ip = '' }) => withAuth(async c => one(await c.query(

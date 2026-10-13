@@ -129,12 +129,32 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
     assert.equal(r.status, 200); assert.equal((await r.json()).next, 'enrol');
     assert.equal((await post('/api/auth/invite', { token, password: 'a passphrase for dana 2' })).status, 400, 'used once');
     assert.deepEqual((await events('dana@example.com')).filter(e => /invite/.test(e)), ['invite_sent:ok', 'invite:ok']);
-    // inviting an existing account again: a new link, a membership added, nothing else changed
+    // inviting an existing account again: a new link, nothing else changed (an existing membership keeps its role: roles are Phase 3)
     const again = await invites.create({ email: 'dana@example.com', name: 'ignored', firmId: DEFAULT_FIRM_ID, role: 'admin', invitedBy: 'operator' });
-    assert.equal(again.userId, userId); assert.equal(sent.length, 2);
-    assert.equal((await asRole('hwp_owner', c => c.query('select role from memberships where user_id = $1', [userId]))).rows[0].role, 'admin');
+    assert.equal(again.userId, userId); assert.equal(again.created, false); assert.equal(sent.length, 2);
+    assert.equal((await asRole('hwp_owner', c => c.query('select role from memberships where user_id = $1', [userId]))).rows[0].role, 'adviser', 'an invitation never changes a role');
+    assert.equal((await asRole('hwp_owner', c => c.query('select name from users where id = $1', [userId]))).rows[0].name, 'Dana Adviser', 'nor a name');
     clock.t += 25 * 3600e3;
     assert.equal((await post('/api/auth/invite', { token: linkIn(sent[1].text, 'invite'), password: 'a passphrase for dana 3' })).status, 400, 'expired after 24 hours');
+  });
+
+  test('no route a signed-in user can reach approves an access request or creates an account: the sign-in route table is exactly the known set, and every plausible path is 404', async () => {
+    const { createAuthRoutes: make } = require('../../apps/api/src/routes/auth.js');
+    const table = Object.keys(make({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), now }).routes).sort();
+    assert.deepEqual(table, ['GET /api/auth/firms', 'GET /api/auth/state', 'POST /api/auth/enrol', 'POST /api/auth/enrol/confirm', 'POST /api/auth/firm', 'POST /api/auth/forgot', 'POST /api/auth/invite', 'POST /api/auth/password',
+      'POST /api/auth/recovery', 'POST /api/auth/request-access', 'POST /api/auth/reset', 'POST /api/auth/sign-in', 'POST /api/auth/sign-out', 'POST /api/auth/sign-out-all', 'POST /api/auth/totp'],
+      'adding a route is a deliberate change to this list');
+    const s = await sessions.issue({ userId: sam, firmId: DEFAULT_FIRM_ID, stage: 'full' });
+    const opts = { cookie: s.cookie.split(';')[0], csrf: s.csrf };
+    const before = (await asRole('hwp_owner', c => c.query('select count(*)::int n from users'))).rows[0].n;
+    for (const [m, p] of [['POST', '/api/auth/approve'], ['POST', '/api/auth/access-requests'], ['POST', '/api/auth/create-user'], ['POST', '/api/auth/invite-user'], ['POST', '/api/auth/users'], ['POST', '/api/users'], ['POST', '/api/access-requests'], ['PUT', '/api/access-requests/1'], ['POST', '/api/members'], ['POST', '/api/invites'], ['GET', '/api/auth/access-requests'], ['GET', '/api/users']]) {
+      const r = await fetch(base + p, { method: m, headers: { ...J, 'X-Client-IP': '10.0.0.1', Cookie: opts.cookie, 'X-CSRF-Token': opts.csrf }, body: m === 'GET' ? undefined : JSON.stringify({ email: 'x@example.com', name: 'X', firmId: DEFAULT_FIRM_ID, role: 'admin', id: 1, status: 'approved' }) });
+      assert.equal(r.status, 404, `${m} ${p}`);
+    }
+    // the invitation route only redeems a link that the operator's tooling issued; a signed-in user cannot mint one
+    assert.equal((await post('/api/auth/invite', { token: 'x'.repeat(43), password: 'a passphrase for nobody 1' }, opts)).status, 400);
+    assert.equal((await asRole('hwp_owner', c => c.query('select count(*)::int n from users'))).rows[0].n, before, 'no account was created');
+    assert.equal((await asRole('hwp_owner', c => c.query(`select count(*)::int n from access_requests where status <> 'pending'`))).rows[0].n, 0, 'no request was decided');
   });
 
   test('the sign-in state for a half-finished session: what the second step needs after a reload', async () => {

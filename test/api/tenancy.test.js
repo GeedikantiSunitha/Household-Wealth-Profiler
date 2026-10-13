@@ -195,6 +195,28 @@ test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to
     } finally { server.close(); }
   });
 
+  test('after 0011 the app role can add an account and a membership inside sign-in, but cannot change or delete accounts or memberships, and still reads nothing across firms', async () => {
+    await asRole('hwp_app', async c => {
+      await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)");
+      const uid = (await c.query(`insert into users (email, name) values ('invited@example.com', 'Invited') returning id`)).rows[0].id;
+      await c.query(`insert into memberships (user_id, firm_id, role) values ($1, $2, 'adviser')`, [uid, B]);
+      await c.query('commit');
+      // sign-in context on, and the firm set to A: B's client data stays invisible, and A's is visible as usual
+      await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)"); await c.query("select set_config('app.firm_id', $1, true)", [A]);
+      assert.equal((await c.query('select count(*)::int n from households where firm_id = $1', [B])).rows[0].n, 0, "B's households");
+      assert.equal((await c.query('select count(*)::int n from firm_records where firm_id = $1', [B])).rows[0].n, 0, "B's firm settings");
+      assert.equal((await c.query('select count(*)::int n from firms')).rows[0].n, 2, 'firm names are readable inside sign-in (the firm picker); nothing else of a firm');
+      await c.query('commit');
+      for (const [sql, what] of [["update users set email = 'x@example.com'", 'an email'], ["update users set name = 'x'", 'a name'], ['update users set active = false', 'deactivation'],
+        ["update memberships set role = 'admin'", 'a role'], ['update memberships set active = false', 'a membership'], ['delete from users', 'deleting accounts'], ['delete from memberships', 'deleting memberships'], ['delete from sessions', 'deleting sessions'], ['delete from auth_events', 'deleting events']]) {
+        await c.query('begin'); await c.query("select set_config('app.auth', 'on', true)");
+        await assert.rejects(c.query(sql), /permission denied/, what + ' is not the app role\'s, even inside sign-in');
+        await c.query('rollback');
+      }
+    });
+    assert.equal((await asRole('hwp_owner', c => c.query(`select role from memberships m join users u on u.id = m.user_id where u.email = 'invited@example.com'`))).rows[0].role, 'adviser');
+  });
+
   test("firm B reusing firm A's key: no replay, no sign the key was used, and B's own repeat rule applies to B's record only", async () => {
     const sa = store.forFirm(A), sb = store.forFirm(B);
     const ia = { user: 'sam', key: 'key-shared-2', request: 'request of A' };

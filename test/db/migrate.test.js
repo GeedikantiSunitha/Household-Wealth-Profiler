@@ -160,7 +160,10 @@ test('0011: within sign-in the app role can make an account with a membership an
     assert.equal(r[6].rows[0].n, 1);
     await assert.rejects(pg.query(`update users set email = 'x@example.com'`), /permission denied/);
     await assert.rejects(pg.query(`update users set active = false`), /permission denied/, 'deactivation is not the app role\'s (Phase 3)');
-    await assert.rejects(pg.query(`delete from access_requests`), /permission denied/);
+    await assert.rejects(pg.query(`update users set name = 'x'`), /permission denied/);
+    await assert.rejects(pg.query(`update memberships set role = 'admin'`), /permission denied/, 'roles are not the app role\'s (Phase 3)');
+    await assert.rejects(pg.query(`update memberships set active = false`), /permission denied/);
+    for (const t of ['users', 'memberships', 'access_requests', 'sessions', 'recovery_codes', 'one_time_tokens']) await assert.rejects(pg.query(`delete from ${t}`), /permission denied/, 'delete ' + t);
     await pg.exec('reset role');
     assert.equal((await db.query(`select status from access_requests`))[0].status, 'approved');
   } finally { await pg.close(); }
