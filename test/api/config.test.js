@@ -39,6 +39,13 @@ test('settings from the environment', () => {
   assert.equal(c.databasePoolMax, 3);
   assert.equal(c.clientIpHeader, 'fly-client-ip');
   assert.equal(c.hsts, false);
+  assert.equal(c.sessionIdleMinutes, 30); assert.equal(c.sessionAbsoluteHours, 12); assert.equal(c.publicUrl, ''); assert.equal(c.secureCookies, false);
+  const s = ok({ SESSION_IDLE_MINUTES: '15', SESSION_ABSOLUTE_HOURS: '8', PUBLIC_URL: 'https://profiler.example.com/' });
+  assert.equal(s.sessionIdleMinutes, 15); assert.equal(s.sessionAbsoluteHours, 8); assert.equal(s.publicUrl, 'https://profiler.example.com'); assert.equal(s.secureCookies, true);
+  assert.equal(ok({ PUBLIC_URL: 'http://localhost:8080' }).secureCookies, false);
+  assert.throws(() => ok({ SESSION_IDLE_MINUTES: '0' }), /SESSION_IDLE_MINUTES must be a positive number/);
+  assert.throws(() => ok({ SESSION_ABSOLUTE_HOURS: 'soon' }), /SESSION_ABSOLUTE_HOURS must be a positive number/);
+  assert.throws(() => ok({ PUBLIC_URL: 'profiler.example.com' }), /PUBLIC_URL must be the address/);
 });
 
 test('AUTH_USERS: entries split on ";", incomplete ones ignored, hash kept as bytes', () => {

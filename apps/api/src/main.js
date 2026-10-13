@@ -23,6 +23,8 @@ const { createHouseholdService } = require('./services/households.js');
 const { createFirmService } = require('./services/firm.js');
 const { createPriceService } = require('./services/prices.js');
 const { createAuth } = require('./auth');
+const { createAuthStore } = require('./auth/store.js');
+const { createSessions, sessionSecretFrom } = require('./auth/sessions.js');
 const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
@@ -83,7 +85,10 @@ function main([cmd, ...args] = []) {
   const households = createHouseholdService({ store, HWP, production: config.production });
   const firm = createFirmService({ store, HWP });
   const prices = createPriceService({ key: config.alphavantageKey });
-  const { authenticate } = createAuth(config);
+  // The app's own sign-in needs PostgreSQL (sessions, accounts); with files, Basic sign-in is the only way in
+  const authStore = store.pool ? createAuthStore({ pool: store.pool }) : null;
+  const sessions = authStore ? createSessions({ store: authStore, secret: sessionSecretFrom(config.key), idleMs: config.sessionIdleMinutes * 60e3, absoluteMs: config.sessionAbsoluteHours * 3600e3, secure: config.secureCookies }) : null;
+  const { authenticate } = createAuth(config, { authStore, sessions });
   const { server } = createApp({ config, households, firm, prices, authenticate, ready: () => store.ready() });
 
   if (cmd === 'import-files') {

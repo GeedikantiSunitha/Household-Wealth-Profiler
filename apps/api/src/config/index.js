@@ -61,6 +61,12 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     if (!same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
   }
   const users = parseUsers(env.AUTH_USERS);
+  // Sessions (the app's own sign-in): idle and absolute limits; cookies are Secure with the __Host-
+  // prefix in production or whenever the app is served over HTTPS (PUBLIC_URL)
+  const minutes = (name, dflt) => { const v = env[name] === undefined || env[name] === '' ? dflt : +env[name]; if (!(v > 0)) throw new Error(`${name} must be a positive number`); return v; };
+  const sessionIdleMinutes = minutes('SESSION_IDLE_MINUTES', 30), sessionAbsoluteHours = minutes('SESSION_ABSOLUTE_HOURS', 12);
+  const publicUrl = (env.PUBLIC_URL || '').replace(/\/+$/, '');
+  if (publicUrl && !/^https?:\/\/[^/]+$/i.test(publicUrl)) throw new Error('PUBLIC_URL must be the address the app is served at, e.g. https://profiler.example.com');
   // The data commands run without sign-in users
   if (!users.size && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'create-user', 'set-password'].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD).');
   if (!key && env.ALLOW_PLAINTEXT !== '1') throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
@@ -85,6 +91,10 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     key,
     newKey,
     hsts: env.HSTS !== '0',
+    sessionIdleMinutes,
+    sessionAbsoluteHours,
+    publicUrl,
+    secureCookies: production || /^https:/i.test(publicUrl),
   };
 }
 

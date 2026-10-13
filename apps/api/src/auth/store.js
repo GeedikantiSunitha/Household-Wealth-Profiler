@@ -37,6 +37,25 @@ function createAuthStore({ pool, now = () => new Date() }) {
     event: ({ userId = null, email = '', event, outcome = '', ip = '', userAgent = '', detail = '' }) => withAuth(c =>
       c.query('insert into auth_events (user_id, email, event, outcome, ip, user_agent, detail) values ($1, $2, $3, $4, $5, $6, $7)', [userId, normaliseEmail(email), event, outcome, ip, String(userAgent).slice(0, 300), detail])),
     events: userId => withAuth(async c => (await c.query('select at, event, outcome, ip, detail from auth_events where user_id = $1 order by id', [userId])).rows),
+
+    // Sessions (auth/sessions.js decides the rules; this is only the rows)
+    createSession: ({ idHash, userId, firmId = null, stage, expiresAt, ip = '', userAgent = '', at }) => withAuth(async c => one(await c.query(
+      'insert into sessions (id_hash, user_id, firm_id, stage, created_at, last_seen_at, expires_at, ip, user_agent) values ($1, $2, $3, $4, $5, $5, $6, $7, $8) returning *',
+      [idHash, userId, firmId, stage, at || now(), expiresAt, ip, userAgent]))),
+    findSession: idHash => withAuth(async c => one(await c.query('select * from sessions where id_hash = $1', [idHash]))),
+    touchSession: (idHash, at) => withAuth(c => c.query('update sessions set last_seen_at = $2 where id_hash = $1', [idHash, at || now()])),
+    revokeSession: (idHash, at) => withAuth(c => c.query('update sessions set revoked_at = $2 where id_hash = $1 and revoked_at is null', [idHash, at || now()])),
+    // A new id for the same sign-in: the old row is ended and the new one keeps the absolute limit, address and agent
+    rotateSession: (oldHash, { idHash, stage, firmId, at }) => withAuth(async c => {
+      const old = one(await c.query('update sessions set revoked_at = $2 where id_hash = $1 and revoked_at is null returning *', [oldHash, at || now()]));
+      if (!old) throw Object.assign(new Error('Session has ended'), { status: 401, code: 'sign_in_required' });
+      return one(await c.query(
+        'insert into sessions (id_hash, user_id, firm_id, stage, created_at, last_seen_at, expires_at, ip, user_agent) values ($1, $2, $3, $4, $5, $5, $6, $7, $8) returning *',
+        [idHash, old.user_id, firmId === undefined ? old.firm_id : firmId, stage || old.stage, at || now(), old.expires_at, old.ip, old.user_agent]));
+    }),
+    revokeAllSessions: (userId, { except = null, at } = {}) => withAuth(async c =>
+      (await c.query('update sessions set revoked_at = $2 where user_id = $1 and revoked_at is null and ($3::text is null or id_hash <> $3)', [userId, at || now(), except])).rowCount),
+    activeSessions: userId => withAuth(async c => (await c.query('select id_hash, firm_id, stage, created_at, last_seen_at, expires_at, ip, user_agent from sessions where user_id = $1 and revoked_at is null and expires_at > $2 order by last_seen_at desc', [userId, now()])).rows),
   };
 }
 
