@@ -128,6 +128,9 @@ node server.js gen-key
 
 Put the user lines in `AUTH_USERS`, separated by `;`, and the key in `DATA_KEY`
 (see `.env.example`). Keep both in your host's secrets store, not in git.
+`AUTH_USERS` (HTTP Basic sign-in) is for development and for the file store only: a production
+server refuses it and people sign in through the app's own sign-in, which needs PostgreSQL
+(see Signing in, under step 4).
 **If you lose `DATA_KEY`, the client files cannot be decrypted.** Back it up separately
 from the data.
 
@@ -152,8 +155,10 @@ with EFS, Fly.io, Render.
 
 ### 3. Put HTTPS in front
 
-Sign-in uses HTTP Basic authentication, so the app **must** be served over HTTPS.
-The simplest option on a VM is Caddy, which gets certificates automatically:
+The app **must** be served over HTTPS: the session cookie is Secure (the `__Host-` cookie a
+browser only accepts over HTTPS), and the links in sign-in emails point at `PUBLIC_URL`, which in
+production must be the `https://` address. The simplest option on a VM is Caddy, which gets
+certificates automatically:
 
 ```
 profiler.yourfirm.co.uk {
@@ -235,6 +240,51 @@ that was filled under older rules, list what would be refused, without changing 
 node server.js check-records            # every firm (as the owner on PostgreSQL); exit 2 when anything is flagged
 node server.js check-records FIRM_ID    # one firm
 ```
+
+**Signing in.** With PostgreSQL, people sign in through the app itself: email and password, then a
+code from an authenticator app (two-step verification is required for everyone; there is no way to
+turn it off). Nothing is handed to an outside sign-in provider: accounts, sessions and the sign-in
+event log live in this database, and the only outside call is the breached-password check, which
+sends the first five characters of the password's SHA-1 hash and nothing else.
+
+| | How it works |
+|---|---|
+| Passwords | 12 to 200 characters, any characters; one that has appeared in a known data breach is refused. Stored as scrypt hashes (OWASP parameters) |
+| Two-step verification | Set up at the first sign-in (QR code or key), confirmed with a code; ten single-use recovery codes are shown once. A code is never accepted twice. Signing in with a recovery code makes the person set up a new authenticator, ends their other sessions and emails them |
+| Failed sign-ins | Per account: no delay for the first two failures, then 1, 2, 4 ... seconds, up to a minute; at the fifth failure in a row the person is warned by email, once. Per address: 20 attempts in 15 minutes. An unknown email takes as long to refuse as a wrong password |
+| Sessions | A cookie, ended after `SESSION_IDLE_MINUTES` without use (30) and in any case after `SESSION_ABSOLUTE_HOURS` (12); a new session id at each step of signing in. Every change is sent with a token bound to the session (CSRF). Changing a password or setting up a new authenticator ends the person's other sessions; Account security has "Sign out everywhere" |
+| Forgotten password | A reset link by email, valid 30 minutes and once. The reply is the same whether or not the address has an account |
+| Invitations | A link by email, valid 24 hours and once; the person chooses a password and sets up the authenticator |
+| Request access | The sign-in page has a form (at most 3 from one address an hour); the request is stored and `OPERATOR_EMAIL` is told. Nobody gets access until the operator approves it |
+
+What production needs (the server refuses to start without them, see `.env.example`):
+
+```ini
+NODE_ENV=production
+PUBLIC_URL=https://profiler.yourfirm.co.uk             # the https address the app is served at
+SMTP_URL=smtps://USER:PASSWORD@smtp.example.com:465    # or smtp://...:587 with STARTTLS; never tls=off
+SMTP_FROM=Household Wealth Profiler <no-reply@yourfirm.co.uk>
+OPERATOR_EMAIL=operator@yourfirm.co.uk                 # receives access requests
+```
+
+Outside production, without `SMTP_URL`, every email (with its link) is written to the server log
+instead, so a developer can follow it.
+
+**Access requests and lost authenticators** (the operator, from the command line; each decision
+names who made it, `--by`, and is recorded in the request and the sign-in event log):
+
+```sh
+node server.js list-requests                                   # pending requests: id, name, email, firm, note
+node server.js approve-request REQUEST_ID FIRM_ID [ROLE] --by "Your Name"   # makes the account (or adds the firm to an existing one) and emails the invitation
+node server.js reject-request REQUEST_ID --by "Your Name"      # declined; nothing is made
+node server.js reset-mfa dana@example.com --by "Your Name"     # lost both the authenticator and the recovery codes
+```
+
+`reset-mfa` is for someone who has lost both the authenticator app and the recovery codes: check who
+they are first, outside the app (for example a call to a number already on file, never one given in
+the request). It revokes every recovery code, ends every session, tells them by email, and they set up
+a new authenticator at their next sign-in; the password stays. These four commands run with the
+server's own settings (`DATABASE_URL`, `DATA_KEY`, and `SMTP_URL` to send the emails).
 
 Sign-in accounts are made by the platform operator (below) for a firm's first administrator, and
 after that by the firm's own administrators from the **User accounts** screen. The password is read
@@ -427,7 +477,7 @@ single-file demo build, opened from disk, fetches it from SheetJS's own CDN.
 
 | Area | How |
 |---|---|
-| Sign-in | Named users, passwords hashed with scrypt, 10 failed attempts lock the address out for 15 minutes. Behind a proxy, set `CLIENT_IP_HEADER` to the header carrying the real client address (Fly.io: `fly-client-ip`) |
+| Sign-in | The app's own sign-in with PostgreSQL: email and password (scrypt, breached passwords refused), a required authenticator code, recovery codes, progressive delays per account and a limit per address, sessions with idle and absolute limits, reset and invitation links by email (see Signing in). HTTP Basic (`AUTH_USERS`) is for development only: 10 failed attempts lock the address out for 15 minutes. Behind a proxy, set `CLIENT_IP_HEADER` to the header carrying the real client address (Fly.io: `fly-client-ip`) |
 | Storage | One folder per household under `DATA_DIR/households/<id>/`, or PostgreSQL when `DATABASE_URL` is set |
 | Encryption at rest | AES-256-GCM on every file or database row, including the audit log |
 | Versions | Every save is kept in `versions/` (or `household_versions`). Two people editing at once cannot overwrite each other: the second save is refused and they reload |
