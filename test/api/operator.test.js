@@ -225,7 +225,9 @@ test.describe('platform operator', { skip: !BASE_URL && 'set TEST_DATABASE_URL t
   });
 
   test('the commands from the command line: no operator URL falls back to the owner with a note in development, and is refused in production', async () => {
-    const base = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot || '' }; // the operator's machine: no DATA_KEY, no app password
+    // the operator's machine: no DATA_KEY, no app password. Each setting is set to '' rather than left out, because the
+    // settings loader fills a missing variable from the project's .env, and a developer's .env names a different database
+    const base = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot || '', DATABASE_URL: '', DATABASE_OWNER_URL: '', DATABASE_OPERATOR_URL: '', DATA_KEY: '', AUTH_USERS: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '' };
     const cli = (args, env) => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...base, ...env }, encoding: 'utf8' });
     let r = cli(['firm-list'], { DATABASE_OPERATOR_URL: OP_URL() });
     assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Alder Wealth/); assert.doesNotMatch(r.stderr, /Note:/);
