@@ -418,6 +418,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
           await click('[data-rec="request"]');
           await until(`/Your request: someone else must approve/.test(document.querySelector('#main').textContent)`, 'the waiting request, with no approve button for the requester', 15000);
           if (await js(`!!document.querySelector('[data-rec="ask"], [data-rec="approve"]')`)) throw new Error('the requester is offered approval');
+          if (await js(`/\\(purged\\)/.test(document.querySelector('#main .panel').textContent)`)) throw new Error('a waiting request names its household "(purged)"');
           await shot('records-requested');
           await click('[data-rec="log"]');
           await until(`/Hide access log/.test(document.querySelector('#main').textContent)`, 'the access log', 15000);

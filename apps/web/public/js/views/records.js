@@ -21,7 +21,8 @@ export async function renderRecords() {
   const me = Store.email || Store.user;
   const pending = d.requests.filter(q => q.status === 'pending'), decided = d.requests.filter(q => q.status !== 'pending');
   const waiting = new Set(pending.map(q => q.householdId));
-  const reqRow = q => `<tr><td><b>${esc(q.householdName || '(purged)')}</b><br><span class="muted mono">${esc(q.householdId)}</span></td><td>${esc(fmtDate(q.retentionUntil))}</td><td>${esc(q.reason)}</td><td>${esc(q.requestedBy)}<br><span class="muted">${esc(fmtTs(q.requestedAt))}</span></td>
+  // A waiting request's household still exists: an empty name is "Unnamed", never "(purged)"
+  const reqRow = q => `<tr><td><b>${esc(q.status === 'purged' ? '(purged)' : q.householdName || 'Unnamed')}</b><br><span class="muted mono">${esc(q.householdId)}</span></td><td>${esc(fmtDate(q.retentionUntil))}</td><td>${esc(q.reason)}</td><td>${esc(q.requestedBy)}<br><span class="muted">${esc(fmtTs(q.requestedAt))}</span></td>
     <td><div class="addrow">${q.requestedBy === me ? '<span class="muted">Your request: someone else must approve.</span>' : UI.confirm === q.id ? `<button class="btn primary" type="button" data-rec="approve" data-id="${esc(q.id)}">Confirm: purge for good</button>` : `<button class="btn" type="button" data-rec="ask" data-id="${esc(q.id)}">Approve purge</button>`}
       <button class="btn ghost" type="button" data-rec="reject" data-id="${esc(q.id)}">${q.requestedBy === me ? 'Withdraw' : 'Reject'}</button></div></td></tr>`;
   const hhRow = h => `<tr><td><b>${esc(h.name || 'Unnamed')}</b><br><span class="muted">${esc(h.reference || '')}</span></td><td>${esc(h.stage)}</td>
