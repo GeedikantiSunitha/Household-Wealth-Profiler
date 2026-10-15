@@ -4,7 +4,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { codeAt, verifyCode, generateSecret, otpauthUri, base32Decode, base32Encode, newRecoveryCodes, normaliseRecoveryCode, STEP_SECONDS, DIGITS } = require('../../apps/api/src/auth/totp.js');
+const { codeAt, verifyCode, generateSecret, otpauthUri, base32Decode, base32Encode, newRecoveryCodes, normaliseRecoveryCode, STEP_SECONDS, DIGITS } = require('../../apps/api/src/services/auth/totp.js');
 
 const RFC_SECRET = Buffer.from('12345678901234567890', 'ascii');
 // RFC 6238 appendix B (SHA-1), the last 6 of the 8 digits shown there

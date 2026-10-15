@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createSessions, sessionSecretFrom, COOKIE_SECURE, COOKIE_PLAIN, TOUCH_MS } = require('../../apps/api/src/auth/sessions.js');
+const { createSessions, sessionSecretFrom, COOKIE_SECURE, COOKIE_PLAIN, TOUCH_MS } = require('../../apps/api/src/services/auth/sessions.js');
 
 // The slice of the sign-in store that sessions use, in memory
 function fakeStore() {

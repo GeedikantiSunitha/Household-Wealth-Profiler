@@ -1,4 +1,4 @@
-// apps/web/public/js/io/import-check.js: every unrecognised dropdown value in an imported file is
+// apps/web/public/js/hooks/io/import-check.js: every unrecognised dropdown value in an imported file is
 // listed before anything is applied, so the file can be fixed in one pass. (A browser module with
 // no browser dependencies, so it is tested here as it is.)
 'use strict';
@@ -8,7 +8,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const H = require('../../packages/core/core.js');
 
-const mod = () => import(pathToFileURL(path.join(__dirname, '..', '..', 'apps', 'web', 'public', 'js', 'io', 'import-check.js')).href);
+const mod = () => import(pathToFileURL(path.join(__dirname, '..', '..', 'apps', 'web', 'public', 'js', 'hooks', 'io', 'import-check.js')).href);
 
 test('a clean file lists nothing: blank, the sample, and option values that look like numbers', async () => {
   const { unknownDropdowns } = await mod();

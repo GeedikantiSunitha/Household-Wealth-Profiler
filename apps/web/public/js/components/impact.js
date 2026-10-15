@@ -1,7 +1,7 @@
 /* Live effect of a section: headline figures compared with when the section was opened, updated as the adviser types. RECORD_ONLY sections (records, not inputs to the figures) show no panel. */
 import { $, esc } from '../lib/dom.js';
 import { gbpK, pct } from '../lib/format.js';
-import { state } from '../state.js';
+import { state } from '../hooks/state.js';
 
 export const RECORD_ONLY=new Set(['contacts','actions','complaints','mandate','models','loas','rtq']);
 export const sgn=n=>n>0?'+':'−';

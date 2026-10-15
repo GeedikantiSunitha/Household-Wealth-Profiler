@@ -88,3 +88,51 @@ unchanged from the baseline. Where the result differs from the plan above:
   because his `main` stores them in files only.
 - **The unit tests run on a fixed clock** (2026-10-10). One of them had hard-coded dates and began
   failing on 2026-10-12; the fix touched only the tests.
+
+## Update 2026-10-15: the middleware layer
+
+The API's security checks, until now written inline in `app.js`, are a layer of their own,
+`apps/api/src/middleware/`, with one file per check and a fixed order that `app.js` runs and
+`test/api/app.test.js` and `test/api/middleware.test.js` pin: parse-url, health, api-only,
+authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf. The
+per-route guards (`guards.js`: the stage a sign-in route needs, the per-address rate limit, the
+role an action needs) sit beside them; the sign-in routes run theirs from their route table. The
+HTTP Basic provider (development only) and the rate limiter moved into the layer unchanged.
+Behaviour, replies and the route table are the same; the move is the whole change. Field
+validation stays in `services/validate.js`, applied by the services, so the commands and the
+importer are held to the same rules as the API. With `SERVE_WEB=0` the API answers `/api/`
+only and the screens are served by a web tier on the same domain, the first step towards
+running the front end, the API and the database as separate services.
+
+## Update 2026-10-15: routes, controllers, services, repositories
+
+The route files are now tables only (`routes/table.js` runs them: method and path to a
+controller, the route's parameters and id checks, its guards in order, 405 where the API has
+always said so). The handler bodies moved, unchanged, into `apps/api/src/controllers/`, one file
+per route file, including the sign-in handlers from `routes/auth.js`, whose route table stays
+where it was. The direction is now the rule and `test/ci/layers.test.js` enforces it on every
+`require()`: app.js to middleware and routes, routes to controllers, controllers to services,
+services to repositories, repositories to the database; no layer requires one above it, and a
+route never skips the controller to call a service.
+
+## Update 2026-10-15: the auth folder dissolved into the layers
+
+`apps/api/src/auth/` held both decisions and storage. Its files moved, unchanged, to where the
+layers say: `services/auth/` (password, sessions, totp, invites, notify, mail) and
+`repositories/auth-store.js` (accounts, sessions and the auth event log in PostgreSQL). The
+progressive-delay schedule after failed sign-ins now lives with the store that applies it, and
+the password service re-exports it, so no repository requires a service. The layering test
+covers the result.
+
+## Update 2026-10-15: the front end in layers
+
+`apps/web/public/js` is now pages, components, hooks and services, in that direction: the screens
+and the sign-in screens are `pages/`; the side rail and top bar joined `components/`; the state,
+the store, the people and firm look-ups and the Excel and download helpers are `hooks/`, what
+pages share; `services/api/` is the only code that calls the server (`client.js` for the API,
+`auth.js` for the sign-in). Three small edits made the rule true: the store's three network calls
+went to `client.js` and its decisions stayed in the store; main.js hands the sign-in pages to the
+store instead of the store loading a page; and the balance sheet groups became content, shared
+by the page and the Excel export. `test/ci/web-layers.test.js` enforces the direction and the
+fetch rule. Every screen is unchanged. (The screen check's own requires of the moved sign-in
+services, missed by the previous commit, are corrected here.)

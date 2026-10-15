@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { createApp } = require('../../apps/api/src/app.js');
-const { checkWrite } = require('../../apps/api/src/http/guards.js');
+const { checkWrite } = require('../../apps/api/src/middleware');
 
 const ROOT = path.join(__dirname, '..', '..');
 const ID = '00000000-0000-4000-8000-000000000001';
@@ -155,4 +155,24 @@ test('a write with Origin "null" or an unparsable Origin is refused as cross-sit
     assert.equal(r.status, 403, origin); assert.deepEqual(await r.json(), { error: 'Cross-site request refused', code: 'cross_site' });
   }
   assert.deepEqual(calls, []);
+});
+
+test('API only (serveWeb false): the back end answers /api/, /healthz and /readyz and nothing else; the screens come from the web tier', async () => {
+  const { server: api } = createApp({ config: { hsts: true, key: Buffer.alloc(32), root: ROOT }, households, authenticate, ready, serveWeb: false });
+  await new Promise(r => api.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${api.address().port}`;
+  try {
+    for (const p of ['/', '/index.html', '/js/main.js', '/core.js', '/styles.css']) {
+      const r = await fetch(at + p, { headers: { Authorization: 'ok' } });
+      assert.equal(r.status, 404, p);
+      assert.deepEqual(await r.json(), { error: 'Not found', code: 'not_found' }, p);
+      assert.match(r.headers.get('content-type'), /application\/json/, p + ' is never a page');
+    }
+    assert.equal((await fetch(at + '/', { method: 'POST', headers: { Authorization: 'ok' } })).status, 404, 'no 405 either: there is nothing there');
+    assert.equal((await fetch(at + '/healthz')).status, 200);
+    assert.equal((await fetch(at + '/readyz')).status, 200);
+    const list = await fetch(at + '/api/households', { headers: { Authorization: 'ok' } });
+    assert.equal(list.status, 200); assert.deepEqual(await list.json(), [{ id: ID }]);
+    assert.equal((await fetch(at + '/api/households')).status, 401, 'the API still asks for sign-in');
+  } finally { api.close(); }
 });

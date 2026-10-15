@@ -1,7 +1,7 @@
 /* The banner above a screen: the sample-household notice and the current message (state.banner).
    state.banner.text is shown as text (escaped); state.banner.html is the app's own markup, and any
    server or file text put into it must go through esc() first. */
-import { state } from '../state.js';
+import { state } from '../hooks/state.js';
 import { esc } from '../lib/dom.js';
 
 export function bannerHTML(household=true){let h='';

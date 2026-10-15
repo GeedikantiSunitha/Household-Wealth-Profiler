@@ -128,46 +128,22 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     assert.equal(r.status, 1); assert.match(r.stderr, /Usage/);
   });
 
-  test('operator commands: list-requests, approve-request (account, membership, invitation, decision recorded), reject-request, reset-mfa; each names who decided', async () => {
+  test('operator commands: list-requests (the requests left from before registration replaced Request Access) and reset-mfa, which names who decided', async () => {
     const { spawnSync } = require('node:child_process');
     // the operator commands run as the app role within sign-in (migration 0011); no owner URL, no AUTH_USERS needed
     const run = (args, input = '') => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...ENV, AUTH_USERS: '', PUBLIC_URL: 'https://profiler.example.com' }, input, encoding: 'utf8' });
-    const JJ = { ...J, 'X-Client-IP': '198.51.100.' + Math.floor(Math.random() * 200) };
-    const ask = body => fetch(BASE + '/api/auth/request-access', { method: 'POST', headers: JJ, body: JSON.stringify(body) });
-    assert.equal((await ask({ name: 'New Adviser', email: 'New.Adviser@Example.com', firm: 'Alder Wealth', note: 'Joining in November' })).status, 200);
-    assert.equal((await ask({ name: 'Someone Else', email: 'else@example.com', firm: '' })).status, 200);
+    // the access requests left from before registration replaced Request Access are still listed, and nothing decides them
+    await db.query(`insert into access_requests (name, email, firm_name, note, ip) values ('New Adviser', 'new.adviser@example.com', 'Alder Wealth', 'Joining in November', '198.51.100.7'), ('Someone Else', 'else@example.com', '', '', '198.51.100.7')`);
     const ids = (await db.query(`select id, email from access_requests where status = 'pending' order by created_at`)).rows;
     assert.equal(ids.length, 2);
-
     let r = run(['list-requests']);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /2 pending request\(s\)/);
     assert.match(r.stdout, new RegExp(ids[0].id + '.*New Adviser.*new.adviser@example.com.*Alder Wealth.*Joining in November'));
     assert.match(r.stdout, new RegExp(ids[1].id + '.*Someone Else.*else@example.com'));
-
-    r = run(['approve-request', ids[0].id, 'f1a00000-0000-4000-8000-000000000001']);
-    assert.equal(r.status, 1); assert.match(r.stderr, /--by/, 'the decider must be named');
-    r = run(['approve-request', ids[0].id, 'f1a00000-0000-4000-8000-000000000001', '--by', 'Sunitha Gedikanti']);
-    assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /Approved: account created for new.adviser@example.com \(adviser in firm f1a00000-0000-4000-8000-000000000001\); invitation sent/);
-    assert.match(r.stderr, /EMAIL NOT SENT \(no SMTP_URL\)/, 'no SMTP here: the invitation goes to the log'); assert.match(r.stderr, /https:\/\/profiler\.example\.com\/#invite=[A-Za-z0-9_-]{43}/);
-    const req = (await db.query('select status, decided_by, decided_at, firm_id from access_requests where id = $1', [ids[0].id])).rows[0];
-    assert.equal(req.status, 'approved'); assert.equal(req.decided_by, 'Sunitha Gedikanti'); assert.ok(req.decided_at); assert.equal(req.firm_id, 'f1a00000-0000-4000-8000-000000000001');
-    const u = (await db.query(`select u.id, u.name, u.password_hash, m.role from users u join memberships m on m.user_id = u.id where u.email = 'new.adviser@example.com'`)).rows[0];
-    assert.equal(u.name, 'New Adviser'); assert.equal(u.role, 'adviser'); assert.equal(u.password_hash, null, 'the password comes through the invitation link');
-    assert.deepEqual((await db.query(`select event, outcome, detail from auth_events where email = 'new.adviser@example.com' order by id`)).rows.map(e => e.event + ':' + e.outcome),
-      ['access_request:stored', 'invite_sent:ok', 'access_request:approved']);
-    assert.match((await db.query(`select detail from auth_events where email = 'new.adviser@example.com' and event = 'access_request' and outcome = 'approved'`)).rows[0].detail, /by Sunitha Gedikanti/);
-    r = run(['approve-request', ids[0].id, 'f1a00000-0000-4000-8000-000000000001', '--by', 'Sunitha Gedikanti']);
-    assert.equal(r.status, 1); assert.match(r.stderr, /already decided \(approved/);
-
-    r = run(['reject-request', ids[1].id, '--by', 'Sunitha Gedikanti']);
-    assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Declined: else@example.com/);
-    assert.deepEqual((await db.query('select status, decided_by from access_requests where id = $1', [ids[1].id])).rows[0], { status: 'declined', decided_by: 'Sunitha Gedikanti' });
-    assert.equal((await db.query(`select count(*)::int n from users where email = 'else@example.com'`)).rows[0].n, 0, 'no account for a declined request');
-    assert.match(run(['list-requests']).stdout, /0 pending request\(s\)/);
-    r = run(['approve-request', '00000000-0000-4000-8000-00000000dead', 'f1a00000-0000-4000-8000-000000000001', '--by', 'x']);
-    assert.equal(r.status, 1); assert.match(r.stderr, /No request/);
+    // an account for reset-mfa, as the operator's create-user would make it
+    const u = (await db.query(`insert into users (email, name) values ('new.adviser@example.com', 'New Adviser') returning id`)).rows[0];
+    await db.query(`insert into memberships (user_id, firm_id, role) values ($1, 'f1a00000-0000-4000-8000-000000000001', 'adviser')`, [u.id]);
 
     // reset-mfa: the authenticator and recovery codes go, every session ends, the user is told, the decision is recorded
     const oldSealer = require('../../apps/api/src/crypto/seal.js').createSealer(Buffer.from(KEY, 'base64'));

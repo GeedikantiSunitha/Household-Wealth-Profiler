@@ -242,8 +242,11 @@ node server.js check-records FIRM_ID    # one firm
 ```
 
 **Signing in.** With PostgreSQL, people sign in through the app itself: email and password, then a
-code from an authenticator app (two-step verification is required for everyone; there is no way to
-turn it off). Nothing is handed to an outside sign-in provider: accounts, sessions and the sign-in
+code from an authenticator app (two-step verification is required for everyone unless the server is
+started with `TOTP_REQUIRED=0`, which is for development and early trials only, never with real
+client data). A new person registers on the sign-in page, confirms their email address through a
+link, and signs in; each registration creates a firm with the registrant as its administrator, who
+invites colleagues from the Team page. Nothing is handed to an outside sign-in provider: accounts, sessions and the sign-in
 event log live in this database, and the only outside call is the breached-password check, which
 sends the first five characters of the password's SHA-1 hash and nothing else.
 
@@ -255,7 +258,7 @@ sends the first five characters of the password's SHA-1 hash and nothing else.
 | Sessions | A cookie, ended after `SESSION_IDLE_MINUTES` without use (30) and in any case after `SESSION_ABSOLUTE_HOURS` (12); a new session id at each step of signing in. Every change is sent with a token bound to the session (CSRF). Changing a password or setting up a new authenticator ends the person's other sessions; Account security has "Sign out everywhere" |
 | Forgotten password | A reset link by email, valid 30 minutes and once. The reply is the same whether or not the address has an account |
 | Invitations | A link by email, valid 24 hours and once; the person chooses a password and sets up the authenticator |
-| Request access | The sign-in page has a form (at most 3 from one address an hour); the request is stored and `OPERATOR_EMAIL` is told. Nobody gets access until the operator approves it |
+| Registration | Name, email, firm and password (checked as everywhere); a firm of their own, with the registrant as its administrator; a verification link by email, valid 24 hours and once, before the first sign-in. The reply is the same whether or not the address already has an account (its holder is told by email). At most 3 from one address an hour |
 
 What production needs (the server refuses to start without them, see `.env.example`):
 
@@ -264,26 +267,23 @@ NODE_ENV=production
 PUBLIC_URL=https://profiler.yourfirm.co.uk             # the https address the app is served at
 SMTP_URL=smtps://USER:PASSWORD@smtp.example.com:465    # or smtp://...:587 with STARTTLS; never tls=off
 SMTP_FROM=Household Wealth Profiler <no-reply@yourfirm.co.uk>
-OPERATOR_EMAIL=operator@yourfirm.co.uk                 # receives access requests
 ```
 
 Outside production, without `SMTP_URL`, every email (with its link) is written to the server log
-instead, so a developer can follow it.
+instead, so a developer can follow it. `OPERATOR_EMAIL` is optional and no longer used by the sign-in.
 
-**Access requests and lost authenticators** (the operator, from the command line; each decision
-names who made it, `--by`, and is recorded in the request and the sign-in event log):
+**Lost authenticators** (the operator, from the command line; the decision names who made it,
+`--by`, and is recorded in the sign-in event log):
 
 ```sh
-node server.js list-requests                                   # pending requests: id, name, email, firm, note
-node server.js approve-request REQUEST_ID FIRM_ID [ROLE] --by "Your Name"   # makes the account (or adds the firm to an existing one) and emails the invitation
-node server.js reject-request REQUEST_ID --by "Your Name"      # declined; nothing is made
 node server.js reset-mfa dana@example.com --by "Your Name"     # lost both the authenticator and the recovery codes
+node server.js list-requests                                   # access requests left from before registration replaced Request Access
 ```
 
 `reset-mfa` is for someone who has lost both the authenticator app and the recovery codes: check who
 they are first, outside the app (for example a call to a number already on file, never one given in
 the request). It revokes every recovery code, ends every session, tells them by email, and they set up
-a new authenticator at their next sign-in; the password stays. These four commands run with the
+a new authenticator at their next sign-in; the password stays. These commands run with the
 server's own settings (`DATABASE_URL`, `DATA_KEY`, and `SMTP_URL` to send the emails).
 
 Sign-in accounts are made by the platform operator (below) for a firm's first administrator, and
@@ -554,8 +554,23 @@ income is included. The Supabase edition imports CSVs but does not yet fetch pri
 
 ```
 packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
-apps/api/src/       the self-hosted API: settings, sign-in, encryption, storage, versions, audit trail, routes
-apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js)
+apps/api/src/       the API, in layers that call downwards only:
+  middleware/         the security layer: ten global gates in a fixed order (parse-url, health, api-only,
+                      authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf),
+                      the per-route guards (stage, rate limit, role) and the Basic provider for development
+  routes/             tables: which method and path reaches which controller, with that route's guards
+  controllers/        one handler per route: read the input, call one service, send the reply
+  services/           the decisions: validation, permissions, sign-off, households, firm, members, records;
+                      services/auth/ is the app's own sign-in: passwords, sessions, authenticator codes, links, mail
+  repositories/       storage: PostgreSQL (row-level security, per-firm keys), the file store, idempotency,
+                      the sign-in store (accounts, sessions, the auth event log)
+  http/ db/ crypto/ config/ cli/   replies and files, the connection pool, encryption, settings, commands
+apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js), in layers:
+  js/pages/           one file per screen, the sign-in screens, and the page switch
+  js/components/      form fields, banners, the side rail, the top bar
+  js/hooks/           what pages share: the state, the store (autosave, conflicts), look-ups, Excel and downloads
+  js/services/api/    the only code that calls the server
+  js/lib/ js/content/ js/events/   helpers, text, and the shell that wires typing and buttons
 apps/web/public/cloud.js  sign-in and two-step verification for the Supabase edition
 server.js           starts the API (npm start) and runs its commands (hash-password, gen-key, import-files)
 db/                 PostgreSQL migrations and the migration runner for the self-hosted API

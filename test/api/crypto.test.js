@@ -58,7 +58,7 @@ test('envelope: a random firm key is wrapped by the master key and unwraps only 
   assert.notDeepEqual(newDataKey(), firmKey, 'random');
   const wrapped = wrapKey(KEY, firmKey);
   assert.match(wrapped, /^wk:v1:/);
-  assert.doesNotMatch(wrapped, new RegExp(firmKey.toString('base64').slice(0, 10)));
+  assert.ok(!wrapped.includes(firmKey.toString('base64').slice(0, 10)), 'the wrapped key does not show the firm key');
   assert.deepEqual(unwrapKey(KEY, wrapped), firmKey);
   assert.throws(() => unwrapKey(crypto.randomBytes(32), wrapped));
   assert.notEqual(wrapKey(KEY, firmKey), wrapped, 'a fresh IV each time');

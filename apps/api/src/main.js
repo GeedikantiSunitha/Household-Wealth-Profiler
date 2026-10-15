@@ -4,7 +4,7 @@
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
      4. a data command (import-files, migrate, index-references, rotate-key, check-records, create-user,
-        set-password, list-requests, approve-request, reject-request, reset-mfa, backup, restore-drill,
+        set-password, list-requests, reset-mfa, backup, restore-drill,
         subject-access-user), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
@@ -25,14 +25,14 @@ const { createFirmService } = require('./services/firm.js');
 const { createMemberService } = require('./services/members.js');
 const { createPriceService } = require('./services/prices.js');
 const { createRecordsService } = require('./services/records.js');
-const { createAuth } = require('./auth');
-const { createAuthStore } = require('./auth/store.js');
-const { createSessions, sessionSecretFrom } = require('./auth/sessions.js');
-const { createLimiter, AUTH_LIMIT } = require('./auth/limiter.js');
-const { dummyHashString } = require('./auth/password.js');
+const { createAuth } = require('./middleware/authenticate.js');
+const { createAuthStore } = require('./repositories/auth-store.js');
+const { createSessions, sessionSecretFrom } = require('./services/auth/sessions.js');
+const { createLimiter, AUTH_LIMIT } = require('./middleware/rate-limit.js');
+const { dummyHashString } = require('./services/auth/password.js');
 const { createAuthRoutes } = require('./routes/auth.js');
-const { createMailer } = require('./auth/mail.js');
-const { createNotify } = require('./auth/notify.js');
+const { createMailer } = require('./services/auth/mail.js');
+const { createNotify } = require('./services/auth/notify.js');
 const { createApp } = require('./app.js');
 const { hashPasswordCommand, genKeyCommand } = require('./cli');
 const { importFiles } = require('./cli/import-files.js');
@@ -43,7 +43,7 @@ const { backup } = require('./cli/backup.js');
 const { restoreDrill } = require('./cli/restore.js');
 const { subjectAccessUser } = require('./cli/subject-access-user.js');
 const { COMMANDS: OPERATOR } = require('./cli/operator.js');
-const { createInvites } = require('./auth/invites.js');
+const { createInvites } = require('./services/auth/invites.js');
 const platform = require('./cli/platform.js');
 
 const STOP_TIMEOUT_MS = 10e3;
@@ -134,7 +134,7 @@ function main([cmd, ...args] = []) {
   // The sign-in emails: links, warnings, access requests (to the log outside production when SMTP_URL is not set)
   const mailer = createMailer({ smtpUrl: config.smtpUrl, from: config.smtpFrom, production: config.production });
   const notify = createNotify({ mailer, publicUrl: config.publicUrl || `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`, operatorEmail: config.operatorEmail });
-  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler' }) : null;
+  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler', totpRequired: config.totpRequired }) : null;
   const members = authStore ? createMemberService({ authStore, notify }) : null;
   const { server } = createApp({ config, households, firm, prices, records, authenticate, authRoutes, members, ready: () => store.ready() });
 
