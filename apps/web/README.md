@@ -17,14 +17,18 @@ the Docker image and never reaches users).
 | --- | --- |
 | `public/` | `index.html`, `styles.css`, `config.js` (non-secret settings only), `cloud.js`, `vendor/` (SheetJS 0.20.3, pinned by hash in `scripts/vendor.js`) |
 | `public/js/main.js` | Start-up only: signs in or finds the server, then draws the first screen |
-| `public/js/state.js` | The open household, the current screen, open sections, the banner (shared by every screen) |
-| `public/js/api/store.js` | The only code that calls the backend: autosave, edit conflicts, the save status |
-| `public/js/content/` | Field help and "how this section is used" text |
-| `public/js/components/` | Form fields, banners, the live-effect panel |
-| `public/js/views/` | One file per screen |
-| `public/js/events/` | Typing in the form, every button and link, the top-bar buttons |
-| `public/js/lib/` | Page helpers, number and date formats, people in the household, firm settings look-ups (team and provider lists) |
-| `public/js/io/` | Excel import and export (SheetJS, loaded on demand), saving files to the device |
+| `public/js/pages/` | One file per screen, the sign-in screens (`sign-in.js`), and `render.js`, which draws the screen on show |
+| `public/js/components/` | Form fields, banners, the live-effect panel, the side rail, the top bar |
+| `public/js/hooks/` | What pages share: the state (`state.js`), the store (`store.js`: autosave, edit conflicts, the save status), people and firm look-ups, and `io/` (Excel import and export with SheetJS loaded on demand, saving files to the device) |
+| `public/js/services/api/` | The only code that calls the server: `client.js`, and `auth.js` for the sign-in |
+| `public/js/events/` | Typing in the form, every button and link, the top-bar buttons (the shell, with `main.js`) |
+| `public/js/lib/` | Page helpers, number and date formats |
+| `public/js/content/` | Field help, "how this section is used" text, the balance sheet groups |
+
+The layers run one direction: pages use components, hooks and services; components use hooks;
+hooks use services; services use nothing above them; `lib/` and `content/` sit below everything.
+`test/ci/web-layers.test.js` fails on an import that looks up, and on any `fetch` outside
+`services/api/`.
 
 ## Rules
 

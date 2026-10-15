@@ -1,13 +1,9 @@
-/* Operator commands for access requests and accounts (Phase 2, step 2.8). They run through the
-   sign-in store as the app role, inside the sign-in context that migration 0011 provides for
-   exactly this, so routine decisions need no owner credential (create-user and set-password remain
-   owner commands). Every decision names the person who made it (--by "Name", required) and is
-   written to the request and to the auth events.
-     node server.js list-requests                              the pending access requests
-     node server.js approve-request ID FIRM_ID [ROLE] --by "Name"
-                                  makes the account (or finds it) with a membership in the firm,
-                                  emails the invitation link, marks the request approved
-     node server.js reject-request ID --by "Name"             marks the request declined; nothing is made
+/* Operator commands for accounts (Phase 2, step 2.8). They run through the sign-in store as the
+   app role, inside the sign-in context that migration 0011 provides for exactly this, so routine
+   decisions need no owner credential (create-user and set-password remain owner commands). A
+   decision names the person who made it (--by "Name", required) and is written to the auth events.
+     node server.js list-requests                              the access requests still pending from before
+                                  registration replaced Request Access (nothing creates new ones)
      node server.js reset-mfa EMAIL --by "Name"               for someone who lost both the authenticator
                                   and the recovery codes: the authenticator no longer counts, every
                                   recovery code is revoked, every session ends, the user is told by
@@ -16,7 +12,7 @@
    Exit 0 done, 1 refused or failed. Nothing prints a secret or a link except through the mailer's
    development log fallback. */
 'use strict';
-const { normaliseEmail } = require('../auth/store.js');
+const { normaliseEmail } = require('../repositories/auth-store.js');
 const { ID_RE } = require('../repositories/ids.js');
 
 const ROLES = ['admin', 'adviser', 'compliance'];
@@ -33,35 +29,6 @@ async function listRequests({ authStore }) {
   const rows = await authStore.pendingRequests();
   console.log(`${rows.length} pending request(s)`);
   for (const r of rows) console.log(`${r.id}  ${new Date(r.created_at).toISOString().slice(0, 16).replace('T', ' ')}  ${r.name}  <${r.email}>  ${r.firm_name || '(no firm given)'}  ${r.note ? JSON.stringify(r.note.slice(0, 120)) : ''}`);
-  return 0;
-}
-
-async function approveRequest({ authStore, invites, args }) {
-  const { rest, by } = byOf(args);
-  if (!by) return needBy('approve-request ID FIRM_ID [ROLE]');
-  const [id, firmId, role = 'adviser'] = rest;
-  if (!ID_RE.test(id || '') || !ID_RE.test(firmId || '') || !ROLES.includes(role)) { console.error(`Usage: node server.js approve-request ID FIRM_ID [${ROLES.join('|')}] --by "Name"`); return 1; }
-  const req = await authStore.request(id);
-  if (!req) { console.error(`No request ${id}`); return 1; }
-  if (req.status !== 'pending') { console.error(`Request ${id} was already decided (${req.status} by ${req.decided_by || 'unknown'})`); return 1; }
-  const { created } = await invites.create({ email: req.email, name: req.name, firmId, role, invitedBy: by });
-  await authStore.decideRequest(id, { status: 'approved', by, firmId });
-  await authStore.event({ email: req.email, event: 'access_request', outcome: 'approved', detail: `request ${id}, ${role} in ${firmId}, by ${by}` });
-  console.log(`Approved: ${created ? 'account created' : 'membership added to the existing account'} for ${normaliseEmail(req.email)} (${role} in firm ${firmId}); invitation sent.`);
-  return 0;
-}
-
-async function rejectRequest({ authStore, args }) {
-  const { rest, by } = byOf(args);
-  if (!by) return needBy('reject-request ID');
-  const [id] = rest;
-  if (!ID_RE.test(id || '')) { console.error('Usage: node server.js reject-request ID --by "Name"'); return 1; }
-  const req = await authStore.request(id);
-  if (!req) { console.error(`No request ${id}`); return 1; }
-  if (req.status !== 'pending') { console.error(`Request ${id} was already decided (${req.status} by ${req.decided_by || 'unknown'})`); return 1; }
-  await authStore.decideRequest(id, { status: 'declined', by });
-  await authStore.event({ email: req.email, event: 'access_request', outcome: 'declined', detail: `request ${id}, by ${by}` });
-  console.log(`Declined: ${req.email} (request ${id}). Nothing was created.`);
   return 0;
 }
 
@@ -82,6 +49,6 @@ async function resetMfa({ authStore, notify, args }) {
   return 0;
 }
 
-const COMMANDS = { 'list-requests': listRequests, 'approve-request': approveRequest, 'reject-request': rejectRequest, 'reset-mfa': resetMfa };
+const COMMANDS = { 'list-requests': listRequests, 'reset-mfa': resetMfa };
 
 module.exports = { COMMANDS, byOf };

@@ -319,7 +319,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     // ---- The app's own sign-in (session mode), against a scratch PostgreSQL database when TEST_DATABASE_URL is set
     const DB = process.env.TEST_DATABASE_URL;
     if (DB) {
-      const { codeAt, base32Decode } = require('../../apps/api/src/auth/totp.js');
+      const { codeAt, base32Decode } = require('../../apps/api/src/services/auth/totp.js');
       const port2 = await freePort(); const BASE2 = `http://127.0.0.1:${port2}/`;
       const key = execFileSync(process.execPath, ['server.js', 'gen-key'], { cwd: ROOT }).toString().trim();
       const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', PUBLIC_URL: BASE2.replace(/\/$/, '') };
@@ -338,21 +338,25 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
         const heading = () => js(`document.querySelector('#gate h2')?.textContent || document.querySelector('#main h2')?.textContent || ''`);
         let secret, usedStep = 0;
         const nextCode = () => { const now = Math.floor(Date.now() / 30000); const step = now > usedStep ? now : usedStep + 1; usedStep = step; return codeAt(base32Decode(secret), step); };
-        await step('sign-in page: Sign in and Request access, no data on screen, no Basic prompt', async () => {
+        await step('sign-in page: Sign in, with Create an account and Forgotten your password; no data on screen, no Basic prompt', async () => {
           await go2();
           await until(`!!document.querySelector('#gate')`, 'the sign-in form');
           if (await heading() !== 'Sign in') throw new Error('heading: ' + await heading());
           if (await js(`!!document.querySelector('[data-k]')`)) throw new Error('a data field is on screen');
           await shot('signin');
         });
-        await step('Request access: the form is stored and acknowledged; the operator is told', async () => {
-          await click('[data-gate="request"]');
-          await until(`document.querySelector('#gate h2')?.textContent === 'Request access'`, 'the request form');
-          await fill('#g-name', 'New Adviser'); await fill('#g-email', 'new@example.com'); await fill('#g-firm', 'Alder Wealth'); await fill('#g-note', 'I work with Ava');
-          await shot('request-access');
+        await step('Register: a firm of their own; the link in the email confirms the address; then sign in', async () => {
+          await click('[data-gate="register"]');
+          await until(`document.querySelector('#gate h2')?.textContent === 'Create an account'`, 'the registration form');
+          await fill('#g-name', 'New Adviser'); await fill('#g-email', 'new@example.com'); await fill('#g-firm', 'Alder Wealth');
+          await fill('#g-password', 'a passphrase for new 1'); await fill('#g-again', 'a passphrase for new 1');
+          await shot('register');
           await submit();
-          await until(`/Thank you/.test(document.querySelector('#gate')?.textContent || '')`, 'the acknowledgement', 10000);
-          if (!/Access request from New Adviser/.test(log2)) throw new Error('the operator was not told (log fallback)');
+          await until(`/Check your email/.test(document.querySelector('#gate')?.textContent || '')`, 'the acknowledgement', 10000);
+          const m = /#verify=([A-Za-z0-9_-]{43})/.exec(log2); if (!m) throw new Error('no verification link in the server log');
+          await go2('#verify=' + m[1]);
+          await until(`/confirmed/.test(document.querySelector('#gate')?.textContent || '')`, 'the confirmation', 10000);
+          await shot('verified');
           await click('[data-gate="signin"]');
           await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'back to sign in');
         });
@@ -428,8 +432,8 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
         // that fills in its own reviewer and goes stale, several roles on one membership, and an invitation answered at sign-in.
         await step('roles: an administrator, an adviser and a compliance reviewer each see only what their role allows', async () => {
           const H = require('../../packages/core/core.js');
-          const { createAuthStore } = require('../../apps/api/src/auth/store.js');
-          const { createSessions, sessionSecretFrom } = require('../../apps/api/src/auth/sessions.js');
+          const { createAuthStore } = require('../../apps/api/src/repositories/auth-store.js');
+          const { createSessions, sessionSecretFrom } = require('../../apps/api/src/services/auth/sessions.js');
           const FIRM = 'f1a00000-0000-4000-8000-000000000001';
           const pool = new (require('pg').Pool)({ connectionString: DB });
           const cli = (...args) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: env2, stdio: 'pipe' }).toString();

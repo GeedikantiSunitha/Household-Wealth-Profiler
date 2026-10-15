@@ -6,7 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { hashPasswordCommand, genKeyCommand } = require('../../apps/api/src/cli');
 const { parseUsers } = require('../../apps/api/src/config');
-const { createBasicAuth } = require('../../apps/api/src/auth/providers/basic');
+const { createBasicAuth } = require('../../apps/api/src/middleware/basic.js');
 const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
 
 const ROOT = path.join(__dirname, '..', '..');

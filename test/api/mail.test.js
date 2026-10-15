@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { createMailer, parseSmtpUrl, dot } = require('../../apps/api/src/auth/mail.js');
+const { createMailer, parseSmtpUrl, dot } = require('../../apps/api/src/services/auth/mail.js');
 
 // A fake SMTP server: records what it was told; offers STARTTLS when given a certificate
 function fakeSmtp({ cert = null, auth = true } = {}) {

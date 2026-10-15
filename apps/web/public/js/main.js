@@ -7,18 +7,20 @@
              by a server that does not answer stops with an error instead of keeping data here
 
    Where the rest of the interface lives:
-     state.js        shared state (the open household, the screen on show, open cards, the banner)
-     api/store.js    saving: the server connection, autosave, edit conflicts, the save status
-     lib/            page helpers, number and date formats, people in the household
-     content/        help text and "how this section is used" text
-     components/     form fields, the banner, the how-it-is-used panel, the live-effect panel
-     views/          one file per screen; views/render.js draws the screen on show
+     pages/          one file per screen, the sign-in screens (sign-in.js), and render.js, which draws the screen on show
+     components/     form fields, the banner, the how-it-is-used panel, the live-effect panel, the side rail, the top bar
+     hooks/          what pages share: the state (state.js), the store (store.js: autosave, edit conflicts, the save
+                     status), people and firm look-ups, and io/ (Excel import and export, saving files to the device)
+     services/api/   the only code that calls the server (client.js; auth.js for the sign-in)
+     lib/            page helpers, number and date formats
+     content/        help text, "how this section is used" text, the balance sheet groups
      events/         typing (editing.js), buttons and links (actions.js), the top bar (toolbar.js)
-     io/             Excel import and export, saving files to the device */
-import { state, setState } from './state.js';
+   Pages use components, hooks and services; components use hooks; hooks use services; services use nothing above them. */
+import { state, setState } from './hooks/state.js';
 import { $, esc } from './lib/dom.js';
-import { Store, setRenderer } from './api/store.js';
-import { render } from './views/render.js';
+import { Store, setRenderer, setGate } from './hooks/store.js';
+import { runGate } from './pages/sign-in.js';
+import { render } from './pages/render.js';
 import { resetUI } from './events/actions.js';
 // Loaded for what they do, not for a name: they listen for typing and wire the top-bar buttons
 import './events/editing.js';
@@ -26,6 +28,7 @@ import './events/toolbar.js';
 
 const H = window.HWP;
 setRenderer(() => render());
+setGate(runGate);
 
 (async()=>{
   // Sign in (or find the server), then the firm settings: if either fails, the app does not open

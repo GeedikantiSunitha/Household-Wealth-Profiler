@@ -10,8 +10,8 @@
                                  is asked to set up its authenticator at its first sign-in.
    Neither prints or logs a password. Exit 0 done, 1 refused or failed. */
 'use strict';
-const { hashPassword, checkPolicy } = require('../auth/password.js');
-const { normaliseEmail } = require('../auth/store.js');
+const { hashPassword, checkPolicy } = require('../services/auth/password.js');
+const { normaliseEmail } = require('../repositories/auth-store.js');
 const { DEFAULT_FIRM_ID, ID_RE } = require('../repositories/ids.js');
 
 const ROLES = ['admin', 'adviser', 'compliance'];

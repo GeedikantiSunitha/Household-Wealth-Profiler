@@ -1,11 +1,11 @@
 /* Form building blocks: field inputs with their tooltips and checks, field groups, owner choices and the one-line summary shown on each card. */
 import { FIELD_HELP, GROUP_HELP } from '../content/help.js';
-import { Store } from '../api/store.js';
+import { Store } from '../hooks/store.js';
 import { esc } from '../lib/dom.js';
-import { FIRM_KEYS, providerOptions, teamOptions } from '../lib/firm.js';
+import { FIRM_KEYS, providerOptions, teamOptions } from '../hooks/firm.js';
 import { fmtDate, gbp, fmtYM } from '../lib/format.js';
-import { isAdult, memberName } from '../lib/people.js';
-import { state } from '../state.js';
+import { isAdult, memberName } from '../hooks/people.js';
+import { state } from '../hooks/state.js';
 
 const H = window.HWP; const { SCHEMA, YN, ROLES, EXP_CATS, optList, N, has, yes } = H;
 

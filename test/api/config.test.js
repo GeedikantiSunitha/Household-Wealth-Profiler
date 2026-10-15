@@ -145,3 +145,13 @@ test('operator commands (Phase 3): no users, no DATA_KEY and, in production, no 
   assert.throws(() => load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@h:5432/other' }, root: root() }), /DATABASE_OPERATOR_URL must point at the same host and database as DATABASE_URL/);
   assert.throws(() => load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@elsewhere:5432/db' }, root: root() }), /same host and database/);
 });
+
+test('SERVE_WEB: the server serves the screens unless SERVE_WEB=0 (the web tier serves them, the API answers /api/ only)', () => {
+  assert.equal(ok().serveWeb, true, 'default: one server for development');
+  assert.equal(ok({ SERVE_WEB: '0' }).serveWeb, false);
+  assert.equal(ok({ SERVE_WEB: '1' }).serveWeb, true);
+  assert.equal(ok({ SERVE_WEB: '' }).serveWeb, true, 'empty means the default');
+  assert.equal(ok().totpRequired, true, 'the second step is required unless switched off');
+  assert.equal(ok({ TOTP_REQUIRED: '0' }).totpRequired, false);
+  assert.equal(ok({ TOTP_REQUIRED: '1' }).totpRequired, true);
+});
