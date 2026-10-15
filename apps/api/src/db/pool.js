@@ -54,13 +54,13 @@ const logLine = m => console.log(new Date().toISOString(), m);
 // touched when none is pending, so the app role (which may not create tables) starts fine.
 // A migration, and its wait for the lock while another process migrates, may take longer than the
 // query timeout that protects ordinary requests, so the connection runs it without one
-async function runMigrations(pool, dir) {
+async function runMigrations(pool, dir, { singleLogin = false } = {}) {
   const c = await pool.connect();
   try {
     await c.query('set statement_timeout = 0');
     const db = pgClient(c);
     if (!(await pending(db, { dir })).length) return [];
-    return await migrate(db, { dir, log: logLine });
+    return await migrate(db, { dir, log: logLine, singleLogin });
   } catch (e) {
     if (e.code === '42501') e.message = `${e.message}. Migrations are pending and DATABASE_URL cannot apply them: set DATABASE_OWNER_URL, or run node server.js migrate as the owner.`;
     throw e;
@@ -71,11 +71,11 @@ async function runMigrations(pool, dir) {
 }
 
 // The same, on a separate connection as the owner (DATABASE_OWNER_URL)
-async function migrateWith(url, dir) {
+async function migrateWith(url, dir, { singleLogin = false } = {}) {
   const pg = require('pg');
   const c = new pg.Client({ connectionString: url });
   await c.connect();
-  try { await c.query('set statement_timeout = 0'); return await migrate(pgClient(c), { dir, log: logLine }); }
+  try { await c.query('set statement_timeout = 0'); return await migrate(pgClient(c), { dir, log: logLine, singleLogin }); }
   finally { await c.end(); }
 }
 

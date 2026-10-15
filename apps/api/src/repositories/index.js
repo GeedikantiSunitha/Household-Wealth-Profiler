@@ -51,7 +51,7 @@ const { createPgStore } = require('./pg-store.js');
 
 function createStore(config, sealer) {
   if (!config.databaseUrl) return createFileStore(config.dataDir, sealer);
-  return createPgStore(config.databaseUrl, { key: sealer.key, poolMax: config.databasePoolMax, migrationsDir: path.join(config.root, 'db', 'migrations'), ownerUrl: config.databaseOwnerUrl, production: config.production });
+  return createPgStore(config.databaseUrl, { key: sealer.key, poolMax: config.databasePoolMax, migrationsDir: path.join(config.root, 'db', 'migrations'), ownerUrl: config.databaseOwnerUrl, production: config.production, singleLogin: !!config.singleLogin });
 }
 
 module.exports = { createStore, createFileStore, createPgStore, ID_RE, DEFAULT_FIRM_ID };

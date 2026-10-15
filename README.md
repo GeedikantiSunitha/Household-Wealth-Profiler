@@ -108,13 +108,16 @@ To add or change users later, run the script again with every username. It keeps
 
 ### DCDeploy
 
-DCDeploy builds the Dockerfile from a GitHub repository. Its data centre is in Frankfurt (EU).
+DCDeploy builds the Dockerfile from a GitHub repository. Its data centre is in Frankfurt (EU). Its
+PostgreSQL (17) gives **one login, which cannot create roles**, and **no TLS**, so the app runs there
+in single-login mode (see "Single-login mode" under step 4), and the database is reached over
+DCDeploy's private network only.
 
-1. Connect this repository (private). Leave the build context and Dockerfile path at `./`.
-2. Port: `8080`. Run **one instance, always on**; do not enable scale-to-zero or add instances, because the data sits on a single volume.
-3. Environment variables: `AUTH_USERS` and `DATA_KEY` (step 1 above), and `CLIENT_IP_HEADER=cf-connecting-ip` if DCDeploy confirms it sets that header on every request (it appears to sit behind Cloudflare). Without it, failed sign-ins from anyone count against the same address.
-4. Add a persistent volume mounted at `/data`.
-5. Back the volume up on a schedule yourself; DCDeploy's docs do not describe built-in snapshots. Keep the backup and `DATA_KEY` in different places.
+1. Create a PostgreSQL database service, and the app as a service from this repository (Dockerfile at `./`), in the same environment, so they share its private network. Never switch on the database's public TCP proxy: without TLS, passwords and data would cross the internet unencrypted.
+2. App settings: `NODE_ENV=production`, `DB_LOGIN_MODE=single`, `DATABASE_URL` (the database's internal address and its one login), `DATA_KEY`, `PUBLIC_URL`, `SMTP_URL`, `SMTP_FROM`, `OPERATOR_EMAIL`, and `CLIENT_IP_HEADER=cf-connecting-ip` once DCDeploy confirms it sets that header on every request. Leave `DATABASE_OWNER_URL`, `DATABASE_OPERATOR_URL` and `AUTH_USERS` unset.
+3. Migrations are a separate step before each deploy, run inside DCDeploy (a one-off worker from the same image, in the same environment): `node server.js migrate`, then `node server.js check-db-posture`, which must end "safe for client data". A production server refuses to start while a migration is pending, so a failed migration stops the deploy and the running version stays up.
+4. Take DCDeploy's database backup before every deploy that includes a migration, and restore one into a scratch database before going live to prove it.
+5. The first firm and administrator: `node server.js firm-create "NAME" SEATS`, `node server.js create-user EMAIL "NAME" FIRM_ID admin` and `set-password`, from the same one-off worker.
 
 ### Any other host
 
@@ -461,6 +464,38 @@ runs once, in a transaction with its tracking row, so a failed migration leaves 
 and is retried on the next start. Several servers starting together take turns. Migrations
 should only add (tables, columns with defaults, indexes): the retention triggers refuse
 deletes anyway. Databases created before migrations were tracked are adopted as they are.
+A new migration should name no database role at all (single-login mode, below, refuses a file with
+a role reference it has no rule for).
+
+**Single-login mode (`DB_LOGIN_MODE=single`).** For hosts that give one database login and no way to
+create roles (DCDeploy). The model is MMW's: the one login owns the tables, runs the migrations and is
+the app's connection; it must not be a superuser and must not bypass row-level security (the server
+refuses to start otherwise); every table that holds data forces row-level security, so the policies
+bind the owner too, and no policy names a role. The migration files are the same; the runner applies
+them through `db/single-login.js`, which leaves out role creation and grants, makes every app policy
+apply to every role, and puts the owner's policies behind two modes a command switches on for its own
+connection: operator mode (`app.operator`: firms and accounts, no client rows) and maintenance mode
+(`app.maintenance`: encrypted client rows across firms, for key rotation and checks). The server never
+switches either on and refuses a `DATABASE_URL` that does. Commands need no other connection: in this
+mode the owner and operator connections are `DATABASE_URL` with the modes on.
+
+What it gives up, as MMW does: the login owns the tables, so it could in principle switch a policy or
+trigger off; that rests on the application's code (every query is parameterised). Firm isolation is
+unchanged (forced row-level security on a login that cannot bypass it), and so are the retention
+triggers and the two-person purge. Backups come from the host (a login that cannot bypass row-level
+security cannot read every firm's rows for `node server.js backup`).
+
+```sh
+DB_LOGIN_MODE=single node server.js migrate            # no role is created
+DB_LOGIN_MODE=single node server.js check-db-posture   # read-only; exit 0 only when every check passes
+```
+
+`check-db-posture` (either mode) checks, as the app's own login: not a superuser and no BYPASSRLS
+(with separate roles, owning no table either); no operator or maintenance mode on the connection;
+every table forcing row-level security with policies, except `schema_migrations`, `firm_settings`
+and `firm_versions`, which hold no client or account data; no household visible without a firm; the
+retention triggers on every kept table; `purge_household()` as a security definer searching
+`pg_temp` last; and no migration pending. Run it before every deploy.
 
 To run the PostgreSQL tests, point them at an empty scratch database:
 `TEST_DATABASE_URL=postgres://... node --test test/api/postgres.test.js`.

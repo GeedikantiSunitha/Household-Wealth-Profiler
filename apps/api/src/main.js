@@ -4,7 +4,7 @@
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
      4. a data command (import-files, migrate, index-references, rotate-key, check-records, create-user,
-        set-password, list-requests, approve-request, reject-request, reset-mfa, backup, restore-drill,
+        set-password, list-requests, approve-request, reject-request, reset-mfa, backup, restore-drill, check-db-posture,
         subject-access-user), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
@@ -42,6 +42,7 @@ const { createUser, setPassword } = require('./cli/accounts.js');
 const { backup } = require('./cli/backup.js');
 const { restoreDrill } = require('./cli/restore.js');
 const { subjectAccessUser } = require('./cli/subject-access-user.js');
+const { checkDbPosture } = require('./cli/db-posture.js');
 const { COMMANDS: OPERATOR } = require('./cli/operator.js');
 const { createInvites } = require('./auth/invites.js');
 const platform = require('./cli/platform.js');
@@ -78,7 +79,7 @@ function main([cmd, ...args] = []) {
   if (cmd === 'migrate') {
     const url = config.databaseOwnerUrl || config.databaseUrl;
     if (!url) { console.error('Set DATABASE_OWNER_URL (or DATABASE_URL) to the database to migrate.'); process.exit(1); }
-    migrateWith(url, path.join(config.root, 'db', 'migrations'))
+    migrateWith(url, path.join(config.root, 'db', 'migrations'), { singleLogin: config.singleLogin })
       .then(done => { console.log(done.length ? `Applied ${done.length} migration(s): ${done.join(', ')}` : 'No migrations pending.'); }, e => { console.error(e.message); process.exit(1); });
     return;
   }
@@ -103,7 +104,13 @@ function main([cmd, ...args] = []) {
       .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
     return;
   }
+  if (cmd === 'check-db-posture') {
+    checkDbPosture({ url: config.databaseUrl, singleLogin: config.singleLogin, migrationsDir: path.join(config.root, 'db', 'migrations') })
+      .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
+    return;
+  }
   if (cmd === 'grant-operator') {
+    if (config.singleLogin) { console.error('DB_LOGIN_MODE=single: there is no operator role to grant. Operator commands run as the one login with operator mode on.'); process.exit(1); }
     platform.grantOperator({ ownerUrl: config.databaseOwnerUrl })
       .then(code => process.exit(code), e => { console.error(e.message); process.exit(1); });
     return;

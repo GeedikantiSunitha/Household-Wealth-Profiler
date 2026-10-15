@@ -31,7 +31,7 @@ const purgeRow = (sealer, r) => ({ id: r.id, householdId: r.household_id, retent
 const relationshipOpen = () => Object.assign(new Error("This household's relationship has not ended"), { status: 409, code: 'relationship_open' });
 const purgePending = () => Object.assign(new Error('A purge request for this household is already waiting for a decision'), { status: 409, code: 'purge_pending' });
 
-function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = '', production = false }) {
+function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = '', production = false, singleLogin = false }) {
   const pool = createPool(url, poolMax);
   const tx = fn => inTx(pool, fn);
   const firmKeys = new Map(); // firmId -> { sealer, indexKey }
@@ -272,12 +272,20 @@ function createPgStore(url, { key: master, poolMax, migrationsDir, ownerUrl = ''
     // Production: never apply; refuse to start while any is pending, so migrations are a
     // deliberate deploy step run as the owner (node server.js migrate).
     async init() {
+      // The login must not be able to switch the policies off: not a superuser, not BYPASSRLS. Checked in
+      // production, and always with one login (where nothing else stands between the app and the rows).
+      // The server's connections never carry operator or maintenance mode (single-login mode).
+      if (production || singleLogin) {
+        const r = (await pool.query("select rolsuper, rolbypassrls, coalesce(current_setting('app.operator', true), '') as op, coalesce(current_setting('app.maintenance', true), '') as mt from pg_roles where rolname = current_user")).rows[0];
+        if (r.rolsuper || r.rolbypassrls) throw new Error('The database login in DATABASE_URL is a superuser or can bypass row-level security, so no policy would hold. Use a login without SUPERUSER and BYPASSRLS.');
+        if (r.op === 'on' || r.mt === 'on') throw new Error('DATABASE_URL switches on operator or maintenance mode for the server. Remove those options: they are for operator commands only.');
+      }
       if (production) {
         const p = await pendingWith(pool, migrationsDir);
         if (p.length) throw new Error(`Database migrations are pending: ${p.join(', ')}. Run: node server.js migrate (with DATABASE_OWNER_URL).`);
         return;
       }
-      if (ownerUrl) await migrateWith(ownerUrl, migrationsDir); else await runMigrations(pool, migrationsDir);
+      if (ownerUrl) await migrateWith(ownerUrl, migrationsDir, { singleLogin }); else await runMigrations(pool, migrationsDir, { singleLogin });
     },
     // For /readyz: the database answers
     ready: async () => { await pool.query('select 1'); },

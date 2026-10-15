@@ -72,6 +72,17 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   if (env.DATABASE_URL && env.DATABASE_OWNER_URL && !same(env.DATABASE_URL, env.DATABASE_OWNER_URL)) throw new Error('DATABASE_OWNER_URL must point at the same host and database as DATABASE_URL (only the user differs).');
   // The platform operator's connection (operator commands only, as the operator role) is checked the same way
   if (env.DATABASE_URL && env.DATABASE_OPERATOR_URL && !same(env.DATABASE_URL, env.DATABASE_OPERATOR_URL)) throw new Error('DATABASE_OPERATOR_URL must point at the same host and database as DATABASE_URL (only the user differs).');
+  // DB_LOGIN_MODE: "separate" (default: the owner, app and operator roles of the migrations) or "single"
+  // (one login that owns the tables and runs the app, for hosts that cannot create roles, such as
+  // DCDeploy; db/single-login.js). With one login there is no other connection to name: the owner and
+  // operator connections are DATABASE_URL with operator mode (and, for the owner's maintenance work,
+  // maintenance mode) switched on for that session, which the server's own connections never do.
+  const dbLoginMode = env.DB_LOGIN_MODE || 'separate';
+  if (!['separate', 'single'].includes(dbLoginMode)) throw new Error('DB_LOGIN_MODE must be "separate" or "single"');
+  const singleLogin = dbLoginMode === 'single';
+  if (singleLogin && (env.DATABASE_OWNER_URL || env.DATABASE_OPERATOR_URL)) throw new Error('DB_LOGIN_MODE=single: leave DATABASE_OWNER_URL and DATABASE_OPERATOR_URL unset. There is one login, DATABASE_URL; commands switch on operator or maintenance mode for their own session.');
+  if (singleLogin && !env.DATABASE_URL && !BACKUP_COMMANDS.includes(command)) throw new Error('DB_LOGIN_MODE=single needs DATABASE_URL (single-login mode is for PostgreSQL).');
+  const withModes = (url, modes) => { if (!url) return ''; const u = new URL(url); const o = u.searchParams.get('options'); u.searchParams.set('options', [o, ...modes.map(m => `-c app.${m}=on`)].filter(Boolean).join(' ')); return u.toString(); };
   const users = parseUsers(env.AUTH_USERS);
   // Sessions (the app's own sign-in): idle and absolute limits; cookies are Secure with the __Host-
   // prefix in production or whenever the app is served over HTTPS (PUBLIC_URL)
@@ -103,9 +114,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   }
   const backupRetentionDays = env.BACKUP_RETENTION_DAYS === undefined || env.BACKUP_RETENTION_DAYS === '' ? 35 : +env.BACKUP_RETENTION_DAYS;
   if (!Number.isInteger(backupRetentionDays) || backupRetentionDays < 1 || backupRetentionDays > 3650) throw new Error('BACKUP_RETENTION_DAYS must be a whole number of days from 1 to 3650');
-  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'subject-access-user', ...BACKUP_COMMANDS, ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
+  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'subject-access-user', 'check-db-posture', ...BACKUP_COMMANDS, ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
   // The operator commands never touch a client record, so the operator's machine does not need the key
-  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
+  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup' && command !== 'check-db-posture' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
     root,
@@ -116,9 +127,11 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     databaseUrl: env.DATABASE_URL || '',
     // The owner connection for migrations (node server.js migrate); the server itself runs as the
     // app role in DATABASE_URL, which cannot change the schema or bypass row-level security
-    databaseOwnerUrl: env.DATABASE_OWNER_URL || '',
-    // The platform operator's connection: the operator role cannot read client records (db/operator.sql)
-    databaseOperatorUrl: env.DATABASE_OPERATOR_URL || '',
+    databaseOwnerUrl: singleLogin ? withModes(env.DATABASE_URL, ['operator', 'maintenance']) : env.DATABASE_OWNER_URL || '',
+    // The platform operator's connection: the operator role cannot read client records (db/operator.sql);
+    // in single-login mode, the one login with operator mode on (accounts and firms, no client rows)
+    databaseOperatorUrl: singleLogin ? withModes(env.DATABASE_URL, ['operator']) : env.DATABASE_OPERATOR_URL || '',
+    singleLogin,
     databasePoolMax: +env.DATABASE_POOL_MAX || 10,
     // Behind a hosting proxy every connection comes from the proxy. Name the header the proxy sets
     // to the real client address (Fly.io: fly-client-ip). Only set this when the proxy overwrites it.
