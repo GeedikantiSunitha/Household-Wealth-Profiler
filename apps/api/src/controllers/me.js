@@ -4,10 +4,10 @@
    token the app must send with every write. The route is routes/me.js. */
 'use strict';
 
-function createMeController({ send, encrypted, production = false }) {
+function createMeController({ send, encrypted, production = false, totpRequired = true }) {
   return {
     me(req, res, ctx) {
-      if (ctx.session) send(res, 200, { user: ctx.user, email: ctx.email, name: ctx.name, firmId: ctx.firmId, firmName: ctx.firmName, role: ctx.role, roles: ctx.roles, stage: ctx.stage, csrf: ctx.csrf, encrypted, production });
+      if (ctx.session) send(res, 200, { user: ctx.user, email: ctx.email, name: ctx.name, firmId: ctx.firmId, firmName: ctx.firmName, role: ctx.role, roles: ctx.roles, stage: ctx.stage, csrf: ctx.csrf, encrypted, production, totpRequired });
       else send(res, 200, { user: ctx.user, encrypted, production });
     },
   };

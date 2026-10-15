@@ -4,7 +4,7 @@
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
      4. a data command (import-files, migrate, index-references, rotate-key, check-records, create-user,
-        set-password, list-requests, approve-request, reject-request, reset-mfa, backup, restore-drill,
+        set-password, list-requests, reset-mfa, backup, restore-drill,
         subject-access-user), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
@@ -134,7 +134,7 @@ function main([cmd, ...args] = []) {
   // The sign-in emails: links, warnings, access requests (to the log outside production when SMTP_URL is not set)
   const mailer = createMailer({ smtpUrl: config.smtpUrl, from: config.smtpFrom, production: config.production });
   const notify = createNotify({ mailer, publicUrl: config.publicUrl || `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`, operatorEmail: config.operatorEmail });
-  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler' }) : null;
+  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler', totpRequired: config.totpRequired }) : null;
   const members = authStore ? createMemberService({ authStore, notify }) : null;
   const { server } = createApp({ config, households, firm, prices, records, authenticate, authRoutes, members, ready: () => store.ready() });
 

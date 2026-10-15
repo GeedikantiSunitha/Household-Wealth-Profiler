@@ -151,4 +151,7 @@ test('SERVE_WEB: the server serves the screens unless SERVE_WEB=0 (the web tier 
   assert.equal(ok({ SERVE_WEB: '0' }).serveWeb, false);
   assert.equal(ok({ SERVE_WEB: '1' }).serveWeb, true);
   assert.equal(ok({ SERVE_WEB: '' }).serveWeb, true, 'empty means the default');
+  assert.equal(ok().totpRequired, true, 'the second step is required unless switched off');
+  assert.equal(ok({ TOTP_REQUIRED: '0' }).totpRequired, false);
+  assert.equal(ok({ TOTP_REQUIRED: '1' }).totpRequired, true);
 });

@@ -13,8 +13,8 @@ export function renderAccount() {
         <div class="f"><label for="pwNext">New password</label><input id="pwNext" type="password" autocomplete="new-password" required></div>
         <div class="f"><label for="pwAgain">New password again</label><input id="pwAgain" type="password" autocomplete="new-password" required></div></div>
       <p class="gate-err" id="pwErr" role="alert"></p><div class="addrow"><button class="btn primary" type="submit">Change password</button></div></form></div>
-    <div class="panel"><h3>Authenticator app</h3><p class="muted">Two-step verification is required at every sign-in. Setting up a new app replaces the current one and gives you new recovery codes; every other session ends.</p>
-      <div class="addrow"><button class="btn" type="button" id="reenrol">Set up a new authenticator</button></div></div>
+    ${Store.totpRequired === false ? '' : `<div class="panel"><h3>Authenticator app</h3><p class="muted">Two-step verification is required at every sign-in. Setting up a new app replaces the current one and gives you new recovery codes; every other session ends.</p>
+      <div class="addrow"><button class="btn" type="button" id="reenrol">Set up a new authenticator</button></div></div>`}
     <div class="panel"><h3>Sessions</h3><p class="muted">Signed in somewhere you do not recognise, or lost a device? End every session, including this one.</p>
       <div class="addrow"><button class="btn" type="button" id="signOutAll">Sign out everywhere</button></div></div>`;
   $('#pwForm').onsubmit = async e => {
@@ -25,7 +25,7 @@ export function renderAccount() {
     try { await Store.api('POST', 'auth/password', { current, next }); toast('Password changed'); $('#pwForm').reset(); }
     catch (x) { err.textContent = x.body && x.body.code === 'bad_credentials' ? 'The current password is not right.' : x.message; }
   };
-  $('#reenrol').onclick = async () => {
+  if ($('#reenrol')) $('#reenrol').onclick = async () => {
     const { enrol } = await import('./sign-in.js');
     const r = await enrol({ withPassword: true });
     document.body.classList.remove('gated');

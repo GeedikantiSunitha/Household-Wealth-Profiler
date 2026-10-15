@@ -34,7 +34,7 @@ function describeProblem(p,firmSettings){const m=/^(\w+)(?:\[(\d+)\])?(?:\.(\w+)
   return esc(where+(label?', '+label:'')+': '+p.message)}
 const problemList=(body,firm)=>'<ul>'+((body&&body.errors)||[]).map(p=>'<li>'+describeProblem(p,firm)+'</li>').join('')+'</ul>';
 // A reply from /api/me with the app's own sign-in: the session's details
-function sessionFrom(S,j){Object.assign(S,{mode:'server',session:true,user:j.user,email:j.email||'',name:j.name||'',firmId:j.firmId||'',firmName:j.firmName||'',role:j.role||'',roles:j.roles||(j.role?[j.role]:[]),csrf:j.csrf||'',encrypted:!!j.encrypted,production:!!j.production})}
+function sessionFrom(S,j){Object.assign(S,{mode:'server',session:true,user:j.user,email:j.email||'',name:j.name||'',firmId:j.firmId||'',firmName:j.firmName||'',role:j.role||'',roles:j.roles||(j.role?[j.role]:[]),csrf:j.csrf||'',encrypted:!!j.encrypted,production:!!j.production,totpRequired:j.totpRequired!==false})}
 const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,cloud:null,role:'',roles:[],review:null,reviewStale:false,firm:'',seats:0,session:false,csrf:'',email:'',name:'',firmId:'',firmName:'',
   async init(){
     if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');

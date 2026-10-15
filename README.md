@@ -242,8 +242,11 @@ node server.js check-records FIRM_ID    # one firm
 ```
 
 **Signing in.** With PostgreSQL, people sign in through the app itself: email and password, then a
-code from an authenticator app (two-step verification is required for everyone; there is no way to
-turn it off). Nothing is handed to an outside sign-in provider: accounts, sessions and the sign-in
+code from an authenticator app (two-step verification is required for everyone unless the server is
+started with `TOTP_REQUIRED=0`, which is for development and early trials only, never with real
+client data). A new person registers on the sign-in page, confirms their email address through a
+link, and signs in; each registration creates a firm with the registrant as its administrator, who
+invites colleagues from the Team page. Nothing is handed to an outside sign-in provider: accounts, sessions and the sign-in
 event log live in this database, and the only outside call is the breached-password check, which
 sends the first five characters of the password's SHA-1 hash and nothing else.
 
@@ -255,7 +258,7 @@ sends the first five characters of the password's SHA-1 hash and nothing else.
 | Sessions | A cookie, ended after `SESSION_IDLE_MINUTES` without use (30) and in any case after `SESSION_ABSOLUTE_HOURS` (12); a new session id at each step of signing in. Every change is sent with a token bound to the session (CSRF). Changing a password or setting up a new authenticator ends the person's other sessions; Account security has "Sign out everywhere" |
 | Forgotten password | A reset link by email, valid 30 minutes and once. The reply is the same whether or not the address has an account |
 | Invitations | A link by email, valid 24 hours and once; the person chooses a password and sets up the authenticator |
-| Request access | The sign-in page has a form (at most 3 from one address an hour); the request is stored and `OPERATOR_EMAIL` is told. Nobody gets access until the operator approves it |
+| Registration | Name, email, firm and password (checked as everywhere); a firm of their own, with the registrant as its administrator; a verification link by email, valid 24 hours and once, before the first sign-in. The reply is the same whether or not the address already has an account (its holder is told by email). At most 3 from one address an hour |
 
 What production needs (the server refuses to start without them, see `.env.example`):
 
@@ -264,26 +267,23 @@ NODE_ENV=production
 PUBLIC_URL=https://profiler.yourfirm.co.uk             # the https address the app is served at
 SMTP_URL=smtps://USER:PASSWORD@smtp.example.com:465    # or smtp://...:587 with STARTTLS; never tls=off
 SMTP_FROM=Household Wealth Profiler <no-reply@yourfirm.co.uk>
-OPERATOR_EMAIL=operator@yourfirm.co.uk                 # receives access requests
 ```
 
 Outside production, without `SMTP_URL`, every email (with its link) is written to the server log
-instead, so a developer can follow it.
+instead, so a developer can follow it. `OPERATOR_EMAIL` is optional and no longer used by the sign-in.
 
-**Access requests and lost authenticators** (the operator, from the command line; each decision
-names who made it, `--by`, and is recorded in the request and the sign-in event log):
+**Lost authenticators** (the operator, from the command line; the decision names who made it,
+`--by`, and is recorded in the sign-in event log):
 
 ```sh
-node server.js list-requests                                   # pending requests: id, name, email, firm, note
-node server.js approve-request REQUEST_ID FIRM_ID [ROLE] --by "Your Name"   # makes the account (or adds the firm to an existing one) and emails the invitation
-node server.js reject-request REQUEST_ID --by "Your Name"      # declined; nothing is made
 node server.js reset-mfa dana@example.com --by "Your Name"     # lost both the authenticator and the recovery codes
+node server.js list-requests                                   # access requests left from before registration replaced Request Access
 ```
 
 `reset-mfa` is for someone who has lost both the authenticator app and the recovery codes: check who
 they are first, outside the app (for example a call to a number already on file, never one given in
 the request). It revokes every recovery code, ends every session, tells them by email, and they set up
-a new authenticator at their next sign-in; the password stays. These four commands run with the
+a new authenticator at their next sign-in; the password stays. These commands run with the
 server's own settings (`DATABASE_URL`, `DATA_KEY`, and `SMTP_URL` to send the emails).
 
 Sign-in accounts are made by the platform operator (below) for a firm's first administrator, and

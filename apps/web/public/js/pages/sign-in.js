@@ -1,11 +1,12 @@
 /* The sign-in screens (Phase 2): shown instead of the app until a full session with a firm exists.
    One screen at a time, each a small form; every call goes to the sign-in API (/api/auth/).
-     runGate(probe)   drives the whole flow from what /api/me answered: the landing page (Sign in /
-                      Request access, forgotten password), the second step (a code from the
+     runGate(probe)   drives the whole flow from what /api/me answered: the landing page (Sign in, with
+                      Create an account and Forgotten your password), registration and the link that
+                      confirms the address, the second step (a code from the
                       authenticator app, or a recovery code), first-time enrolment (QR code and key,
                       then the recovery codes shown once), the firm picker; a #reset= or #invite=
                       link in the address opens the new-password screen first. Resolves when the
-                      app can open.
+                      app can open. With TOTP_REQUIRED=0 the password alone signs in.
      firmPicker()     the firm picker on its own (switching firm from the user menu)
    Nothing here touches household data, and the screens never show the server's raw JSON. */
 import { $, esc } from '../lib/dom.js';
@@ -37,35 +38,56 @@ function screen({ title, intro = '', fields = [], submit = 'Continue', extra = '
     form.onclick = e => { const b = e.target.closest('[data-gate]'); if (b) { e.preventDefault(); ok({ action: b.dataset.gate }); } };
   });
 }
-const tabs = on => `<div class="tabs" role="tablist"><button type="button" class="btn${on === 'signin' ? ' primary' : ''}" data-gate="signin" role="tab" aria-selected="${on === 'signin'}">Sign in</button><button type="button" class="btn${on === 'request' ? ' primary' : ''}" data-gate="request" role="tab" aria-selected="${on === 'request'}">Request access</button></div>`;
-const message = (title, text, next = 'signin', label = 'Back to sign in') => screen({ title, before: `<p>${text}</p>`, submit: '', extra: `<button class="btn primary" type="button" data-gate="${next}">${esc(label)}</button>` });
+const message = (title, text, next = 'signin', label = 'Back to sign in') => screen({ title, before: `<p>${text}</p>`, submit: '', extra: `<button class="btn primary" type="button" data-gate="${next}">${esc(label)}</button>${next === 'signin' ? '' : '<button class="btn ghost" type="button" data-gate="signin">Back to sign in</button>'}` });
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function landing(lastEmail = '') {
   for (;;) {
-    const v = await screen({ title: 'Sign in', intro: `${esc(APP_NAME)}. Client records are encrypted and every change is recorded.`, before: tabs('signin'),
+    const v = await screen({ title: 'Sign in', intro: `${esc(APP_NAME)}. Client records are encrypted and every change is recorded.`,
       fields: [{ k: 'email', l: 'Email', t: 'email', ac: 'username', v: lastEmail }, { k: 'password', l: 'Password', t: 'password', ac: 'current-password' }],
-      submit: 'Sign in', extra: '<button class="btn ghost" type="button" data-gate="forgot">Forgotten your password?</button>' });
-    if (v.action === 'request') { await requestAccess(); continue; }
+      submit: 'Sign in', extra: '<button class="btn ghost" type="button" data-gate="register">Create an account</button><button class="btn ghost" type="button" data-gate="forgot">Forgotten your password?</button>' });
+    if (v.action === 'register') { lastEmail = (await register()) || lastEmail; continue; }
     if (v.action === 'forgot') { await forgot(lastEmail); continue; }
     if (v.action) continue;
     lastEmail = v.email;
     try { return { ...(await authApi('POST', 'sign-in', { email: v.email, password: v.password })), email: v.email }; }
-    catch (e) { fail(e.code === 'too_many_attempts' ? e.message : e.code === 'bad_credentials' ? 'Email or password is not right.' : e.message); }
+    catch (e) {
+      if (e.code === 'email_unverified') { await unverified(v.email); continue; }
+      fail(e.code === 'too_many_attempts' ? e.message : e.code === 'bad_credentials' ? 'Email or password is not right.' : e.message);
+    }
   }
 }
 
-async function requestAccess() {
+// Registration: a firm of their own, then a link to confirm the address, then sign in. Resolves with the email given (or null)
+async function register() {
   for (;;) {
-    const v = await screen({ title: 'Request access', intro: 'Tell us who you are. The operator will set up your account and send you an invitation by email.', before: tabs('request'),
-      fields: [{ k: 'name', l: 'Your name', max: 200 }, { k: 'email', l: 'Work email', t: 'email', ac: 'email', max: 254 }, { k: 'firm', l: 'Firm', max: 200, req: false }, { k: 'note', l: 'Anything else (optional)', t: 'area', max: 1000, req: false }], submit: 'Send request' });
-    if (v.action) return;
-    if (!v.name.trim() || !EMAIL.test(v.email.trim())) { fail('Give your name and a valid email address.'); continue; }
-    try { await authApi('POST', 'request-access', { name: v.name, email: v.email, firm: v.firm || '', note: v.note || '' }); }
+    const v = await screen({ title: 'Create an account', intro: 'Your firm gets its own space, with you as its administrator; you invite colleagues from the Team page. A link to confirm your email address is sent first.',
+      fields: [{ k: 'name', l: 'Your name', max: 200 }, { k: 'email', l: 'Work email', t: 'email', ac: 'email', max: 254 }, { k: 'firm', l: 'Firm', max: 200 },
+        { k: 'password', l: 'Password', t: 'password', ac: 'new-password' }, { k: 'again', l: 'Password again', t: 'password', ac: 'new-password' }],
+      submit: 'Register', extra: '<button class="btn ghost" type="button" data-gate="signin">Already registered? Sign in</button>' });
+    if (v.action) return null;
+    if (!v.name.trim() || !EMAIL.test(v.email.trim()) || !v.firm.trim()) { fail('Give your name, a valid email address and the name of your firm.'); continue; }
+    if (v.password !== v.again) { fail('The two passwords do not match.'); continue; }
+    try { await authApi('POST', 'register', { name: v.name, email: v.email, firm: v.firm, password: v.password }); }
     catch (e) { fail(e.message); continue; }
-    await message('Thank you', 'Your request has been sent. You will receive an invitation by email once your account is set up.');
-    return;
+    await message('Check your email', 'A link to confirm your address is on its way. It works once, for 24 hours. Open it, then sign in with your email address and the password you chose.');
+    return v.email.trim();
   }
+}
+
+// Signed in with the right password, but the address is not confirmed yet
+async function unverified(email) {
+  const v = await message('Confirm your email address first', 'Open the link we sent you when you registered. If it has expired or did not arrive, ask for a new one.', 'resend', 'Send the link again');
+  if (v.action !== 'resend') return;
+  try { await authApi('POST', 'verify/resend', { email }); } catch (e) { fail(e.message); return; }
+  await message('Check your email', 'If that address has an unconfirmed account, a new link is on its way. It works once, for 24 hours.');
+}
+
+// #verify=TOKEN: the address is confirmed through the link
+async function verifyLink(token) {
+  try { await authApi('POST', 'verify', { token }); }
+  catch (e) { await message('This link is no longer valid', 'Links work once, for 24 hours. Sign in with your email and password to ask for a new one.'); return; }
+  await message('Your email address is confirmed', 'Sign in with your email address and the password you chose.');
 }
 
 async function forgot(lastEmail) {
@@ -180,13 +202,13 @@ export async function firmPicker() {
 }
 
 // A reset or invitation link pasted while the sign-in page is open: start again with it
-window.addEventListener('hashchange', () => { if (/^#(reset|invite)=/.test(location.hash)) location.reload(); });
+window.addEventListener('hashchange', () => { if (/^#(reset|invite|verify)=/.test(location.hash)) location.reload(); });
 
 // probe: what /api/me answered ({ code }) or a sign-in state ({ stage, next, csrf })
 export async function runGate(probe) {
   let st;
-  const m = /^#(reset|invite)=([A-Za-z0-9_-]{43})$/.exec(location.hash);
-  if (m) { history.replaceState(null, '', location.pathname + location.search); await throughLink(m[1], m[2]); st = { state: 'out' }; }
+  const m = /^#(reset|invite|verify)=([A-Za-z0-9_-]{43})$/.exec(location.hash);
+  if (m) { history.replaceState(null, '', location.pathname + location.search); await (m[1] === 'verify' ? verifyLink(m[2]) : throughLink(m[1], m[2])); st = { state: 'out' }; }
   else if (probe.code === 'sign_in_required') st = { state: 'out' };
   else { try { st = await authApi('GET', 'state'); } catch (e) { st = { state: 'out' }; } }
   let lastEmail = '';

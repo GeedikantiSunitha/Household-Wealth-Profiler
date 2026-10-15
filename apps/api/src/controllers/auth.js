@@ -7,16 +7,18 @@ const crypto = require('crypto');
 const { verifyPassword, dummyVerify, hashPassword, checkPolicy, breachedCount } = require('../services/auth/password.js');
 const { generateSecret, base32Encode, base32Decode, otpauthUri, verifyCode, newRecoveryCodes, normaliseRecoveryCode } = require('../services/auth/totp.js');
 const { ID_RE } = require('../repositories/ids.js');
+const { normaliseEmail } = require('../repositories/auth-store.js');
 
 const WARN_AT = 5;
 const RESET_TTL_MS = 30 * 60e3;
+const VERIFY_TTL_MS = 24 * 3600e3;
 const REQUEST_LIMIT = Object.freeze({ max: 3, windowMs: 3600e3 });
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const refuse = (status, error, code) => Object.assign(new Error(error), { status, code });
 const BAD_CREDENTIALS = () => refuse(401, 'Email or password is not right', 'bad_credentials');
 const SECOND_STEP = () => refuse(401, 'Finish signing in: enter the code from your authenticator app', 'second_step_required');
 
-function createAuthController({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter }) {
+function createAuthController({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter, totpRequired = true }) {
   const event = (ctx, userId, ev, outcome, detail = '') => authStore.event({ userId, email: ctx.email || '', event: ev, outcome, ip: ctx.ip, userAgent: ctx.userAgent, detail });
   const BAD_CODE = (msg = 'That code is not right') => refuse(401, msg, 'bad_code');
   const codeHash = code => crypto.createHash('sha256').update(code).digest('hex');
@@ -134,9 +136,15 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
       }
       return fail('bad_password', user.id, false);
     }
+    if (!user.email_verified_at) { await event(ctx, user.id, 'sign_in', 'unverified'); throw refuse(403, 'Confirm your email address first: open the link we sent you, or ask for a new one.', 'email_unverified'); }
     await authStore.recordSuccess(user.id);
     if (ctx.auth && ctx.auth.session) await sessions.revoke(ctx.auth);
     const s = await sessions.issue({ userId: user.id, stage: 'password', ip: ctx.ip, userAgent: ctx.userAgent });
+    if (!totpRequired) {
+      // TOTP_REQUIRED=0: no second step; the password alone opens a full session (not for real client data)
+      await event(ctx, user.id, 'sign_in', 'ok', 'password; second step off');
+      return finish({ ...ctx, auth: { session: { id_hash: s.idHash } } }, user);
+    }
     await event(ctx, user.id, 'sign_in', 'ok', 'password');
     return { reply: { stage: 'password', next: user.totp_confirmed_at && !user.reenrol ? 'totp' : 'enrol', csrf: s.csrf }, headers: { 'Set-Cookie': s.cookie } };
   }
@@ -211,6 +219,7 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
     if (!user) { await event(ctx, null, ev, 'bad_token'); throw refuse(400, 'This link is no longer valid. Ask for a new one.', 'bad_token'); }
     ctx.email = user.email;
     await authStore.setPassword(user.id, await hashPassword(password));
+    await authStore.markVerified(user.id); // the link reached the address
     await authStore.recordSuccess(user.id);
     await sessions.revokeAll(user.id, {});
     await event(ctx, user.id, ev, 'ok', count === null ? 'breach check skipped' : '');
@@ -219,17 +228,56 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
   const reset = async ctx => { await throughLink(ctx, 'reset', 'reset'); return { reply: { ok: true } }; };
   const invite = async ctx => { const user = await throughLink(ctx, 'invite', 'invite'); return { reply: { ok: true, email: user.email } }; };
 
-  async function requestAccess(ctx) {
+  // Registration: name, email, firm and password; a firm of their own with the registrant as its
+  // administrator; the address is confirmed through a link before the first sign-in. The reply is
+  // the same whether or not the address already has an account (its holder is told by email).
+  const str = v => (typeof v === 'string' ? v : '');
+  async function register(ctx) {
     const b = ctx.body || {};
-    const name = typeof b.name === 'string' ? b.name.trim() : '', email = typeof b.email === 'string' ? b.email.trim() : '';
-    const firm = typeof b.firm === 'string' ? b.firm.trim() : '', note = typeof b.note === 'string' ? b.note.trim() : '';
-    if (!name || name.length > 200 || !EMAIL.test(email) || email.length > 254 || firm.length > 200 || note.length > 1000 || /[\u0000-\u001F\u007F]/.test(name + firm + email)) throw refuse(400, 'Give your name, a valid email address, and at most 200 characters for the firm and 1,000 for the note', 'bad_request');
+    const name = str(b.name).trim(), email = normaliseEmail(str(b.email)), firmName = str(b.firm).trim(), password = str(b.password);
+    if (!name || name.length > 200 || !EMAIL.test(email) || email.length > 254 || !firmName || firmName.length > 200 || /[\u0000-\u001F\u007F]/.test(name + firmName + email)) throw refuse(400, 'Give your name, a valid email address, the name of your firm and a password', 'bad_request');
+    const problem = checkPolicy(password);
+    if (problem) throw refuse(400, problem, 'weak_password');
+    const l = requestLimiter.hit(ctx.ip);
+    if (!l.allowed) throw refuse(429, 'Too many registrations from this address. Try again later.', 'too_many_attempts');
+    const count = await breachedCount(password, breached);
+    if (count) throw refuse(400, 'That password has appeared in a data breach. Choose a different one.', 'breached_password');
+    ctx.email = email;
+    const r = await authStore.register({ email, name, firmName, passwordHash: await hashPassword(password) });
+    if (r.exists) {
+      await event(ctx, r.userId, 'register', 'exists');
+      if (notify.alreadyRegistered) await notify.alreadyRegistered(r.user);
+      return { reply: { ok: true } };
+    }
+    const { token } = await authStore.issueToken(r.userId, 'verify', VERIFY_TTL_MS);
+    await notify.verifyLink({ email, name }, token);
+    await event(ctx, r.userId, 'register', 'ok', `firm ${r.firmId}${count === null ? '; breach check skipped' : ''}`);
+    return { reply: { ok: true } };
+  }
+
+  async function verify(ctx) {
+    const { token } = ctx.body || {};
+    const user = await authStore.consumeToken(token, 'verify');
+    if (!user) { await event(ctx, null, 'verify', 'bad_token'); throw refuse(400, 'This link is no longer valid. Sign in and ask for a new one.', 'bad_token'); }
+    ctx.email = user.email;
+    await authStore.markVerified(user.id);
+    await event(ctx, user.id, 'verify', 'ok');
+    return { reply: { ok: true, email: user.email } };
+  }
+
+  // A new verification link, for an unconfirmed account only; the reply never says which it was
+  async function resendVerification(ctx) {
+    const { email } = ctx.body || {};
+    if (typeof email !== 'string' || !email.trim() || email.length > 254) throw refuse(400, 'An email address is required', 'bad_request');
     const l = requestLimiter.hit(ctx.ip);
     if (!l.allowed) throw refuse(429, 'Too many requests from this address. Try again later.', 'too_many_attempts');
     ctx.email = email;
-    await authStore.createAccessRequest({ name, email, firm, note, ip: ctx.ip });
-    await event(ctx, null, 'access_request', 'stored', firm);
-    await notify.accessRequest({ name, email, firm, note, ip: ctx.ip });
+    const user = await authStore.findUserByEmail(email);
+    if (user && user.active && !user.email_verified_at) {
+      const { token } = await authStore.issueToken(user.id, 'verify', VERIFY_TTL_MS);
+      await notify.verifyLink(user, token);
+      await event(ctx, user.id, 'verify_resent', 'sent');
+    } else await event(ctx, user ? user.id : null, 'verify_resent', user ? 'not_needed' : 'unknown');
     return { reply: { ok: true } };
   }
 
@@ -239,7 +287,7 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
     return { reply: { stage: ctx.auth.stage, next, csrf: ctx.auth.csrf, email: user.email } };
   }
 
-  return { totp, enrol, confirmEnrol, recovery, changePassword, signIn, signOut, signOutAll, firms, switchFirm, invitations, answerInvitation, forgot, reset, invite, requestAccess, state };
+  return { totp, enrol, confirmEnrol, recovery, changePassword, signIn, signOut, signOutAll, firms, switchFirm, invitations, answerInvitation, forgot, reset, invite, register, verify, resendVerification, state };
 }
 
 module.exports = { createAuthController, WARN_AT, REQUEST_LIMIT };

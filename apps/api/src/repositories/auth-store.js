@@ -12,7 +12,7 @@ const { tx } = require('../db/pool.js');
 const delayAfter = failures => failures < 3 ? 0 : Math.min(2 ** (failures - 3), 60);
 
 const normaliseEmail = e => String(e || '').trim().toLowerCase();
-const USER_COLUMNS = 'id, email, name, active, password_hash, password_set_at, totp_secret, totp_pending, totp_confirmed_at, totp_last_step, failed_attempts, not_before, last_sign_in_at, reenrol';
+const USER_COLUMNS = 'id, email, name, active, password_hash, password_set_at, totp_secret, totp_pending, totp_confirmed_at, totp_last_step, failed_attempts, not_before, last_sign_in_at, reenrol, email_verified_at';
 
 function createAuthStore({ pool, now = () => new Date() }) {
   const withAuth = fn => tx(pool, async c => { await c.query("select set_config('app.auth', 'on', true)"); return fn(c); });
@@ -28,6 +28,20 @@ function createAuthStore({ pool, now = () => new Date() }) {
     withFirm,
     normaliseEmail,
 
+    // Registration: a firm, its administrator and the account's password, in one transaction; the address is
+    // not yet confirmed (email_verified_at null) until the verification link is opened. An address that already
+    // has an account makes nothing and says so to the caller only (the reply to the browser is the same).
+    register: ({ email, name, firmName, passwordHash, seats = 5 }) => withAuth(async c => {
+      email = normaliseEmail(email);
+      const existing = one(await c.query(`select ${USER_COLUMNS} from users where email = $1`, [email]));
+      if (existing) return { exists: true, userId: existing.id, user: existing };
+      const firmId = crypto.randomUUID();
+      await c.query('insert into firms (id, name, seats) values ($1, $2, $3)', [firmId, firmName, seats]);
+      const user = one(await c.query('insert into users (email, name, password_hash, password_set_at, email_verified_at) values ($1, $2, $3, $4, null) returning id', [email, name, passwordHash, now()]));
+      await c.query("insert into memberships (user_id, firm_id, role, extra_roles, accepted_at) values ($1, $2, 'admin', '{}', $3)", [user.id, firmId, now()]);
+      return { exists: false, userId: user.id, firmId };
+    }),
+    markVerified: userId => withAuth(c => c.query('update users set email_verified_at = coalesce(email_verified_at, $2) where id = $1', [userId, now()])),
     findUserByEmail: email => withAuth(async c => one(await c.query(`select ${USER_COLUMNS} from users where email = $1`, [normaliseEmail(email)]))),
     findUser: id => withAuth(async c => one(await c.query(`select ${USER_COLUMNS} from users where id = $1`, [id]))),
     // Active, accepted memberships with the firm's name, for the firm picker and for the session: role is the

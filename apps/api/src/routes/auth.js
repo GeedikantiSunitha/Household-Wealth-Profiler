@@ -41,8 +41,11 @@
    POST reset {token, password}     sets the password through the link; every session ends
    POST invite {token, password}    a new account chooses its password through the invitation link
                                     (24 hours, single use); then it signs in and enrols as usual
-   POST request-access {name, email, firm, note}  stored for the operator, who is told by email;
-                                    always 200; fields capped; a few per address per hour
+   POST register {name, email, firm, password}  a firm of their own with the registrant as its administrator,
+                                    the password checked as everywhere, and a verification link by email (24 hours,
+                                    single use); always 200 (an address that already has an account is told by email)
+   POST verify {token}              confirms the address through the link; sign-in is refused until then
+   POST verify/resend {email}       a new link for an unconfirmed account; always 200; a few per address per hour
    GET  state                       for a half-finished session after a reload: stage, next, csrf
    Every outcome is an auth event. The per-address limiter counts attempts on sign-in, codes,
    recovery codes and links. Secrets are sealed with DATA_KEY (rotate-key re-seals them). */
@@ -59,7 +62,9 @@ function createAuthRoutes({ limiter, clientIpHeader = '', now = Date.now, reques
     'POST /api/auth/forgot': { stage: 'none', limited: true, fn: c.forgot },
     'POST /api/auth/reset': { stage: 'none', limited: true, fn: c.reset },
     'POST /api/auth/invite': { stage: 'none', limited: true, fn: c.invite },
-    'POST /api/auth/request-access': { stage: 'none', limited: true, fn: c.requestAccess },
+    'POST /api/auth/register': { stage: 'none', limited: true, fn: c.register },
+    'POST /api/auth/verify': { stage: 'none', limited: true, fn: c.verify },
+    'POST /api/auth/verify/resend': { stage: 'none', limited: true, fn: c.resendVerification },
     'GET /api/auth/state': { stage: 'any', fn: c.state },
     'POST /api/auth/sign-in': { stage: 'none', limited: true, fn: c.signIn },
     'POST /api/auth/sign-out': { stage: 'any', fn: c.signOut },

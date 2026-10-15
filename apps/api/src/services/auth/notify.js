@@ -12,6 +12,12 @@ function createNotify({ mailer, publicUrl, operatorEmail = '', appName = 'Househ
   const signOff = `\n\nIf this was not you, or you have any concern, contact your administrator.\n\n${appName}`;
 
   return {
+    // The verification link after a registration: 24 hours, single use
+    verifyLink: ({ email, name }, token) => mailer.send({ to: email, subject: `Confirm your email address for ${appName}`,
+      text: `Hello ${name || ''},\n\nThank you for registering with ${appName}.\n\nTo confirm your email address, open this link within 24 hours:\n\n${link('verify', token)}\n\nThen sign in with your email address and the password you chose.\n\nIf you did not register, ignore this email: nothing is open until the address is confirmed.\n\n${appName}` }),
+    // A registration with an address that already has an account: the holder is told, nobody else is
+    alreadyRegistered: user => quietly('already registered notice', () => mailer.send({ to: user.email, subject: `${appName}: this address already has an account`,
+      text: `Hello ${user.name || ''},\n\nSomeone (hopefully you) tried to register with this email address, which already has a ${appName} account.\n\nTo sign in, use your password; if you have forgotten it, choose "Forgotten your password?" on the sign-in page.${signOff}` })),
     // The reset link: 30 minutes, single use
     resetLink: (user, token) => mailer.send({ to: user.email, subject: `Reset your ${appName} password`,
       text: `Hello ${user.name || ''},\n\nSomeone (hopefully you) asked to reset the password for your ${appName} account.\n\nTo choose a new password, open this link within 30 minutes:\n\n${link('reset', token)}\n\nThe link works once. If you did not ask for this, you can ignore this email: your password has not changed.${signOff}` }),
@@ -28,11 +34,6 @@ function createNotify({ mailer, publicUrl, operatorEmail = '', appName = 'Househ
       text: `Hello ${user.name || ''},\n\nA recovery code was just used to sign in to your ${appName} account${ip ? ` from the address ${ip}` : ''}. The authenticator app on that account no longer counts: a new one must be set up at the next sign-in, and every other session has been ended.${signOff}` })),
     mfaReset: user => quietly('authenticator reset notice', () => mailer.send({ to: user.email, subject: `${appName}: your authenticator app was reset`,
       text: `Hello ${user.name || ''},\n\nAn operator has reset the authenticator app on your ${appName} account, and every recovery code and every session has been ended. At your next sign-in you will set up a new authenticator app and receive new recovery codes.${signOff}` })),
-    accessRequest: req => {
-      if (!operatorEmail) { log('access request stored, but OPERATOR_EMAIL is not set, so nobody was told'); return Promise.resolve(); }
-      return quietly('access request', () => mailer.send({ to: operatorEmail, subject: `${appName}: Access request from ${req.name}`,
-        text: `An access request was submitted on the sign-in page.\n\nName: ${req.name}\nEmail: ${req.email}\nFirm: ${req.firm || '(not given)'}\nNote: ${req.note || '(none)'}\nFrom address: ${req.ip || ''}\n\nTo approve it, create the account and send the invitation (see the README). Nothing has been created yet.\n\n${appName}` }));
-    },
   };
 }
 

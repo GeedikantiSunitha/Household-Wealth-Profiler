@@ -132,6 +132,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     // SERVE_WEB=0: the API answers /api/, /healthz and /readyz only; the screens are served by the
     // web tier (apps/web as its own service, behind the same domain). The default, one server, is for development.
     serveWeb: env.SERVE_WEB !== '0',
+    // TOTP_REQUIRED=0 switches the second step (authenticator code) off: the password alone signs in.
+    // Development and early trials only; never with real client data.
+    totpRequired: env.TOTP_REQUIRED !== '0',
     sessionIdleMinutes,
     sessionAbsoluteHours,
     publicUrl,

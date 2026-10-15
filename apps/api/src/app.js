@@ -31,7 +31,7 @@ function createApp({ config, households, firm, prices, records = null, authentic
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const gates = createGates({ send, ready, serveWeb, basicUsers, authenticate });
   const routes = [
-    createMeRoute({ send, encrypted: !!config.key, production: !!config.production }),
+    createMeRoute({ send, encrypted: !!config.key, production: !!config.production, totpRequired: config.totpRequired !== false }),
     createFirmRoutes({ firm, send, readBody }),
     createPriceRoute({ prices, send }),
     createHouseholdRoutes({ households, ID_RE, send, readBody }),

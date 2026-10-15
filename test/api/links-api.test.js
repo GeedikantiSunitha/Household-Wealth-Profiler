@@ -1,5 +1,5 @@
 // Links and requests (2.6) on PostgreSQL: forgot password and the reset link, the invitation link
-// for a new account, the sign-in state for a half-finished session, Request Access, and the
+// for a new account, the sign-in state for a half-finished session, registration, and the
 // emails behind them (captured here, never sent). Runs when TEST_DATABASE_URL points at a scratch
 // database, in a schema of its own.
 'use strict';
@@ -142,7 +142,7 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
     const { createAuthRoutes: make } = require('../../apps/api/src/routes/auth.js');
     const table = Object.keys(make({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), now }).routes).sort();
     assert.deepEqual(table, ['GET /api/auth/firms', 'GET /api/auth/invitations', 'GET /api/auth/state', 'POST /api/auth/enrol', 'POST /api/auth/enrol/confirm', 'POST /api/auth/firm', 'POST /api/auth/forgot', 'POST /api/auth/invitations/accept', 'POST /api/auth/invitations/decline', 'POST /api/auth/invite', 'POST /api/auth/password',
-      'POST /api/auth/recovery', 'POST /api/auth/request-access', 'POST /api/auth/reset', 'POST /api/auth/sign-in', 'POST /api/auth/sign-out', 'POST /api/auth/sign-out-all', 'POST /api/auth/totp'],
+      'POST /api/auth/recovery', 'POST /api/auth/register', 'POST /api/auth/reset', 'POST /api/auth/sign-in', 'POST /api/auth/sign-out', 'POST /api/auth/sign-out-all', 'POST /api/auth/totp', 'POST /api/auth/verify', 'POST /api/auth/verify/resend'],
       'adding a route is a deliberate change to this list');
     const s = await sessions.issue({ userId: sam, firmId: DEFAULT_FIRM_ID, stage: 'full' });
     const opts = { cookie: s.cookie.split(';')[0], csrf: s.csrf };
@@ -166,20 +166,65 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
     await post('/api/auth/sign-out', {}, { cookie, csrf });
   });
 
-  test('Request Access: stored and sent to the operator; fields are capped; the same address is limited to a few an hour; nothing says whether the email exists', async () => {
-    let r = await post('/api/auth/request-access', { name: 'New Adviser', email: 'new@example.com', firm: 'Alder Wealth', note: 'I work with Sam' });
+  test('Registration: a firm of their own with the registrant as administrator; the address is confirmed through the link before the first sign-in; an existing address is told by email and nothing is made; fields and passwords are checked; a few per address per hour', async () => {
+    const IP1 = '203.0.113.77', IP2 = '203.0.113.78'; // their own addresses: the per-address limits of earlier tests do not count here
+    const before = sent.length;
+    let r = await post('/api/auth/register', { name: 'New Adviser', email: 'New@Example.com', firm: 'Alder Wealth', password: 'a passphrase for new 1' }, { ip: IP1 });
     assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
-    assert.equal(sent.length, 1); assert.equal(sent[0].to, 'operator@example.com'); assert.match(sent[0].subject, /Access request/); assert.match(sent[0].text, /New Adviser/); assert.match(sent[0].text, /Alder Wealth/);
-    const row = (await asRole('hwp_owner', c => c.query('select name, email, firm_name, firm_id, note, status, ip from access_requests'))).rows[0];
-    assert.deepEqual(row, { name: 'New Adviser', email: 'new@example.com', firm_name: 'Alder Wealth', firm_id: null, note: 'I work with Sam', status: 'pending', ip: '10.0.0.1' });
-    r = await post('/api/auth/request-access', { name: 'Sam', email: 'sam@example.com', firm: 'x', note: '' });
-    assert.equal(r.status, 200, 'an existing account gets the same answer'); assert.equal(sent.length, 2);
-    for (const bad of [{ name: '', email: 'a@b.co' }, { name: 'x', email: 'not-an-email' }, { name: 'x'.repeat(201), email: 'a@b.co' }, { name: 'x', email: 'a@b.co', note: 'n'.repeat(1001) }, { name: 'x', email: 'a@b.co', firm: 'f'.repeat(201) }]) {
-      const b = await post('/api/auth/request-access', bad);
-      assert.equal(b.status, 400, JSON.stringify(bad).slice(0, 40)); assert.equal((await b.json()).code, 'bad_request');
+    assert.equal(sent.length, before + 1); assert.equal(sent[before].to, 'new@example.com'); assert.match(sent[before].subject, /Confirm your email/);
+    const token = linkIn(sent[before].text, 'verify');
+    const row = (await asRole('hwp_owner', c => c.query(`select u.name, u.email_verified_at, u.password_hash is not null as has_password, m.role, m.accepted_at is not null as accepted, f.name as firm, f.seats
+      from users u join memberships m on m.user_id = u.id join firms f on f.id = m.firm_id where u.email = 'new@example.com'`))).rows[0];
+    assert.deepEqual(row, { name: 'New Adviser', email_verified_at: null, has_password: true, role: 'admin', accepted: true, firm: 'Alder Wealth', seats: 5 });
+    // not confirmed: the right password is refused with a clear code; a wrong one is refused as ever
+    r = await post('/api/auth/sign-in', { email: 'new@example.com', password: 'a passphrase for new 1' }, { ip: IP1 });
+    assert.equal(r.status, 403); assert.equal((await r.json()).code, 'email_unverified');
+    r = await post('/api/auth/sign-in', { email: 'new@example.com', password: 'wrong' }, { ip: IP1 });
+    assert.equal(r.status, 401); assert.equal((await r.json()).code, 'bad_credentials');
+    // a new link on request, which replaces the first; the reply is the same for any address
+    r = await post('/api/auth/verify/resend', { email: 'new@example.com' }, { ip: IP1 }); assert.equal(r.status, 200); assert.equal(sent.length, before + 2);
+    r = await post('/api/auth/verify/resend', { email: 'nobody@example.com' }, { ip: IP1 }); assert.equal(r.status, 200); assert.equal(sent.length, before + 2, 'no email for an unknown address');
+    const token2 = linkIn(sent[before + 1].text, 'verify');
+    r = await post('/api/auth/verify', { token }, { ip: IP1 }); assert.equal(r.status, 400, 'the first link was replaced by the second');
+    r = await post('/api/auth/verify', { token: token2 }, { ip: IP1 }); assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true, email: 'new@example.com' });
+    r = await post('/api/auth/verify', { token: token2 }, { ip: IP1 }); assert.equal(r.status, 400, 'a link works once');
+    r = await post('/api/auth/sign-in', { email: 'new@example.com', password: 'a passphrase for new 1' }, { ip: IP1 });
+    assert.equal(r.status, 200); const st = await r.json(); assert.equal(st.stage, 'password'); assert.equal(st.next, 'enrol');
+    await post('/api/auth/sign-out', {}, { cookie: cookieOf(r), csrf: st.csrf });
+    assert.deepEqual((await asRole('hwp_owner', c => c.query(`select event, outcome from auth_events where email = 'new@example.com' order by id`))).rows.map(e => e.event + ':' + e.outcome),
+      ['register:ok', 'sign_in:unverified', 'sign_in:bad_password', 'verify_resent:sent', 'verify:ok', 'sign_in:ok', 'sign_out:ok']);
+    // an address that already has an account: the same reply, nothing made, the holder is told
+    const users = (await asRole('hwp_owner', c => c.query('select count(*)::int n from users'))).rows[0].n;
+    r = await post('/api/auth/register', { name: 'Imposter', email: 'sam@example.com', firm: 'Other', password: 'a passphrase for sam 2' }, { ip: IP2 });
+    assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true });
+    assert.equal(sent[sent.length - 1].to, 'sam@example.com'); assert.match(sent[sent.length - 1].subject, /already has an account/);
+    assert.equal((await asRole('hwp_owner', c => c.query('select count(*)::int n from users'))).rows[0].n, users);
+    for (const bad of [{ name: '', email: 'a@b.co', firm: 'F', password: 'a passphrase that is fine 1' }, { name: 'x', email: 'not-an-email', firm: 'F', password: 'a passphrase that is fine 1' }, { name: 'x', email: 'a@b.co', firm: '', password: 'a passphrase that is fine 1' }]) {
+      const b = await post('/api/auth/register', bad); assert.equal(b.status, 400, JSON.stringify(bad).slice(0, 40)); assert.equal((await b.json()).code, 'bad_request');
     }
-    for (let i = 0; i < 3; i++) await post('/api/auth/request-access', { name: 'Again', email: `again${i}@example.com` }, { ip: '203.0.113.5' });
-    r = await post('/api/auth/request-access', { name: 'Again', email: 'again9@example.com' }, { ip: '203.0.113.5' });
+    const weak = await post('/api/auth/register', { name: 'x', email: 'weak@example.com', firm: 'F', password: 'short' }, { ip: IP2 }); assert.equal(weak.status, 400); assert.equal((await weak.json()).code, 'weak_password');
+    for (let i = 0; i < 3; i++) await post('/api/auth/register', { name: 'Again', email: `again${i}@example.com`, firm: 'F', password: 'a passphrase that is fine 1' }, { ip: '203.0.113.5' });
+    r = await post('/api/auth/register', { name: 'Again', email: 'again9@example.com', firm: 'F', password: 'a passphrase that is fine 1' }, { ip: '203.0.113.5' });
     assert.equal(r.status, 429); assert.equal((await r.json()).code, 'too_many_attempts');
+  });
+
+  test('TOTP_REQUIRED=0: the password alone opens a full session in the only firm, and /api/me says the second step is off', async () => {
+    const solo = (await asRole('hwp_owner', async c => (await c.query(`insert into users (email, name, password_hash, password_set_at) values ('solo@example.com', 'Solo', $1, now()) returning id`, [await hashPassword(PASS)])).rows[0].id));
+    await asRole('hwp_owner', c => c.query(`insert into memberships (user_id, firm_id, role) values ($1, $2, 'adviser')`, [solo, DEFAULT_FIRM_ID]));
+    const { authenticate } = createAuth({ users: new Map(), clientIpHeader: 'x-client-ip' }, { authStore: store, sessions });
+    const routes2 = createAuthRoutes({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), notify: {}, clientIpHeader: 'x-client-ip', now, sealer: createSealer(Buffer.alloc(32, 7)), totpRequired: false });
+    const nothing = { list: async () => [], create: async () => ({ id: '0', version: 1 }), get: async () => null, audit: async () => null, save: async () => ({ notFound: true }) };
+    const app2 = createApp({ config: { hsts: false, key: Buffer.alloc(32), root: ROOT, users: new Map(), totpRequired: false }, households: nothing, firm: { get: async () => ({}), audit: async () => [], save: async () => ({}) }, prices: { enabled: false }, authenticate, authRoutes: routes2, ready: async () => {} });
+    await new Promise(ok => app2.server.listen(0, '127.0.0.1', ok));
+    const b2 = `http://127.0.0.1:${app2.server.address().port}`;
+    try {
+      const r = await fetch(b2 + '/api/auth/sign-in', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Client-IP': '10.0.0.9' }, body: JSON.stringify({ email: 'solo@example.com', password: PASS }) });
+      assert.equal(r.status, 200); const st = await r.json();
+      assert.equal(st.stage, 'full'); assert.equal(st.next, null); assert.equal(st.firmId, DEFAULT_FIRM_ID);
+      const me = await fetch(b2 + '/api/me', { headers: { Cookie: cookieOf(r) } });
+      assert.equal(me.status, 200); const j = await me.json(); assert.equal(j.totpRequired, false); assert.equal(j.stage, 'full'); assert.equal(j.email, 'solo@example.com');
+      assert.match((await asRole('hwp_owner', c => c.query(`select detail from auth_events where email = 'solo@example.com' and event = 'sign_in'`))).rows[0].detail, /second step off/);
+      await fetch(b2 + '/api/auth/sign-out', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookieOf(r), 'X-CSRF-Token': st.csrf }, body: '{}' });
+    } finally { app2.server.close(); }
   });
 });
