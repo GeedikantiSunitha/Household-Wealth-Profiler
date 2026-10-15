@@ -554,7 +554,15 @@ income is included. The Supabase edition imports CSVs but does not yet fetch pri
 
 ```
 packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
-apps/api/src/       the self-hosted API: settings, sign-in, encryption, storage, versions, audit trail, routes
+apps/api/src/       the API, in layers that call downwards only:
+  middleware/         the security layer: ten global gates in a fixed order (parse-url, health, api-only,
+                      authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf),
+                      the per-route guards (stage, rate limit, role) and the Basic provider for development
+  routes/             which method and path reaches which handler, and that route's guards
+  services/           the decisions: validation, permissions, sign-off, households, firm, members, records
+  repositories/       storage: PostgreSQL (row-level security, per-firm keys), the file store, idempotency
+  auth/               the app's own sign-in: passwords, sessions, authenticator codes, links, mail
+  http/ db/ crypto/ config/ cli/   replies and files, the connection pool, encryption, settings, commands
 apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js)
 apps/web/public/cloud.js  sign-in and two-step verification for the Supabase edition
 server.js           starts the API (npm start) and runs its commands (hash-password, gen-key, import-files)

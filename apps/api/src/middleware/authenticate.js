@@ -6,7 +6,7 @@
    HTTP Basic (AUTH_USERS, development only: production refuses it): every user in the default firm,
    stage full, no session. Nothing else; there is no provider interface. */
 'use strict';
-const basic = require('./providers/basic');
+const basic = require('./basic.js');
 
 function createAuth(config, { authStore = null, sessions = null, now } = {}) {
   const b = config.users && config.users.size ? basic.createBasicAuth({ users: config.users, clientIpHeader: config.clientIpHeader, ...(now ? { now } : {}) }) : null;

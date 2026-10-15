@@ -49,7 +49,8 @@
 'use strict';
 const crypto = require('crypto');
 const { verifyPassword, dummyVerify, hashPassword, checkPolicy, breachedCount } = require('../auth/password.js');
-const { ipOf } = require('../auth/limiter.js');
+const { ipOf } = require('../middleware/rate-limit.js');
+const { requireStage, limited } = require('../middleware/guards.js');
 const { generateSecret, base32Encode, base32Decode, otpauthUri, verifyCode, newRecoveryCodes, normaliseRecoveryCode } = require('../auth/totp.js');
 const { ID_RE } = require('../repositories/ids.js');
 
@@ -62,7 +63,7 @@ const BAD_CREDENTIALS = () => refuse(401, 'Email or password is not right', 'bad
 const SECOND_STEP = () => refuse(401, 'Finish signing in: enter the code from your authenticator app', 'second_step_required');
 
 function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter = null }) {
-  const { createLimiter } = require('../auth/limiter.js');
+  const { createLimiter } = require('../middleware/rate-limit.js');
   requestLimiter = requestLimiter || createLimiter({ ...REQUEST_LIMIT, now });
   const event = (ctx, userId, ev, outcome, detail = '') => authStore.event({ userId, email: ctx.email || '', event: ev, outcome, ip: ctx.ip, userAgent: ctx.userAgent, detail });
   const BAD_CODE = (msg = 'That code is not right') => refuse(401, msg, 'bad_code');
@@ -306,7 +307,9 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
     'POST /api/auth/recovery': { stage: 'any', limited: true, fn: recovery },
     'POST /api/auth/password': { stage: 'full', fn: changePassword },
   };
-  const add = (key, route) => { ROUTES[key] = route; };
+  const guardsOf = r => [requireStage(r.stage), ...(r.limited ? [limited(limiter, clientIpHeader)] : [])];
+  for (const r of Object.values(ROUTES)) r.guards = guardsOf(r);
+  const add = (key, route) => { ROUTES[key] = { ...route, guards: guardsOf(route) }; };
 
   // true when the request was one of these routes (and has been answered)
   async function handle({ req, res, p, auth, send, readBody }) {
@@ -315,16 +318,12 @@ function createAuthRoutes({ authStore, sessions, limiter, notify = {}, clientIpH
     if (!route) { send(res, 404, { error: 'Not found' }); return true; }
     if (auth && auth.locked) { send(res, 429, { error: 'Too many failed sign-ins. Try again in 15 minutes.', code: 'locked_out' }); return true; }
     const session = auth && auth.session ? auth : null;
-    if (route.stage !== 'none') {
-      if (!session) { send(res, 401, { error: 'Sign in required', code: 'sign_in_required' }); return true; }
-      if (route.stage === 'full' && session.stage !== 'full') { const e = SECOND_STEP(); send(res, e.status, { error: e.message, code: e.code }); return true; }
-      if (req.method !== 'GET' && req.headers['x-csrf-token'] !== session.csrf) { send(res, 403, { error: 'Request refused: the sign-in token is missing or stale. Reload the page.', code: 'csrf' }); return true; }
+    // The route's own guards (middleware/guards.js), in order: the stage it needs (with the CSRF token on a session write), then the per-address limit
+    for (const guard of route.guards) {
+      const refused = guard({ req, p, auth });
+      if (refused) { send(res, ...refused); return true; }
     }
     const ip = ipOf(req, clientIpHeader);
-    if (route.limited) {
-      const l = limiter.hit(ip);
-      if (!l.allowed) { send(res, 429, { error: 'Too many attempts from this address. Try again in 15 minutes.', code: 'too_many_attempts' }, { 'Retry-After': String(l.retryAfter) }); return true; }
-    }
     const ctx = { ip, userAgent: req.headers['user-agent'] || '', auth: session || auth, email: session ? session.email : '', body: req.method === 'GET' ? {} : await readBody(req) };
     try {
       const { status = 200, reply, headers = {} } = await route.fn(ctx);

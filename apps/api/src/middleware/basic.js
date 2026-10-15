@@ -12,7 +12,7 @@
      once a minute and capped, so they cannot grow without limit. */
 'use strict';
 const crypto = require('crypto');
-const { DEFAULT_FIRM_ID } = require('../../../repositories/ids.js');
+const { DEFAULT_FIRM_ID } = require('../repositories/ids.js');
 
 const MAX_FAILURES = 10;
 const LOCK_MS = 15 * 60e3;

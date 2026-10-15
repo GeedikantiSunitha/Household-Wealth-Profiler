@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { createApp } = require('../../apps/api/src/app.js');
-const { checkWrite } = require('../../apps/api/src/http/guards.js');
+const { checkWrite } = require('../../apps/api/src/middleware');
 
 const ROOT = path.join(__dirname, '..', '..');
 const ID = '00000000-0000-4000-8000-000000000001';

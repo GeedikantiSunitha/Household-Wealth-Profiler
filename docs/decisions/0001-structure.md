@@ -88,3 +88,18 @@ unchanged from the baseline. Where the result differs from the plan above:
   because his `main` stores them in files only.
 - **The unit tests run on a fixed clock** (2026-10-10). One of them had hard-coded dates and began
   failing on 2026-10-12; the fix touched only the tests.
+
+## Update 2026-10-15: the middleware layer
+
+The API's security checks, until now written inline in `app.js`, are a layer of their own,
+`apps/api/src/middleware/`, with one file per check and a fixed order that `app.js` runs and
+`test/api/app.test.js` and `test/api/middleware.test.js` pin: parse-url, health, api-only,
+authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf. The
+per-route guards (`guards.js`: the stage a sign-in route needs, the per-address rate limit, the
+role an action needs) sit beside them; the sign-in routes run theirs from their route table. The
+HTTP Basic provider (development only) and the rate limiter moved into the layer unchanged.
+Behaviour, replies and the route table are the same; the move is the whole change. Field
+validation stays in `services/validate.js`, applied by the services, so the commands and the
+importer are held to the same rules as the API. With `SERVE_WEB=0` the API answers `/api/`
+only and the screens are served by a web tier on the same domain, the first step towards
+running the front end, the API and the database as separate services.

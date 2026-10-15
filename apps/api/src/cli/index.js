@@ -4,7 +4,7 @@
    Each returns the exit code; output goes to stdout, problems to stderr. */
 'use strict';
 const crypto = require('crypto');
-const { hashPassword } = require('../auth');
+const { hashPassword } = require('../middleware/authenticate.js');
 
 function hashPasswordCommand([name, pass]) {
   if (!name || !pass || /[:;]/.test(name)) { console.error('Usage: node server.js hash-password NAME PASSWORD (name without : or ;)'); return 1; }

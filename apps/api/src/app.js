@@ -1,16 +1,14 @@
-/* The API server: every request goes through the same steps, in this order.
-     0. a request whose URL cannot be parsed is 400 "Bad request"
-     1. GET /healthz answers without signing in (the process is up); GET /readyz answers without
-        signing in once storage answers too (200), else 503 with no detail (for the host's checks)
-     2. the sign-in routes (/api/auth/, routes/auth.js) answer here, each saying what session it
-        needs; then sign-in: 429 while the address is locked out, 401 with a Basic challenge when
-        not signed in; a session whose second step is pending reaches only the second-step and
-        sign-out routes (401)
-     3. anything outside /api/ is one of the app's files (GET only, else 405); with SERVE_WEB=0
-        (the web tier serves the screens) it is 404, before sign-in is even looked at
-     4. any API call that changes something: same-site check (403), then JSON check (415); with a
-        cookie session, the CSRF token bound to that session must come in X-CSRF-Token (403)
-     5. the API routes; anything else is 404
+/* The API server: every request goes through the middleware gates (middleware/index.js, in
+   their fixed order) and then one route. The order is part of the security:
+     1. parse-url, 2. health, 3. api-only, 4. authenticate
+        the sign-in routes (/api/auth/, routes/auth.js) branch off here: same-site and json-body,
+        then each route's own guards (stage, rate limit)
+        with the app's own sign-in the screens are served here too, before anyone is signed in
+        (the shell holds no data)
+     5. sign-in-required, 6. second-step, 7. firm-required
+        with Basic sign-in (development) the screens are served here, after sign-in
+     8. same-site, 9. json-body, 10. csrf, for anything that changes something
+     then the routes (routes/*.js) call the controllers; anything else is 404
    An error a step raises with a status (413, 400) is sent with its message, its code and, for a
    refused record, its list of problems; any other error is logged and answered "Server error"
    (500) without detail. Every error reply carries a code (see http/respond.js). */
@@ -19,7 +17,7 @@ const http = require('http');
 const path = require('path');
 const { securityHeaders, createSend, readBody } = require('./http/respond.js');
 const { createStatic } = require('./http/static.js');
-const { checkWrite } = require('./http/guards.js');
+const { createGates, checkWrite } = require('./middleware');
 const { createMeRoute } = require('./routes/me.js');
 const { createHouseholdRoutes } = require('./routes/households.js');
 const { createFirmRoutes } = require('./routes/firm.js');
@@ -28,20 +26,10 @@ const { createPriceRoute } = require('./routes/prices.js');
 const { createRecordsRoutes } = require('./routes/records.js');
 const { ID_RE } = require('./repositories/ids.js');
 
-const CHALLENGE = { 'WWW-Authenticate': 'Basic realm="Household Wealth Profiler", charset="UTF-8"' };
-// What a session may call while its second step is still pending
-const SECOND_STEP_PATHS = new Set(['/api/auth/totp', '/api/auth/enrol', '/api/auth/enrol/confirm', '/api/auth/recovery', '/api/auth/sign-out', '/api/auth/state']);
-const READY_TIMEOUT_MS = 3000;
-
-// ready() must answer within the time limit, or the readiness check reports not ready
-function withinTime(promise, ms) {
-  let timer;
-  return Promise.race([promise, new Promise((_, no) => { timer = setTimeout(() => no(new Error('timed out')), ms); })]).finally(() => clearTimeout(timer));
-}
-
 function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, members = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers, serveWeb = config.serveWeb !== false }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
+  const gates = createGates({ send, ready, serveWeb, basicUsers, authenticate });
   const routes = [
     createMeRoute({ send, encrypted: !!config.key, production: !!config.production }),
     createFirmRoutes({ firm, send, readBody }),
@@ -50,39 +38,29 @@ function createApp({ config, households, firm, prices, records = null, authentic
     ...(records ? [createRecordsRoutes({ records, ID_RE, send, readBody })] : []),
     ...(members ? [createMembersRoutes({ members, send, readBody })] : []), // the team: only with the app's own sign-in (PostgreSQL)
   ];
+  const files = ctx => (ctx.req.method === 'GET' ? serveStatic(ctx.req, ctx.res, ctx.p) : send(ctx.res, 405, { error: 'Method not allowed' }));
 
   async function handle(req, res) {
-    let url;
-    try { url = new URL(req.url, 'http://localhost'); } catch (e) { return send(res, 400, { error: 'Bad request' }); }
-    const p = url.pathname;
-    if (p === '/healthz') return send(res, 200, { ok: true });
-    if (p === '/readyz') {
-      try { await withinTime(ready(), READY_TIMEOUT_MS); return send(res, 200, { ok: true }); }
-      catch (e) { console.error(new Date().toISOString(), 'not ready:', e.message); return send(res, 503, { ok: false }); }
-    }
-    // API only: the screens live in the web tier, so no path outside /api/ exists here
-    if (!serveWeb && !p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
-    const auth = await authenticate(req);
+    const ctx = { req, res };
+    if (gates.parseUrl(ctx)) return;
+    if (await gates.health(ctx)) return;
+    if (gates.apiOnly(ctx)) return;
+    await gates.authenticate(ctx);
+    const { p, auth } = ctx;
     if (authRoutes && p.startsWith('/api/auth/')) {
       const refused = checkWrite(req);
       if (refused) return send(res, ...refused);
       return authRoutes.handle({ req, res, p, auth, send, readBody });
     }
-    // With the app's own sign-in the shell must load before anyone is signed in (it holds no data)
-    if (publicShell && !p.startsWith('/api/')) return req.method === 'GET' ? serveStatic(req, res, p) : send(res, 405, { error: 'Method not allowed' });
-    if (!auth || auth.locked) {
-      return send(res, auth && auth.locked ? 429 : 401, { error: auth && auth.locked ? 'Too many failed sign-ins. Try again in 15 minutes.' : 'Sign in required' },
-        auth && auth.locked ? {} : basicUsers ? CHALLENGE : {});
-    }
-    if ((auth.stage || 'full') !== 'full' && !SECOND_STEP_PATHS.has(p)) return send(res, 401, { error: 'Finish signing in: enter the code from your authenticator app', code: 'second_step_required' });
-    if (auth.session && !auth.firmId && p !== '/api/me') return send(res, 403, { error: 'Choose a firm to work in', code: 'firm_required' });
+    if (publicShell && !p.startsWith('/api/')) return files(ctx);
+    if (gates.signInRequired(ctx)) return;
+    if (gates.secondStep(ctx)) return;
+    if (gates.firmRequired(ctx)) return;
+    if (!p.startsWith('/api/')) return files(ctx);
+    if (gates.sameSite(ctx) || gates.jsonBody(ctx) || gates.csrf(ctx)) return;
     // Everything a route and service may act on: who is signed in, and the one firm they work in
-    const ctx = { user: auth.user, firmId: auth.firmId, ...(auth.session ? { userId: auth.userId, email: auth.email, name: auth.name, firmName: auth.firmName, role: auth.role, roles: auth.roles, stage: auth.stage, csrf: auth.csrf, session: auth.session } : {}) };
-    if (!p.startsWith('/api/')) return req.method === 'GET' ? serveStatic(req, res, p) : send(res, 405, { error: 'Method not allowed' });
-    const refused = checkWrite(req);
-    if (refused) return send(res, ...refused);
-    if (auth.session && req.method !== 'GET' && req.headers['x-csrf-token'] !== auth.csrf) return send(res, 403, { error: 'Request refused: the sign-in token is missing or stale. Reload the page.', code: 'csrf' });
-    for (const route of routes) if (await route(req, res, p, ctx)) return;
+    const routeCtx = { user: auth.user, firmId: auth.firmId, ...(auth.session ? { userId: auth.userId, email: auth.email, name: auth.name, firmName: auth.firmName, role: auth.role, roles: auth.roles, stage: auth.stage, csrf: auth.csrf, session: auth.session } : {}) };
+    for (const route of routes) if (await route(req, res, p, routeCtx)) return;
     return send(res, 404, { error: 'Not found' });
   }
 
