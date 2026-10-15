@@ -11,8 +11,8 @@ const operator = require('../../apps/api/src/cli/platform.js');
 const { createUser, setPassword } = require('../../apps/api/src/cli/accounts.js');
 const { createStore } = require('../../apps/api/src/repositories');
 const { createSealer } = require('../../apps/api/src/crypto/seal.js');
-const { createAuthStore } = require('../../apps/api/src/auth/store.js');
-const { createSessions } = require('../../apps/api/src/auth/sessions.js');
+const { createAuthStore } = require('../../apps/api/src/repositories/auth-store.js');
+const { createSessions } = require('../../apps/api/src/services/auth/sessions.js');
 const { migrate, pgClient } = require('../../db/migrate.js');
 const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
 

@@ -16,17 +16,16 @@ const SRC = path.join(__dirname, '..', '..', 'apps', 'api', 'src');
 const ALLOWED = {
   'main.js': ['*'],
   'app.js': ['http', 'middleware', 'routes', 'repositories'],
-  cli: ['services', 'repositories', 'auth', 'crypto', 'db', 'config', 'middleware', 'http'],
+  cli: ['services', 'repositories', 'crypto', 'db', 'config', 'middleware', 'http'],
   middleware: ['services', 'repositories'],
   routes: ['controllers', 'middleware', 'repositories'],
-  controllers: ['services', 'auth', 'repositories', 'crypto'],
-  services: ['repositories', 'auth', 'crypto', 'db'],
-  auth: ['repositories', 'crypto', 'db', 'services'],
+  controllers: ['services', 'repositories', 'crypto'],
+  services: ['repositories', 'crypto', 'db'],
   repositories: ['db', 'crypto'],
   http: [],
   crypto: [],
   db: [],
-  config: ['auth'],
+  config: ['services'], // parses the SMTP_URL setting with the mail service's parser
 };
 
 function* files(dir) {

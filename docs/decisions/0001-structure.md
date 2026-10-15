@@ -114,3 +114,12 @@ where it was. The direction is now the rule and `test/ci/layers.test.js` enforce
 `require()`: app.js to middleware and routes, routes to controllers, controllers to services,
 services to repositories, repositories to the database; no layer requires one above it, and a
 route never skips the controller to call a service.
+
+## Update 2026-10-15: the auth folder dissolved into the layers
+
+`apps/api/src/auth/` held both decisions and storage. Its files moved, unchanged, to where the
+layers say: `services/auth/` (password, sessions, totp, invites, notify, mail) and
+`repositories/auth-store.js` (accounts, sessions and the auth event log in PostgreSQL). The
+progressive-delay schedule after failed sign-ins now lives with the store that applies it, and
+the password service re-exports it, so no repository requires a service. The layering test
+covers the result.

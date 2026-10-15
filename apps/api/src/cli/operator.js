@@ -16,7 +16,7 @@
    Exit 0 done, 1 refused or failed. Nothing prints a secret or a link except through the mailer's
    development log fallback. */
 'use strict';
-const { normaliseEmail } = require('../auth/store.js');
+const { normaliseEmail } = require('../repositories/auth-store.js');
 const { ID_RE } = require('../repositories/ids.js');
 
 const ROLES = ['admin', 'adviser', 'compliance'];

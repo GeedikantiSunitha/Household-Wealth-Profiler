@@ -81,7 +81,7 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   // Email for the sign-in links and warnings: SMTP_URL (smtp:// with STARTTLS, or smtps://), the sender,
   // and the operator who receives access requests. Without SMTP_URL, outside production, messages go to the log.
   const smtpUrl = env.SMTP_URL || '';
-  if (smtpUrl) require('../auth/mail.js').parseSmtpUrl(smtpUrl);
+  if (smtpUrl) require('../services/auth/mail.js').parseSmtpUrl(smtpUrl);
   const smtpFrom = env.SMTP_FROM || 'Household Wealth Profiler <no-reply@localhost>';
   const operatorEmail = env.OPERATOR_EMAIL || '';
   // How long a household is kept after its relationship ends, in whole years. The Money Laundering

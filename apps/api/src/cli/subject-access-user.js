@@ -11,7 +11,7 @@
    auth event. Exit 0 done, 1 refused or failed. */
 'use strict';
 const fs = require('fs');
-const { normaliseEmail } = require('../auth/store.js');
+const { normaliseEmail } = require('../repositories/auth-store.js');
 
 async function subjectAccessUser({ ownerUrl, args: [email, outFile], now = () => new Date(), log = console.log }) {
   if (!ownerUrl) { console.error('Set DATABASE_OWNER_URL: the owner reads the accounts of every firm.'); return 1; }

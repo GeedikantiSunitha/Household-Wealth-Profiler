@@ -560,9 +560,10 @@ apps/api/src/       the API, in layers that call downwards only:
                       the per-route guards (stage, rate limit, role) and the Basic provider for development
   routes/             tables: which method and path reaches which controller, with that route's guards
   controllers/        one handler per route: read the input, call one service, send the reply
-  services/           the decisions: validation, permissions, sign-off, households, firm, members, records
-  repositories/       storage: PostgreSQL (row-level security, per-firm keys), the file store, idempotency
-  auth/               the app's own sign-in: passwords, sessions, authenticator codes, links, mail
+  services/           the decisions: validation, permissions, sign-off, households, firm, members, records;
+                      services/auth/ is the app's own sign-in: passwords, sessions, authenticator codes, links, mail
+  repositories/       storage: PostgreSQL (row-level security, per-firm keys), the file store, idempotency,
+                      the sign-in store (accounts, sessions, the auth event log)
   http/ db/ crypto/ config/ cli/   replies and files, the connection pool, encryption, settings, commands
 apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js)
 apps/web/public/cloud.js  sign-in and two-step verification for the Supabase edition

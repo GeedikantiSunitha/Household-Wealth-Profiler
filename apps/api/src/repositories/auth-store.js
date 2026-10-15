@@ -8,7 +8,8 @@
 'use strict';
 const crypto = require('crypto');
 const { tx } = require('../db/pool.js');
-const { delayAfter } = require('./password.js');
+// The progressive delay after failed sign-ins: none for the first two, then 1, 2, 4 ... seconds, at most a minute
+const delayAfter = failures => failures < 3 ? 0 : Math.min(2 ** (failures - 3), 60);
 
 const normaliseEmail = e => String(e || '').trim().toLowerCase();
 const USER_COLUMNS = 'id, email, name, active, password_hash, password_set_at, totp_secret, totp_pending, totp_confirmed_at, totp_last_step, failed_attempts, not_before, last_sign_in_at, reenrol';
@@ -194,4 +195,4 @@ function createAuthStore({ pool, now = () => new Date() }) {
   };
 }
 
-module.exports = { createAuthStore, normaliseEmail };
+module.exports = { createAuthStore, normaliseEmail, delayAfter };

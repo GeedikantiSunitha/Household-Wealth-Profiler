@@ -22,8 +22,8 @@
    the administrator who made them. */
 'use strict';
 const { authorize, ROLES } = require('./access.js');
-const { normaliseEmail } = require('../auth/store.js');
-const { INVITE_TTL_MS } = require('../auth/invites.js');
+const { normaliseEmail } = require('../repositories/auth-store.js');
+const { INVITE_TTL_MS } = require('./auth/invites.js');
 const { ID_RE } = require('../repositories/ids.js');
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

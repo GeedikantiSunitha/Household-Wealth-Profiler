@@ -65,7 +65,7 @@ function checkPolicy(password) {
   return null;
 }
 
-const delayAfter = failures => failures < 3 ? 0 : Math.min(2 ** (failures - 3), 60);
+const { delayAfter } = require('../../repositories/auth-store.js'); // the schedule the store applies after a failure
 
 async function breachedCount(password, { fetch = globalThis.fetch, timeoutMs = 5000, log = m => console.error(new Date().toISOString(), m) } = {}) {
   const sha1 = crypto.createHash('sha1').update(String(password), 'utf8').digest('hex').toUpperCase();

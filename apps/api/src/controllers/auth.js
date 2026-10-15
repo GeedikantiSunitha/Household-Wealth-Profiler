@@ -4,8 +4,8 @@
    event. Secrets are sealed with DATA_KEY (rotate-key re-seals them). */
 'use strict';
 const crypto = require('crypto');
-const { verifyPassword, dummyVerify, hashPassword, checkPolicy, breachedCount } = require('../auth/password.js');
-const { generateSecret, base32Encode, base32Decode, otpauthUri, verifyCode, newRecoveryCodes, normaliseRecoveryCode } = require('../auth/totp.js');
+const { verifyPassword, dummyVerify, hashPassword, checkPolicy, breachedCount } = require('../services/auth/password.js');
+const { generateSecret, base32Encode, base32Decode, otpauthUri, verifyCode, newRecoveryCodes, normaliseRecoveryCode } = require('../services/auth/totp.js');
 const { ID_RE } = require('../repositories/ids.js');
 
 const WARN_AT = 5;

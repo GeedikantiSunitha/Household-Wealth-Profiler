@@ -4,8 +4,8 @@
    through POST /api/auth/invite, which sets the password. Creating an account here runs as the
    app role within sign-in (migration 0011 allows it), so the server needs no owner connection. */
 'use strict';
-const { normaliseEmail } = require('./store.js');
-const { ID_RE } = require('../repositories/ids.js');
+const { normaliseEmail } = require('../../repositories/auth-store.js');
+const { ID_RE } = require('../../repositories/ids.js');
 
 const INVITE_TTL_MS = 24 * 3600e3;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
