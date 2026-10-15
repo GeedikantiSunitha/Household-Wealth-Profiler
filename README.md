@@ -558,7 +558,8 @@ apps/api/src/       the API, in layers that call downwards only:
   middleware/         the security layer: ten global gates in a fixed order (parse-url, health, api-only,
                       authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf),
                       the per-route guards (stage, rate limit, role) and the Basic provider for development
-  routes/             which method and path reaches which handler, and that route's guards
+  routes/             tables: which method and path reaches which controller, with that route's guards
+  controllers/        one handler per route: read the input, call one service, send the reply
   services/           the decisions: validation, permissions, sign-off, households, firm, members, records
   repositories/       storage: PostgreSQL (row-level security, per-firm keys), the file store, idempotency
   auth/               the app's own sign-in: passwords, sessions, authenticator codes, links, mail

@@ -103,3 +103,14 @@ validation stays in `services/validate.js`, applied by the services, so the comm
 importer are held to the same rules as the API. With `SERVE_WEB=0` the API answers `/api/`
 only and the screens are served by a web tier on the same domain, the first step towards
 running the front end, the API and the database as separate services.
+
+## Update 2026-10-15: routes, controllers, services, repositories
+
+The route files are now tables only (`routes/table.js` runs them: method and path to a
+controller, the route's parameters and id checks, its guards in order, 405 where the API has
+always said so). The handler bodies moved, unchanged, into `apps/api/src/controllers/`, one file
+per route file, including the sign-in handlers from `routes/auth.js`, whose route table stays
+where it was. The direction is now the rule and `test/ci/layers.test.js` enforces it on every
+`require()`: app.js to middleware and routes, routes to controllers, controllers to services,
+services to repositories, repositories to the database; no layer requires one above it, and a
+route never skips the controller to call a service.
