@@ -129,6 +129,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     key,
     newKey,
     hsts: env.HSTS !== '0',
+    // SERVE_WEB=0: the API answers /api/, /healthz and /readyz only; the screens are served by the
+    // web tier (apps/web as its own service, behind the same domain). The default, one server, is for development.
+    serveWeb: env.SERVE_WEB !== '0',
     sessionIdleMinutes,
     sessionAbsoluteHours,
     publicUrl,

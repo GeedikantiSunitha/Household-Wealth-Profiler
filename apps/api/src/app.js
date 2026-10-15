@@ -6,7 +6,8 @@
         needs; then sign-in: 429 while the address is locked out, 401 with a Basic challenge when
         not signed in; a session whose second step is pending reaches only the second-step and
         sign-out routes (401)
-     3. anything outside /api/ is one of the app's files (GET only, else 405)
+     3. anything outside /api/ is one of the app's files (GET only, else 405); with SERVE_WEB=0
+        (the web tier serves the screens) it is 404, before sign-in is even looked at
      4. any API call that changes something: same-site check (403), then JSON check (415); with a
         cookie session, the CSRF token bound to that session must come in X-CSRF-Token (403)
      5. the API routes; anything else is 404
@@ -38,7 +39,7 @@ function withinTime(promise, ms) {
   return Promise.race([promise, new Promise((_, no) => { timer = setTimeout(() => no(new Error('timed out')), ms); })]).finally(() => clearTimeout(timer));
 }
 
-function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, members = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers }) {
+function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, members = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers, serveWeb = config.serveWeb !== false }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const routes = [
@@ -59,6 +60,8 @@ function createApp({ config, households, firm, prices, records = null, authentic
       try { await withinTime(ready(), READY_TIMEOUT_MS); return send(res, 200, { ok: true }); }
       catch (e) { console.error(new Date().toISOString(), 'not ready:', e.message); return send(res, 503, { ok: false }); }
     }
+    // API only: the screens live in the web tier, so no path outside /api/ exists here
+    if (!serveWeb && !p.startsWith('/api/')) return send(res, 404, { error: 'Not found' });
     const auth = await authenticate(req);
     if (authRoutes && p.startsWith('/api/auth/')) {
       const refused = checkWrite(req);
