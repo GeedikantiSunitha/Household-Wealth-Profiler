@@ -565,7 +565,12 @@ apps/api/src/       the API, in layers that call downwards only:
   repositories/       storage: PostgreSQL (row-level security, per-firm keys), the file store, idempotency,
                       the sign-in store (accounts, sessions, the auth event log)
   http/ db/ crypto/ config/ cli/   replies and files, the connection pool, encryption, settings, commands
-apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js)
+apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js), in layers:
+  js/pages/           one file per screen, the sign-in screens, and the page switch
+  js/components/      form fields, banners, the side rail, the top bar
+  js/hooks/           what pages share: the state, the store (autosave, conflicts), look-ups, Excel and downloads
+  js/services/api/    the only code that calls the server
+  js/lib/ js/content/ js/events/   helpers, text, and the shell that wires typing and buttons
 apps/web/public/cloud.js  sign-in and two-step verification for the Supabase edition
 server.js           starts the API (npm start) and runs its commands (hash-password, gen-key, import-files)
 db/                 PostgreSQL migrations and the migration runner for the self-hosted API

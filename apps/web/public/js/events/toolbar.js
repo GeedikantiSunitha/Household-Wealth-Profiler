@@ -1,11 +1,11 @@
 /* Top-bar buttons: Import Excel / JSON, Excel template, Export Excel, Export JSON, All households. Wired when this module loads (main.js imports it for that). */
-import { Store, logChange } from '../api/store.js';
-import { save } from '../io/download.js';
-import { buildWorkbook, importWorkbook, loadXLSX } from '../io/excel.js';
-import { describeUnknown, unknownDropdowns } from '../io/import-check.js';
+import { Store, logChange } from '../hooks/store.js';
+import { save } from '../hooks/io/download.js';
+import { buildWorkbook, importWorkbook, loadXLSX } from '../hooks/io/excel.js';
+import { describeUnknown, unknownDropdowns } from '../hooks/io/import-check.js';
 import { $, esc, toast } from '../lib/dom.js';
-import { setState, state } from '../state.js';
-import { render } from '../views/render.js';
+import { setState, state } from '../hooks/state.js';
+import { render } from '../pages/render.js';
 
 const H = window.HWP;
 

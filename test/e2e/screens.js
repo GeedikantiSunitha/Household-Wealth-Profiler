@@ -319,7 +319,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     // ---- The app's own sign-in (session mode), against a scratch PostgreSQL database when TEST_DATABASE_URL is set
     const DB = process.env.TEST_DATABASE_URL;
     if (DB) {
-      const { codeAt, base32Decode } = require('../../apps/api/src/auth/totp.js');
+      const { codeAt, base32Decode } = require('../../apps/api/src/services/auth/totp.js');
       const port2 = await freePort(); const BASE2 = `http://127.0.0.1:${port2}/`;
       const key = execFileSync(process.execPath, ['server.js', 'gen-key'], { cwd: ROOT }).toString().trim();
       const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', PUBLIC_URL: BASE2.replace(/\/$/, '') };
@@ -428,8 +428,8 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
         // that fills in its own reviewer and goes stale, several roles on one membership, and an invitation answered at sign-in.
         await step('roles: an administrator, an adviser and a compliance reviewer each see only what their role allows', async () => {
           const H = require('../../packages/core/core.js');
-          const { createAuthStore } = require('../../apps/api/src/auth/store.js');
-          const { createSessions, sessionSecretFrom } = require('../../apps/api/src/auth/sessions.js');
+          const { createAuthStore } = require('../../apps/api/src/repositories/auth-store.js');
+          const { createSessions, sessionSecretFrom } = require('../../apps/api/src/services/auth/sessions.js');
           const FIRM = 'f1a00000-0000-4000-8000-000000000001';
           const pool = new (require('pg').Pool)({ connectionString: DB });
           const cli = (...args) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: env2, stdio: 'pipe' }).toString();

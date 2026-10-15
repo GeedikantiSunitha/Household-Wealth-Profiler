@@ -1,11 +1,11 @@
 /* Typing in the form: reads the value, records the change (audit trail when there is no server), saves (autosave), checks the field, refreshes the card summary, the live-effect panel and the side rail. */
-import { LS_USER, Store, logChange } from '../api/store.js';
+import { LS_USER, Store, logChange } from '../hooks/store.js';
 import { VALIDATE, summary } from '../components/form.js';
 import { refreshImpact } from '../components/impact.js';
 import { esc } from '../lib/dom.js';
-import { state } from '../state.js';
-import { renderNav } from '../views/nav.js';
-import { render } from '../views/render.js';
+import { state } from '../hooks/state.js';
+import { renderNav } from '../components/nav.js';
+import { render } from '../pages/render.js';
 
 const H = window.HWP; const { SCHEMA, YN, fieldsOf } = H;
 

@@ -1,16 +1,16 @@
 /* Every button and link on the page (data-nav and data-act): moving between screens, adding, removing and undoing records, opening and creating households, reloading after a conflict, team invitations, and the start-again controls. Enter or Space on a card heading opens it. */
-import { Store, logChange } from '../api/store.js';
+import { Store, logChange } from '../hooks/store.js';
 import { summary } from '../components/form.js';
 import { IMPACT } from '../components/impact.js';
 import { $, esc, toast } from '../lib/dom.js';
-import { FIRM_KEYS, recs } from '../lib/firm.js';
+import { FIRM_KEYS, recs } from '../hooks/firm.js';
 import { fmtYM } from '../lib/format.js';
-import { isAdult } from '../lib/people.js';
-import { setState, state } from '../state.js';
-import { FIRM_VIEWS, NAV, NAV_OPEN, renderNav } from '../views/nav.js';
-import { PERF } from '../views/performance.js';
-import { render } from '../views/render.js';
-import { TASKF } from '../views/tasks.js';
+import { isAdult } from '../hooks/people.js';
+import { setState, state } from '../hooks/state.js';
+import { FIRM_VIEWS, NAV, NAV_OPEN, renderNav } from '../components/nav.js';
+import { PERF } from '../pages/performance.js';
+import { render } from '../pages/render.js';
+import { TASKF } from '../pages/tasks.js';
 
 const H = window.HWP; const { SCHEMA, fieldsOf } = H;
 
@@ -33,7 +33,7 @@ document.addEventListener('click',async e=>{
     await Store.cloud.signOut();location.reload();return}
   if(act==='records'){await Store.flush();state.VIEW='records';state.banner=null;render();window.scrollTo({top:0});return}
   if(act==='account'){await Store.flush();state.VIEW='account';state.banner=null;render();window.scrollTo({top:0});return}
-  if(act==='switchFirm'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}const {firmPicker}=await import('../auth/gate.js');await firmPicker();location.reload();return}
+  if(act==='switchFirm'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}const {firmPicker}=await import('../pages/sign-in.js');await firmPicker();location.reload();return}
   if(act==='invite'){const roles=[...document.querySelectorAll('#invRoles input:checked')].map(x=>x.value);
     if(!roles.length){state.banner={cls:'bad',html:'Tick at least one role.'};render();return}
     const body={name:$('#invName').value.trim(),email:$('#invEmail').value.trim(),role:roles[0],...(Store.session?{roles}:{})};b.disabled=true;

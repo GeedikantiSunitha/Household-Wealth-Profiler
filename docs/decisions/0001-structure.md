@@ -123,3 +123,16 @@ layers say: `services/auth/` (password, sessions, totp, invites, notify, mail) a
 progressive-delay schedule after failed sign-ins now lives with the store that applies it, and
 the password service re-exports it, so no repository requires a service. The layering test
 covers the result.
+
+## Update 2026-10-15: the front end in layers
+
+`apps/web/public/js` is now pages, components, hooks and services, in that direction: the screens
+and the sign-in screens are `pages/`; the side rail and top bar joined `components/`; the state,
+the store, the people and firm look-ups and the Excel and download helpers are `hooks/`, what
+pages share; `services/api/` is the only code that calls the server (`client.js` for the API,
+`auth.js` for the sign-in). Three small edits made the rule true: the store's three network calls
+went to `client.js` and its decisions stayed in the store; main.js hands the sign-in pages to the
+store instead of the store loading a page; and the balance sheet groups became content, shared
+by the page and the Excel export. `test/ci/web-layers.test.js` enforces the direction and the
+fetch rule. Every screen is unchanged. (The screen check's own requires of the moved sign-in
+services, missed by the previous commit, are corrected here.)

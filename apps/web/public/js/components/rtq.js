@@ -1,7 +1,7 @@
 /* Risk questionnaire panel: the scored answers and the result shown in the questionnaire section. */
 import { esc } from '../lib/dom.js';
-import { isAdult, memberName } from '../lib/people.js';
-import { state } from '../state.js';
+import { isAdult, memberName } from '../hooks/people.js';
+import { state } from '../hooks/state.js';
 
 const H = window.HWP;
 
