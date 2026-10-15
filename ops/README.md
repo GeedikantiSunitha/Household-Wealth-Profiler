@@ -1,6 +1,8 @@
 # ops: running the service
 
-Tools for operating a deployment, kept apart from the app itself.
+Tools for operating a deployment, kept apart from the app itself. The step-by-step deployment
+process (checks before, the database and its roles, migrations, the DCDeploy service and its
+variables, validation after, backups, rollback, troubleshooting) is [DEPLOYMENT.md](DEPLOYMENT.md).
 
 | Folder | Holds | When |
 | --- | --- | --- |

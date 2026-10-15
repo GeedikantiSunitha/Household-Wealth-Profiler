@@ -1,0 +1,66 @@
+# A rehearsal of the deployment on your own machine: the web tier, the API, a one-off migration and
+# PostgreSQL as separate containers, the way they run on DCDeploy (apps/web/Dockerfile and
+# apps/api/Dockerfile). For trying the set-up only, never for real client data: the database
+# passwords are fixed, mail goes to the API's log, cookies are not Secure (no TLS here).
+#
+#   HWP_DATA_KEY=$(node server.js gen-key) docker compose -f deploy/local/compose.yml up --build
+#   node deploy/local/check.js http://localhost:8088      # the smoke check through the web tier
+#   docker compose -f deploy/local/compose.yml down -v   # and throw the database away
+#
+# Run from the repository root. The first account: register at http://localhost:8088 and take the
+# verification link from the api service's log (docker compose ... logs api).
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: rehearsal
+      POSTGRES_DB: wealth_profiler
+    volumes:
+      - ./db-init.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wealth_profiler"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # The deploy step: migrations as the owner, before the API starts (production never migrates itself)
+  migrate:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "server.js", "migrate"]
+    environment:
+      NODE_ENV: development
+      DATABASE_OWNER_URL: postgres://hwp_owner:rehearsal-owner@db:5432/wealth_profiler
+      DATABASE_URL: postgres://hwp_app:rehearsal-app@db:5432/wealth_profiler
+      DATA_KEY: ${HWP_DATA_KEY:?set HWP_DATA_KEY from node server.js gen-key}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: development
+      SERVE_WEB: "0"
+      DATABASE_URL: postgres://hwp_app:rehearsal-app@db:5432/wealth_profiler
+      DATA_KEY: ${HWP_DATA_KEY:?set HWP_DATA_KEY from node server.js gen-key}
+      PUBLIC_URL: http://localhost:8088
+      TOTP_REQUIRED: "0"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      API_UPSTREAM: http://api:8080
+    ports:
+      - "8088:8080"
+    depends_on:
+      - api

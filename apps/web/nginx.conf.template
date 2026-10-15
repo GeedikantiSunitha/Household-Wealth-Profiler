@@ -1,0 +1,46 @@
+# The web tier (apps/web/Dockerfile): the screens as static files, and the API on the same domain.
+# ${API_UPSTREAM} and ${API_HOST} are filled in from the environment when the container starts;
+# every other $name is an nginx variable.
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+    server_tokens off;
+    client_max_body_size 1m;
+
+    # The web tier's own health check (the API's are /healthz and /readyz, passed through below)
+    location = /health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # The API, on this domain. Its own replies carry its own headers; the real client address and
+    # the public host, with its port as the browser sent it, go with each request (the API's same-site
+    # check compares it with the Origin header).
+    location ~ ^/(api/|healthz$|readyz$) {
+        proxy_pass ${API_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${API_HOST};
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 60s;
+    }
+
+    # The screens: the same headers the API sends with them (apps/api/src/http/respond.js), so a
+    # page served here is as locked down as one served by the API. HSTS comes from the API's replies
+    # and the host's TLS edge. No caching: a deploy must reach every browser at once.
+    location / {
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri $uri/ =404;
+    }
+}
