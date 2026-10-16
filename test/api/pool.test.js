@@ -1,10 +1,10 @@
-// apps/api/src/db/pool.js: the pool's time limits, and how a transaction behaves when PostgreSQL
+// backend/src/db/pool.js: the pool's time limits, and how a transaction behaves when PostgreSQL
 // asks for it to be run again or when no connection is free. A fake pool stands in for the
 // database, so this runs without one.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createPool, tx, POOL_OPTIONS, RETRIES, runMigrations } = require('../../apps/api/src/db/pool.js');
+const { createPool, tx, POOL_OPTIONS, RETRIES, runMigrations } = require('../../backend/src/db/pool.js');
 
 test('the pool limits connection waits, statements and idle time, and names itself to the database', async () => {
   assert.deepEqual(POOL_OPTIONS, { connectionTimeoutMillis: 10000, idleTimeoutMillis: 30000, statement_timeout: 15000, application_name: 'household-wealth-profiler' });

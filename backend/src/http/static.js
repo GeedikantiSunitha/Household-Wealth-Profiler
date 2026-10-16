@@ -1,5 +1,5 @@
-/* The app's own files from public/, plus /core.js from packages/core (the one copy of the rules).
-   Nothing outside public/ can be read: such paths, like missing files, are 404. A path whose
+/* The app's own files from frontend/src (or WEB_DIR: a built frontend/dist), plus /core.js from packages/core (the one copy of the rules).
+   Nothing outside that folder can be read: such paths, like missing files, are 404. A path whose
    percent-encoding is broken is 400. */
 'use strict';
 const fsp = require('fs').promises;

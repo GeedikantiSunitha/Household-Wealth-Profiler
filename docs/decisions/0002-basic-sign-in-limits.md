@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-10
 - **Status:** The three limits below were fixed in step 0.5.2 (unknown names now cost a full password check, the maps are pruned and capped, a malformed hash is refused at start-up). Basic sign-in itself is development-only: `NODE_ENV=production` refuses it, and Phase 2 replaces it with the app's own sign-in.
-- **Code:** `apps/api/src/auth/providers/basic/index.js` (moved unchanged from `server.js` in step B9)
+- **Code:** `backend/src/auth/providers/basic/index.js` (moved unchanged from `server.js` in step B9)
 
 ## Context
 

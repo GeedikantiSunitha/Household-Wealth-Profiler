@@ -1,11 +1,11 @@
-// apps/api/src/auth/password.js: scrypt at the OWASP parameters, a dummy check that costs the same
+// backend/src/auth/password.js: scrypt at the OWASP parameters, a dummy check that costs the same
 // for unknown accounts, the password policy, the progressive delay after failures, and the
 // breached-password lookup by k-anonymity (only a 5-character hash prefix ever leaves the server).
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { hashPassword, verifyPassword, dummyVerify, dummyHashString, checkPolicy, delayAfter, breachedCount, SCRYPT, MIN_LENGTH, MAX_LENGTH } = require('../../apps/api/src/services/auth/password.js');
+const { hashPassword, verifyPassword, dummyVerify, dummyHashString, checkPolicy, delayAfter, breachedCount, SCRYPT, MIN_LENGTH, MAX_LENGTH } = require('../../backend/src/services/auth/password.js');
 
 test('scrypt parameters follow current OWASP guidance: N 2^17, r 8, p 1, 64-byte key, 16-byte salt', () => {
   assert.deepEqual(SCRYPT, { N: 131072, r: 8, p: 1, keylen: 64, saltBytes: 16 });

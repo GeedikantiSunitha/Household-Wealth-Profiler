@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const { ID_RE } = require('../repositories/ids.js');
 
-const OPERATOR_SQL = path.join(__dirname, '..', '..', '..', '..', 'db', 'operator.sql');
+const OPERATOR_SQL = path.join(__dirname, '..', '..', '..', 'db', 'operator.sql');
 const STALE_DAYS = 90;
 
 async function withDb(url, fn) {

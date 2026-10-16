@@ -14,10 +14,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
 const H = require('../../packages/core/core.js');
-const { createStore, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
-const { createHouseholdService } = require('../../apps/api/src/services/households.js');
-const { prune, listBackups, toolMajor } = require('../../apps/api/src/cli/backup.js');
+const { createStore, DEFAULT_FIRM_ID } = require('../../backend/src/repositories');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
+const { createHouseholdService } = require('../../backend/src/services/households.js');
+const { prune, listBackups, toolMajor } = require('../../backend/src/cli/backup.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const BASE_URL = require('../api/test-db.js').testDatabaseUrl();
@@ -36,7 +36,7 @@ test('prune removes backups older than the retention period, never the newest, a
 });
 
 test('BACKUP_KEY must be its own key: the same as DATA_KEY is refused at start-up', () => {
-  const { load } = require('../../apps/api/src/config');
+  const { load } = require('../../backend/src/config');
   const k = gen(), root = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-cfg-'));
   try {
     assert.throws(() => load({ env: { DATA_KEY: k, BACKUP_KEY: k, DATABASE_URL: 'postgres://x' }, root }), /BACKUP_KEY must not be the same as DATA_KEY/);
@@ -65,7 +65,7 @@ test.describe('backup and restore drill', { skip: pgToolsUsable() }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-backups-'));
   const DATA_KEY = gen(), BACKUP_KEY = gen();
   let admin;
-  const env = extra => ({ ...process.env, DATABASE_URL: '', DATABASE_OWNER_URL: '', AUTH_USERS: '', SMTP_URL: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', NODE_ENV: '',
+  const env = extra => ({ ...process.env, DATABASE_URL: '', DATABASE_OWNER_URL: '', AUTH_USERS: '', SMTP_URL: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '', NODE_ENV: '',
     DATA_KEY, BACKUP_KEY, BACKUP_DATABASE_URL: url, BACKUP_DIR: dir, PG_BIN: process.env.PG_BIN || '', ...extra });
   const run = (args, extra = {}) => new Promise(ok => execFile(process.execPath, ['server.js', ...args], { cwd: ROOT, env: env(extra), timeout: 240000 }, (e, stdout, stderr) => ok({ code: e ? e.code : 0, out: stdout + stderr })));
   const newest = async () => path.join(dir, (await listBackups(dir))[0].name);

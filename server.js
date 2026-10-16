@@ -17,8 +17,8 @@
    Settings come from the environment, or from a .env file next to this one.
    Variables already set in the environment win over .env.
 
-   The code is in apps/api/src (start-up: main.js). This file stays so that `npm start`, the
+   The code is in backend/src (start-up: main.js). This file stays so that `npm start`, the
    Dockerfile, the deploy scripts and the commands above keep working unchanged.
 */
 'use strict';
-if (require.main === module) require('./apps/api/src/main.js').main(process.argv.slice(2));
+if (require.main === module) require('./backend/src/main.js').main(process.argv.slice(2));

@@ -1,5 +1,5 @@
 // node server.js check-records: reports every stored household and firm settings record that the
-// field rules (apps/api/src/services/validate.js) would refuse, and every record that cannot be
+// field rules (backend/src/services/validate.js) would refuse, and every record that cannot be
 // read, without changing anything. Run on a database before the rules are enforced on it. Output
 // names ids, field paths and rules only, never a stored value. Exit 0 clean, 2 with problems.
 'use strict';
@@ -11,15 +11,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
-const { createStore, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+const { createStore, DEFAULT_FIRM_ID } = require('../../backend/src/repositories');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const OTHER_FIRM = '0f1e0000-0000-4000-8000-000000000002';
 const KEY = crypto.randomBytes(32).toString('base64');
 const rec = (id, state) => ({ id, version: 1, state, createdAt: '2026-10-10T09:00:00.000Z', createdBy: 'sam', updatedAt: '2026-10-10T09:00:00.000Z', updatedBy: 'sam' });
 const run = (dir, args = []) => new Promise(resolve => execFile(process.execPath, ['server.js', 'check-records', ...args],
-  { cwd: ROOT, timeout: 20000, env: { ...process.env, DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '' } },
+  { cwd: ROOT, timeout: 20000, env: { ...process.env, DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '' } },
   (error, stdout, stderr) => resolve({ code: error ? (error.code === undefined ? 'killed' : error.code) : 0, stdout, stderr })));
 
 test('check-records lists each record the rules would refuse and each unreadable one, per firm, and changes nothing', async () => {

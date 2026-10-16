@@ -7,20 +7,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { createApp } = require('../../apps/api/src/app.js');
-const { createAuth } = require('../../apps/api/src/middleware/authenticate.js');
-const { createAuthStore } = require('../../apps/api/src/repositories/auth-store.js');
-const { createSessions } = require('../../apps/api/src/services/auth/sessions.js');
-const { createAuthRoutes } = require('../../apps/api/src/routes/auth.js');
-const { createLimiter, AUTH_LIMIT } = require('../../apps/api/src/middleware/rate-limit.js');
-const { createNotify } = require('../../apps/api/src/services/auth/notify.js');
-const { createInvites } = require('../../apps/api/src/services/auth/invites.js');
-const { hashPassword } = require('../../apps/api/src/services/auth/password.js');
-const { codeAt, base32Decode } = require('../../apps/api/src/services/auth/totp.js');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
-const { createPool } = require('../../apps/api/src/db/pool.js');
+const { createApp } = require('../../backend/src/app.js');
+const { createAuth } = require('../../backend/src/middleware/authenticate.js');
+const { createAuthStore } = require('../../backend/src/repositories/auth-store.js');
+const { createSessions } = require('../../backend/src/services/auth/sessions.js');
+const { createAuthRoutes } = require('../../backend/src/routes/auth.js');
+const { createLimiter, AUTH_LIMIT } = require('../../backend/src/middleware/rate-limit.js');
+const { createNotify } = require('../../backend/src/services/auth/notify.js');
+const { createInvites } = require('../../backend/src/services/auth/invites.js');
+const { hashPassword } = require('../../backend/src/services/auth/password.js');
+const { codeAt, base32Decode } = require('../../backend/src/services/auth/totp.js');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
+const { createPool } = require('../../backend/src/db/pool.js');
 const { migrate, pgClient } = require('../../db/migrate.js');
-const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+const { DEFAULT_FIRM_ID } = require('../../backend/src/repositories/ids.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const BASE_URL = require('./test-db.js').testDatabaseUrl();
@@ -139,7 +139,7 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
   });
 
   test('no route a signed-in user can reach approves an access request or creates an account: the sign-in route table is exactly the known set, and every plausible path is 404', async () => {
-    const { createAuthRoutes: make } = require('../../apps/api/src/routes/auth.js');
+    const { createAuthRoutes: make } = require('../../backend/src/routes/auth.js');
     const table = Object.keys(make({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), now }).routes).sort();
     assert.deepEqual(table, ['GET /api/auth/firms', 'GET /api/auth/invitations', 'GET /api/auth/state', 'POST /api/auth/enrol', 'POST /api/auth/enrol/confirm', 'POST /api/auth/firm', 'POST /api/auth/forgot', 'POST /api/auth/invitations/accept', 'POST /api/auth/invitations/decline', 'POST /api/auth/invite', 'POST /api/auth/password',
       'POST /api/auth/recovery', 'POST /api/auth/register', 'POST /api/auth/reset', 'POST /api/auth/sign-in', 'POST /api/auth/sign-out', 'POST /api/auth/sign-out-all', 'POST /api/auth/totp', 'POST /api/auth/verify', 'POST /api/auth/verify/resend'],

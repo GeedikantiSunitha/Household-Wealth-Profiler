@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const root = path.join(__dirname, '..');
-const read = f => fs.readFileSync(path.join(root, 'apps', 'web', 'public', f), 'utf8');
+const read = f => fs.readFileSync(path.join(root, 'frontend', 'src', f), 'utf8');
 const readCore = () => fs.readFileSync(path.join(root, 'packages', 'core', 'core.js'), 'utf8');
 const html = read('index.html');
 const css = read('styles.css');
@@ -17,7 +17,7 @@ const safe = js => js.replace(/<\/script/gi, '<\\/script');
 function bundle(entry) {
   let esbuild;
   try { esbuild = require('esbuild'); } catch (e) { console.error('npm run build needs the development packages. Run: npm install'); process.exit(1); }
-  const out = esbuild.buildSync({ entryPoints: [path.join(root, 'apps', 'web', 'public', entry)], bundle: true, format: 'iife', write: false, charset: 'utf8', logLevel: 'warning' });
+  const out = esbuild.buildSync({ entryPoints: [path.join(root, 'frontend', 'src', entry)], bundle: true, format: 'iife', write: false, charset: 'utf8', logLevel: 'warning' });
   return out.outputFiles[0].text;
 }
 const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))

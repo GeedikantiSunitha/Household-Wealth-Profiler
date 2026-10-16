@@ -1,4 +1,4 @@
-# The web tier (apps/web/Dockerfile): the screens as static files, and the API on the same domain.
+# The web tier (frontend/Dockerfile): the screens as static files, and the API on the same domain.
 # ${API_UPSTREAM} and ${API_HOST} are filled in from the environment when the container starts;
 # every other $name is an nginx variable.
 server {
@@ -30,7 +30,7 @@ server {
         proxy_read_timeout 60s;
     }
 
-    # The screens: the same headers the API sends with them (apps/api/src/http/respond.js), so a
+    # The screens: the same headers the API sends with them (backend/src/http/respond.js), so a
     # page served here is as locked down as one served by the API. HSTS comes from the API's replies
     # and the host's TLS edge. No caching: a deploy must reach every browser at once.
     location / {

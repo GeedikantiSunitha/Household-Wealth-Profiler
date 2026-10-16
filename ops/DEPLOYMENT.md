@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Last updated:** 16 October 2026
-**Applies to:** the Node API edition on `develop` and later (`apps/api`, `apps/web`, `db/migrations`); the former Supabase edition was retired in Phase 6, so "Supabase" below means only the PostgreSQL host option.
+**Applies to:** the Node API edition on `develop` and later (`backend`, `frontend`, `db/migrations`); the former Supabase edition was retired in Phase 6, so "Supabase" below means only the PostgreSQL host option.
 
 Step-by-step instructions for deploying to development, staging and production, with the checks before, the validation after, and how to roll back. Everything here is what the code actually does; where a step is still to be decided, it says so.
 
@@ -31,7 +31,7 @@ feature branch (one per approved phase) → develop (staging) → main (producti
 Two shapes, same code, same database:
 
 - **One service** (the simplest): the repository's root `Dockerfile` (Node 22, port 8080) serves the API and the screens together.
-- **Two services** (the front end apart from the back end, as in the ModelMyWealth and mahimapareek deployments): `apps/web/Dockerfile` is an nginx container serving `apps/web/public` and `core.js` as they are and passing `/api/`, `/healthz` and `/readyz` to the API; `apps/api/Dockerfile` is the API alone (`SERVE_WEB=0`). Only the web tier faces the internet. One domain for both, so the session cookie, the CSRF token, the same-site check and the content security policy are unchanged; the web tier sends the same page headers the API does, and a test pins that.
+- **Two services** (the front end apart from the back end, as in the ModelMyWealth and mahimapareek deployments): `frontend/Dockerfile` is an nginx container serving `frontend/src` and `core.js` as they are and passing `/api/`, `/healthz` and `/readyz` to the API; `backend/Dockerfile` is the API alone (`SERVE_WEB=0`). Only the web tier faces the internet. One domain for both, so the session cookie, the CSRF token, the same-site check and the content security policy are unchanged; the web tier sends the same page headers the API does, and a test pins that.
 
 In both shapes the PostgreSQL database is a separate service, migrations are run from your machine before the deploy, and the production server refuses to start while one is pending. There is no volume: with `DATABASE_URL` set, nothing is written to disk. `deploy/local/compose.yml` rehearses the two-service shape on your own machine, and `deploy/local/check.js` is the smoke check for either shape.
 
@@ -209,8 +209,8 @@ Both variables are needed together: the loader refuses an owner connection whose
 
 ### Or two services (front end and back end apart)
 
-1. **api**: same repository and branch; build context `./`, Dockerfile path `apps/api/Dockerfile`; port `8080`; the variables below. Not reachable from the internet if DCDeploy allows a private service; otherwise note its public address.
-2. **web**: same repository and branch; build context `./`, Dockerfile path `apps/web/Dockerfile`; port `8080`; this is the public one, with the domain and TLS. Variables: `API_UPSTREAM` = `http://api:8080` on a private network, or the api service's `https://` address when there is none, and then also `API_HOST` = that address's host name.
+1. **api**: same repository and branch; build context `./`, Dockerfile path `backend/Dockerfile`; port `8080`; the variables below. Not reachable from the internet if DCDeploy allows a private service; otherwise note its public address.
+2. **web**: same repository and branch; build context `./`, Dockerfile path `frontend/Dockerfile`; port `8080`; this is the public one, with the domain and TLS. Variables: `API_UPSTREAM` = `http://api:8080` on a private network, or the api service's `https://` address when there is none, and then also `API_HOST` = that address's host name.
 3. `PUBLIC_URL` on the api service is the web service's public address (the one users open), not the api's own.
 4. After deploy, `node deploy/local/check.js https://HOST` proves the split: the page and `core.js` byte for byte with the headers, the API behind the same domain, a cross-site write refused, a same-site one reaching the API.
 

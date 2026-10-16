@@ -28,7 +28,7 @@ const { ID_RE } = require('./repositories/ids.js');
 
 function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, members = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers, serveWeb = config.serveWeb !== false }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
-  const serveStatic = createStatic({ publicDir: path.join(config.root, 'apps', 'web', 'public'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
+  const serveStatic = createStatic({ publicDir: config.webDir || path.join(config.root, 'frontend', 'src'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
   const gates = createGates({ send, ready, serveWeb, basicUsers, authenticate });
   const routes = [
     createMeRoute({ send, encrypted: !!config.key, production: !!config.production, totpRequired: config.totpRequired !== false }),

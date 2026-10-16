@@ -36,7 +36,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     if (left) throw new Error('TEST_DATABASE_URL must point at an empty database');
     KEY = node(['gen-key']);
     // DATABASE_OWNER_URL is blanked too: a developer's .env must never steer a test server's migrations elsewhere
-    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
+    ENV = { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATABASE_URL: URL_, DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '', DATA_KEY: KEY, ALPHAVANTAGE_KEY: '',
       AUTH_USERS: [node(['hash-password', 'sam', 'correct horse']), node(['hash-password', 'chris', 'battery staple'])].join(';') };
     proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: ENV, stdio: 'pipe' });
     proc.stderr.on('data', d => serverLog.push(String(d))); // shown at the end if the server logged an error
@@ -146,7 +146,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     await db.query(`insert into memberships (user_id, firm_id, role) values ($1, 'f1a00000-0000-4000-8000-000000000001', 'adviser')`, [u.id]);
 
     // reset-mfa: the authenticator and recovery codes go, every session ends, the user is told, the decision is recorded
-    const oldSealer = require('../../apps/api/src/crypto/seal.js').createSealer(Buffer.from(KEY, 'base64'));
+    const oldSealer = require('../../backend/src/crypto/seal.js').createSealer(Buffer.from(KEY, 'base64'));
     await db.query(`update users set totp_secret = $2, totp_confirmed_at = now(), totp_last_step = 5, reenrol = false where id = $1`, [u.id, oldSealer.seal('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')]);
     await db.query(`insert into recovery_codes (user_id, code_hash) values ($1, 'h1'), ($1, 'h2')`, [u.id]);
     await db.query(`insert into sessions (id_hash, user_id, firm_id, stage, expires_at) values ('s1', $1, $2, 'full', now() + interval '1 hour')`, [u.id, 'f1a00000-0000-4000-8000-000000000001']);
@@ -167,7 +167,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
     const before = (await db.query('select wrapped_key from firms')).rows[0].wrapped_key;
     const NEW = node(['gen-key']);
     // an account with an authenticator: its secret is sealed with the master key and must follow it
-    const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+    const { createSealer } = require('../../backend/src/crypto/seal.js');
     const oldSealer = createSealer(Buffer.from(KEY, 'base64')), newSealer = createSealer(Buffer.from(NEW, 'base64'));
     const uid = (await db.query(`insert into users (email, name, totp_secret) values ('totp@example.com', 'T', $1) returning id`, [oldSealer.seal('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ')])).rows[0].id;
     assert.match(run(['rotate-key'], { NEW_DATA_KEY: NEW }), /1 firm key\(s\) re-wrapped and \d+ authenticator secret\(s\) re-sealed/);
@@ -199,7 +199,7 @@ test.describe('PostgreSQL storage', { skip: !URL_ && 'set TEST_DATABASE_URL to r
   });
 
   test('rotate-key refuses while any record is still sealed with the master key itself (enc:v1)', async () => {
-    const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+    const { createSealer } = require('../../backend/src/crypto/seal.js');
     const legacy = createSealer(Buffer.from(KEY, 'base64'));
     const lid = crypto.randomUUID();
     const rec = { id: lid, version: 1, state: H.blank(), createdAt: '2026-10-01T00:00:00.000Z', createdBy: 'old', updatedAt: '2026-10-01T00:00:00.000Z', updatedBy: 'old' };

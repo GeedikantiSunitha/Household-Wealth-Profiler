@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { migrate, pgClient } = require('../../db/migrate.js');
-const { subjectAccessUser } = require('../../apps/api/src/cli/subject-access-user.js');
+const { subjectAccessUser } = require('../../backend/src/cli/subject-access-user.js');
 
 const BASE_URL = require('../api/test-db.js').testDatabaseUrl();
 const ROOT = path.join(__dirname, '..', '..');

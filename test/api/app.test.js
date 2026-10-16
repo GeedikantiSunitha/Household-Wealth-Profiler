@@ -1,12 +1,12 @@
-// apps/api/src/app.js: the order every request goes through, with stand-in sign-in and services.
+// backend/src/app.js: the order every request goes through, with stand-in sign-in and services.
 // The order is part of the security: health check before sign-in, sign-in before files and API,
 // same-site check before the JSON check, and no detail in a server error.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { createApp } = require('../../apps/api/src/app.js');
-const { checkWrite } = require('../../apps/api/src/middleware');
+const { createApp } = require('../../backend/src/app.js');
+const { checkWrite } = require('../../backend/src/middleware');
 
 const ROOT = path.join(__dirname, '..', '..');
 const ID = '00000000-0000-4000-8000-000000000001';

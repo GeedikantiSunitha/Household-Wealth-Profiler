@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const H = require('../../packages/core/core.js');
-const { ROLES, ACTIONS, SIGN_OFF_FIELDS, rolesOf, hasRole, can, authorize, stampSignOff, guardSave, guardCreate, withContributor } = require('../../apps/api/src/services/access.js');
+const { ROLES, ACTIONS, SIGN_OFF_FIELDS, rolesOf, hasRole, can, authorize, stampSignOff, guardSave, guardCreate, withContributor } = require('../../backend/src/services/access.js');
 
 // A signed-in account. roles is optional (the primary role alone otherwise); userId is the account's id.
 const session = (role, name = 'Casey Compliance', extra = {}) => ({ user: `${role}@example.com`, firmId: 'f', session: {}, role, name, userId: `${role}-id`, ...extra });

@@ -1,4 +1,4 @@
-// apps/api/src/services/records.js (Phase 4): the access log, exports, the retention clock, approved
+// backend/src/services/records.js (Phase 4): the access log, exports, the retention clock, approved
 // purge and the subject access export, without HTTP. The same tests run on the file store and, when
 // TEST_DATABASE_URL is set, on PostgreSQL as the real app role (hwp_app, row-level security forced,
 // migrations run as hwp_owner in a schema of their own), so both stores keep one behaviour.
@@ -10,10 +10,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
-const { createHouseholdService } = require('../../apps/api/src/services/households.js');
-const { createRecordsService, addYears, day } = require('../../apps/api/src/services/records.js');
-const { createStore, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+const { createHouseholdService } = require('../../backend/src/services/households.js');
+const { createRecordsService, addYears, day } = require('../../backend/src/services/records.js');
+const { createStore, DEFAULT_FIRM_ID } = require('../../backend/src/repositories');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
 const { migrate, pgClient } = require('../../db/migrate.js');
 
 const ROOT = path.join(__dirname, '..', '..');

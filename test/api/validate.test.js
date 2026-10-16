@@ -1,4 +1,4 @@
-// apps/api/src/services/validate.js: the field rules the API holds a household and the firm
+// backend/src/services/validate.js: the field rules the API holds a household and the firm
 // settings to before storing them. The rules come from the schema in packages/core (never
 // changed here): each field type has one rule, and every rule names the field path and the rule,
 // never the submitted value. Everything the app itself produces must pass.
@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const H = require('../../packages/core/core.js');
-const { validateHousehold, validateFirm, LIMITS } = require('../../apps/api/src/services/validate.js');
+const { validateHousehold, validateFirm, LIMITS } = require('../../backend/src/services/validate.js');
 
 // A normalised state with one row in each collection, the way the service sees it
 const base = () => { const s = H.normalise(H.blank()); for (const c of H.COLS) s[c] = [H.defaults(c)]; return s; };

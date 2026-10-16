@@ -1,11 +1,11 @@
-// apps/api/src/crypto/seal.js: encryption at rest. The most important property is that data
+// backend/src/crypto/seal.js: encryption at rest. The most important property is that data
 // sealed before this module existed still opens, so a fixed sample sealed by the old server.js
 // code (commit 2585ab4) is checked here.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createSealer, createFirmSealer, newDataKey, wrapKey, unwrapKey, normaliseReference, referenceIndex, indexKeyFor, recordKeyFor, PREFIX, PREFIX_V2 } = require('../../apps/api/src/crypto/seal.js');
+const { createSealer, createFirmSealer, newDataKey, wrapKey, unwrapKey, normaliseReference, referenceIndex, indexKeyFor, recordKeyFor, PREFIX, PREFIX_V2 } = require('../../backend/src/crypto/seal.js');
 
 const KEY = Buffer.alloc(32, 7); // test key only
 const PLAIN = '{"id":"vector","name":"Harrington household","ni":"QQ123456C"}';

@@ -64,14 +64,14 @@ test.describe('migrations may only add', () => {
 });
 
 test.describe('the spreadsheet library is vendored at a pinned version', () => {
-  const VENDOR = path.join(ROOT, 'apps', 'web', 'public', 'vendor');
-  test('apps/web/public/vendor/xlsx.full.min.js is SheetJS 0.20.3 (sha256 pinned), with its licence beside it', () => {
+  const VENDOR = path.join(ROOT, 'frontend', 'src', 'vendor');
+  test('frontend/src/vendor/xlsx.full.min.js is SheetJS 0.20.3 (sha256 pinned), with its licence beside it', () => {
     assert.equal(XLSX.version, '0.20.3');
     const r = verify(path.join(VENDOR, 'xlsx.full.min.js'));
     assert.equal(r.ok, true, `sha256 is ${r.sha256}`);
     assert.match(fs.readFileSync(path.join(VENDOR, 'LICENSE-xlsx.txt'), 'utf8'), /Apache License/);
   });
-  test('apps/web/public/vendor/qrcode.js is qrcode-generator 1.4.4 (sha256 pinned, MIT), with its licence beside it', () => {
+  test('frontend/src/vendor/qrcode.js is qrcode-generator 1.4.4 (sha256 pinned, MIT), with its licence beside it', () => {
     assert.equal(QRCODE.version, '1.4.4');
     const r = verify(path.join(VENDOR, 'qrcode.js'), QRCODE);
     assert.equal(r.ok, true, `sha256 is ${r.sha256}`);

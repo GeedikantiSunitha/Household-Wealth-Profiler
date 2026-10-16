@@ -1,4 +1,4 @@
-// apps/api/src/auth/store.js: accounts, sign-in state and auth events on PostgreSQL, behind row
+// backend/src/auth/store.js: accounts, sign-in state and auth events on PostgreSQL, behind row
 // security that the app role passes only inside the store's own transactions. Runs when
 // TEST_DATABASE_URL points at a scratch database, in a schema of its own.
 'use strict';
@@ -6,10 +6,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { createAuthStore, normaliseEmail } = require('../../apps/api/src/repositories/auth-store.js');
-const { createPool } = require('../../apps/api/src/db/pool.js');
+const { createAuthStore, normaliseEmail } = require('../../backend/src/repositories/auth-store.js');
+const { createPool } = require('../../backend/src/db/pool.js');
 const { migrate, pgClient } = require('../../db/migrate.js');
-const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+const { DEFAULT_FIRM_ID } = require('../../backend/src/repositories/ids.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const BASE_URL = require('./test-db.js').testDatabaseUrl();

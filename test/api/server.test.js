@@ -25,7 +25,7 @@ let proc;
 
 test.before(async () => {
   // DATABASE_URL is blanked so a developer's .env cannot point the test at a real database
-  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', ALPHAVANTAGE_KEY: '', CLIENT_IP_HEADER: 'X-Client-IP',
+  proc = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', DATA_DIR: DATA, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '', ALPHAVANTAGE_KEY: '', CLIENT_IP_HEADER: 'X-Client-IP',
     AUTH_USERS: [user('sam', 'correct horse'), user('chris', 'battery staple')].join(';') }, stdio: 'pipe' });
   await waitForServer(proc, BASE);
 }, { timeout: 120000 }); // a server that fails to start must fail the run in minutes, not hang it (seen on Windows)
@@ -34,7 +34,7 @@ test.after(() => { proc.kill(); fs.rmSync(DATA, { recursive: true, force: true }
 // Windows delivers no signals (process.kill ends the process outright), so this runs on Linux and macOS, including CI
 test('SIGTERM: no new connections, the request in flight finishes, then the process exits 0', { skip: process.platform === 'win32' && 'no signals on Windows' }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-stop-'));
-  const port = PORT + 7, env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', ALPHAVANTAGE_KEY: '', AUTH_USERS: user('sam', 'correct horse') };
+  const port = PORT + 7, env = { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, DATA_KEY: KEY, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '', ALPHAVANTAGE_KEY: '', AUTH_USERS: user('sam', 'correct horse') };
   const p = spawn(process.execPath, ['server.js'], { cwd: ROOT, env, stdio: 'pipe' });
   try {
     await waitForServer(p, `http://127.0.0.1:${port}`);

@@ -106,7 +106,7 @@ function guardSave(ctx, changes, next, rec = {}) {
 }
 
 // A new household: a role that may write, carrying no sign-off (that is for a reviewer, on a file that exists)
-function guardCreate(ctx, next, HWP = require('../../../../packages/core/core.js')) {
+function guardCreate(ctx, next, HWP = require('../../../packages/core/core.js')) {
   authorize(ctx, 'households.write');
   if (isDevelopment(ctx)) return;
   if (HWP.diff(null, next).some(c => SIGN_OFF.has(c.field))) throw refuse(403, 'forbidden', 'Only a compliance reviewer can record the review sign-off, and only on a file that exists.');

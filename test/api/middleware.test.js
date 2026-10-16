@@ -1,4 +1,4 @@
-// apps/api/src/middleware: the security layer. The global gates have a fixed order, each file is
+// backend/src/middleware: the security layer. The global gates have a fixed order, each file is
 // one check, and the per-route guards (guards.js) say what one route needs beyond them. The order
 // in which app.js runs the gates is pinned by test/api/app.test.js; this file pins the layer itself.
 'use strict';
@@ -6,11 +6,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const mw = require('../../apps/api/src/middleware');
-const { requireStage, limited, requireRole } = require('../../apps/api/src/middleware/guards.js');
-const { createLimiter } = require('../../apps/api/src/middleware/rate-limit.js');
+const mw = require('../../backend/src/middleware');
+const { requireStage, limited, requireRole } = require('../../backend/src/middleware/guards.js');
+const { createLimiter } = require('../../backend/src/middleware/rate-limit.js');
 
-const DIR = path.join(__dirname, '..', '..', 'apps', 'api', 'src', 'middleware');
+const DIR = path.join(__dirname, '..', '..', 'backend', 'src', 'middleware');
 const camel = name => name.replace(/-([a-z])/g, (m, c) => c.toUpperCase());
 
 test('the global gates: ten, in this fixed order, one file each', () => {

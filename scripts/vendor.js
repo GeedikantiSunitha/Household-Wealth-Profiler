@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* The spreadsheet library (SheetJS) is served by the app itself from apps/web/public/vendor/,
+/* The spreadsheet library (SheetJS) is served by the app itself from frontend/src/vendor/,
    never from a CDN, so the Content Security Policy allows scripts from this server only. The copy
    is pinned by version and sha256: this command downloads it again from SheetJS and refuses to
    write anything whose hash differs. To upgrade, change the version, URL and hash here, run
@@ -25,7 +25,7 @@ const QRCODE = {
 };
 Object.assign(XLSX, { file: 'xlsx.full.min.js', licenceFile: 'LICENSE-xlsx.txt', name: 'SheetJS' });
 const LIBS = [XLSX, QRCODE];
-const DIR = path.join(__dirname, '..', 'apps', 'web', 'public', 'vendor');
+const DIR = path.join(__dirname, '..', 'frontend', 'src', 'vendor');
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex');
 
 // Whether the file at `file` is exactly the pinned library

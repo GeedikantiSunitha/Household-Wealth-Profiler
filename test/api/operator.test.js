@@ -7,14 +7,14 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const operator = require('../../apps/api/src/cli/platform.js');
-const { createUser, setPassword } = require('../../apps/api/src/cli/accounts.js');
-const { createStore } = require('../../apps/api/src/repositories');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
-const { createAuthStore } = require('../../apps/api/src/repositories/auth-store.js');
-const { createSessions } = require('../../apps/api/src/services/auth/sessions.js');
+const operator = require('../../backend/src/cli/platform.js');
+const { createUser, setPassword } = require('../../backend/src/cli/accounts.js');
+const { createStore } = require('../../backend/src/repositories');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
+const { createAuthStore } = require('../../backend/src/repositories/auth-store.js');
+const { createSessions } = require('../../backend/src/services/auth/sessions.js');
 const { migrate, pgClient } = require('../../db/migrate.js');
-const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+const { DEFAULT_FIRM_ID } = require('../../backend/src/repositories/ids.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const BASE_URL = require('./test-db.js').testDatabaseUrl();
@@ -227,7 +227,7 @@ test.describe('platform operator', { skip: !BASE_URL && 'set TEST_DATABASE_URL t
   test('the commands from the command line: no operator URL falls back to the owner with a note in development, and is refused in production', async () => {
     // the operator's machine: no DATA_KEY, no app password. Each setting is set to '' rather than left out, because the
     // settings loader fills a missing variable from the project's .env, and a developer's .env names a different database
-    const base = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot || '', DATABASE_URL: '', DATABASE_OWNER_URL: '', DATABASE_OPERATOR_URL: '', DATA_KEY: '', AUTH_USERS: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '' };
+    const base = { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot || '', DATABASE_URL: '', DATABASE_OWNER_URL: '', DATABASE_OPERATOR_URL: '', DATA_KEY: '', AUTH_USERS: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '' };
     const cli = (args, env) => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: { ...base, ...env }, encoding: 'utf8' });
     let r = cli(['firm-list'], { DATABASE_OPERATOR_URL: OP_URL() });
     assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /Alder Wealth/); assert.doesNotMatch(r.stderr, /Note:/);

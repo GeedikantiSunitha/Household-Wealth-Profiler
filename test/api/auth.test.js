@@ -1,11 +1,11 @@
-// apps/api/src/middleware/basic.js: HTTP Basic sign-in, lockout and login cache. A fake clock
+// backend/src/middleware/basic.js: HTTP Basic sign-in, lockout and login cache. A fake clock
 // checks the 15-minute lock and the 5-minute cache without waiting.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createBasicAuth, hashPassword, MAX_FAILURES, LOCK_MS, CACHE_MS } = require('../../apps/api/src/middleware/basic.js');
-const { parseUsers } = require('../../apps/api/src/config');
-const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+const { createBasicAuth, hashPassword, MAX_FAILURES, LOCK_MS, CACHE_MS } = require('../../backend/src/middleware/basic.js');
+const { parseUsers } = require('../../backend/src/config');
+const { DEFAULT_FIRM_ID } = require('../../backend/src/repositories/ids.js');
 // Basic sign-in is development-only: every user belongs to the default firm
 const firmId = DEFAULT_FIRM_ID;
 

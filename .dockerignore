@@ -3,5 +3,6 @@ data
 data-dev
 .env
 dist
+frontend/dist
 test
 .git

@@ -1,4 +1,4 @@
-// apps/api/src/config: every setting, its default, and the exact start-up refusals.
+// backend/src/config: every setting, its default, and the exact start-up refusals.
 // Each test passes its own environment and an empty project folder, so a developer's .env never counts.
 'use strict';
 const test = require('node:test');
@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { load, parseUsers } = require('../../apps/api/src/config');
+const { load, parseUsers } = require('../../backend/src/config');
 
 const root = () => fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-config-'));
 const USER = `sam:${'ab'.repeat(16)}:${'cd'.repeat(64)}`;
@@ -154,4 +154,7 @@ test('SERVE_WEB: the server serves the screens unless SERVE_WEB=0 (the web tier 
   assert.equal(ok().totpRequired, true, 'the second step is required unless switched off');
   assert.equal(ok({ TOTP_REQUIRED: '0' }).totpRequired, false);
   assert.equal(ok({ TOTP_REQUIRED: '1' }).totpRequired, true);
+  const r = root();
+  assert.equal(load({ env: { AUTH_USERS: USER, DATA_KEY: KEY }, root: r }).webDir, path.join(r, 'frontend', 'src'), 'the screens come from frontend/src unless WEB_DIR says otherwise');
+  assert.equal(ok({ WEB_DIR: 'frontend/dist' }).webDir, path.resolve('frontend/dist'));
 });

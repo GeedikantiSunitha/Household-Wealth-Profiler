@@ -82,7 +82,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
   try {
     const demo = execFileSync(process.execPath, ['server.js', 'hash-password', 'demo', 'demo'], { cwd: ROOT }).toString().trim();
     app = spawn(process.execPath, ['server.js'], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, PORT: String(appPort), HOST: '127.0.0.1',
-      DATA_DIR: data, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', DATA_KEY: '', ALLOW_PLAINTEXT: '1', HSTS: '0', AUTH_USERS: demo } });
+      DATA_DIR: data, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '', DATA_KEY: '', ALLOW_PLAINTEXT: '1', HSTS: '0', AUTH_USERS: demo } });
     await waitHttp(BASE + 'healthz');
     chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--hide-scrollbars', '--mute-audio',
       `--remote-debugging-port=${debugPort}`, '--remote-allow-origins=*', `--user-data-dir=${profile}`, '--window-size=1366,900', 'about:blank'], { stdio: 'ignore' });
@@ -319,7 +319,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     // ---- The app's own sign-in (session mode), against a scratch PostgreSQL database when TEST_DATABASE_URL is set
     const DB = process.env.TEST_DATABASE_URL;
     if (DB) {
-      const { codeAt, base32Decode } = require('../../apps/api/src/services/auth/totp.js');
+      const { codeAt, base32Decode } = require('../../backend/src/services/auth/totp.js');
       const port2 = await freePort(); const BASE2 = `http://127.0.0.1:${port2}/`;
       const key = execFileSync(process.execPath, ['server.js', 'gen-key'], { cwd: ROOT }).toString().trim();
       const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', PUBLIC_URL: BASE2.replace(/\/$/, '') };
@@ -432,8 +432,8 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
         // that fills in its own reviewer and goes stale, several roles on one membership, and an invitation answered at sign-in.
         await step('roles: an administrator, an adviser and a compliance reviewer each see only what their role allows', async () => {
           const H = require('../../packages/core/core.js');
-          const { createAuthStore } = require('../../apps/api/src/repositories/auth-store.js');
-          const { createSessions, sessionSecretFrom } = require('../../apps/api/src/services/auth/sessions.js');
+          const { createAuthStore } = require('../../backend/src/repositories/auth-store.js');
+          const { createSessions, sessionSecretFrom } = require('../../backend/src/services/auth/sessions.js');
           const FIRM = 'f1a00000-0000-4000-8000-000000000001';
           const pool = new (require('pg').Pool)({ connectionString: DB });
           const cli = (...args) => execFileSync(process.execPath, ['server.js', ...args], { cwd: ROOT, env: env2, stdio: 'pipe' }).toString();

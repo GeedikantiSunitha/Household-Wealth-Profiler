@@ -4,7 +4,7 @@
    connection, 15 s per statement, and idle connections are dropped after 30 s. TLS comes from the
    URL (sslmode=verify-full&sslrootcert=... when the database is on another machine). */
 'use strict';
-const { migrate, pending, pgClient } = require('../../../../db/migrate.js');
+const { migrate, pending, pgClient } = require('../../../db/migrate.js');
 
 const POOL_OPTIONS = { connectionTimeoutMillis: 10000, idleTimeoutMillis: 30000, statement_timeout: 15000, application_name: 'household-wealth-profiler' };
 // PostgreSQL asks the client to run the transaction again: deadlock detected, serialization failure

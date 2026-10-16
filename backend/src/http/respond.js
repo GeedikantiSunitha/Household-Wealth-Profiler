@@ -8,7 +8,7 @@ const CODE_BY_STATUS = { 400: 'bad_request', 401: 'sign_in_required', 403: 'forb
 
 function securityHeaders({ hsts }) {
   const h = {
-    // Scripts only from this server: the spreadsheet library is served from apps/web/public/vendor
+    // Scripts only from this server: the spreadsheet library is served from frontend/src/vendor
     'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',

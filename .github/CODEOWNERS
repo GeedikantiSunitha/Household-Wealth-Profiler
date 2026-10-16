@@ -4,8 +4,8 @@
 packages/core/                      @umesh-ttf
 db/migrations/                      @umesh-ttf
 test/api/api-contract.js            @umesh-ttf
-apps/api/src/services/auth/         @umesh-ttf
-apps/api/src/middleware/            @umesh-ttf
-apps/api/src/crypto/                @umesh-ttf
-apps/api/src/repositories/          @umesh-ttf
+backend/src/services/auth/         @umesh-ttf
+backend/src/middleware/            @umesh-ttf
+backend/src/crypto/                @umesh-ttf
+backend/src/repositories/          @umesh-ttf
 .github/                            @umesh-ttf

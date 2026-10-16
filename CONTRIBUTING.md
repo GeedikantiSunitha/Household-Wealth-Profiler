@@ -8,7 +8,7 @@ Umesh owns the repository and decides what is released. Everyone else works thro
    pre-commit check: `git config core.hooksPath .githooks` (it runs the tests and refuses `.env` and data folders).
 2. Create a branch named for the change: `git checkout -b fix/ni-number-check`.
 3. Make the change. Run `npm test` and `npm run check` before every commit; all must pass.
-   If you changed the interface (`apps/web`), also run `npm run screens` (needs Chrome or Edge) and
+   If you changed the interface (`frontend`), also run `npm run screens` (needs Chrome or Edge) and
    go through [docs/checklists/screen-smoke.md](docs/checklists/screen-smoke.md).
 4. Push the branch and open a pull request into `develop`. Say what changed and why, and how you tested it.
    The checks in `.github/workflows/ci.yml` must pass: tests with PostgreSQL, the single-file build, the
@@ -32,7 +32,7 @@ by setting the repository variable `CODEQL` to `1`.
 - **Tests:** `npm test` runs the rules (`test/unit`), the API in both storage modes (`test/api`), database migrations (`test/db`) and the CI guards (`test/ci`). Set `TEST_DATABASE_URL` to an empty scratch database to include the PostgreSQL tests; never point it at a real database. Add a test with every fix.
 - **Dependencies:** the only runtime dependency is `pg` (used only when `DATABASE_URL` is set). Development dependencies are PGlite (tests) and esbuild (bundles the interface's modules for `npm run build`; never shipped). Keep it that way unless agreed.
 - **Tax year:** the bands and allowances in `packages/core/core.js` (`assumptions` defaults) need checking against HMRC each April.
-- **Spreadsheet library:** SheetJS is vendored in `apps/web/public/vendor/` and pinned by hash. To upgrade, change the version, URL and hash in `scripts/vendor.js`, run `npm run vendor`, and commit the result; a test checks the committed file.
+- **Spreadsheet library:** SheetJS is vendored in `frontend/src/vendor/` and pinned by hash. To upgrade, change the version, URL and hash in `scripts/vendor.js`, run `npm run vendor`, and commit the result; a test checks the committed file.
 - **Secrets:** never commit `.env`, `AUTH_USERS`, `DATA_KEY` or any key. `.gitignore` covers the usual files, but check `git status` before committing.
 - **Client data:** never put real client data in the repository, in tests, or in the sample household.
 

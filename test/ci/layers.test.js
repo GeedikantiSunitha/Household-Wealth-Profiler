@@ -1,14 +1,14 @@
 // The backend runs one direction only: app.js -> middleware and routes -> controllers -> services
 // -> repositories -> db. A file may require its own layer or a layer below it, never one above,
 // and a route may not skip the controller to call a service. This reads every require() in
-// apps/api/src and fails on the first edge that breaks the rule, naming the file.
+// backend/src and fails on the first edge that breaks the rule, naming the file.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const SRC = path.join(__dirname, '..', '..', 'apps', 'api', 'src');
+const SRC = path.join(__dirname, '..', '..', 'backend', 'src');
 
 // What each layer may require (its own layer is always allowed). The entry points (main.js, app.js,
 // cli) wire everything, so they may require anything below them; routes name controllers and
@@ -38,11 +38,11 @@ const layerOf = file => { const rel = path.relative(SRC, file).split(path.sep); 
 const targetLayer = (file, spec) => {
   const abs = path.resolve(path.dirname(file), spec);
   const rel = path.relative(SRC, abs).split(path.sep);
-  if (rel[0] === '..') return null; // outside apps/api/src (packages/core, db/migrate.js): not a layer
+  if (rel[0] === '..') return null; // outside backend/src (packages/core, db/migrate.js): not a layer
   return rel.length === 1 ? rel[0].replace(/\.js$/, '') : rel[0];
 };
 
-test('every require() in apps/api/src points to the same layer or one below it', () => {
+test('every require() in backend/src points to the same layer or one below it', () => {
   const problems = [];
   for (const file of files(SRC)) {
     const layer = layerOf(file);

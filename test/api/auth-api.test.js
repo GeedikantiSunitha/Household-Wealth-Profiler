@@ -1,4 +1,4 @@
-// The sign-in API (apps/api/src/routes/auth.js) on PostgreSQL: sign in with email and password,
+// The sign-in API (backend/src/routes/auth.js) on PostgreSQL: sign in with email and password,
 // what the replies give away (nothing about which accounts exist), the progressive delay and the
 // per-address limiter, sign-out, firm switching, and the auth events behind each. The second step
 // (authenticator) is covered by totp-api.test.js. Runs when TEST_DATABASE_URL points at a scratch
@@ -8,16 +8,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { createApp } = require('../../apps/api/src/app.js');
-const { createAuth } = require('../../apps/api/src/middleware/authenticate.js');
-const { createAuthStore } = require('../../apps/api/src/repositories/auth-store.js');
-const { createSessions } = require('../../apps/api/src/services/auth/sessions.js');
-const { createAuthRoutes } = require('../../apps/api/src/routes/auth.js');
-const { createLimiter, AUTH_LIMIT } = require('../../apps/api/src/middleware/rate-limit.js');
-const { hashPassword } = require('../../apps/api/src/services/auth/password.js');
-const { createPool } = require('../../apps/api/src/db/pool.js');
+const { createApp } = require('../../backend/src/app.js');
+const { createAuth } = require('../../backend/src/middleware/authenticate.js');
+const { createAuthStore } = require('../../backend/src/repositories/auth-store.js');
+const { createSessions } = require('../../backend/src/services/auth/sessions.js');
+const { createAuthRoutes } = require('../../backend/src/routes/auth.js');
+const { createLimiter, AUTH_LIMIT } = require('../../backend/src/middleware/rate-limit.js');
+const { hashPassword } = require('../../backend/src/services/auth/password.js');
+const { createPool } = require('../../backend/src/db/pool.js');
 const { migrate, pgClient } = require('../../db/migrate.js');
-const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+const { DEFAULT_FIRM_ID } = require('../../backend/src/repositories/ids.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const BASE_URL = require('./test-db.js').testDatabaseUrl();

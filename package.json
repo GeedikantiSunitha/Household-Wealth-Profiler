@@ -17,6 +17,7 @@
     "test": "node --test --test-timeout=300000 \"test/**/*.test.js\"",
     "screens": "node test/e2e/screens.js",
     "build": "node scripts/build.js",
+    "build:web": "node scripts/build-web.js",
     "check": "node scripts/ci/check-migrations.js db/migrations && node scripts/ci/check-licences.js",
     "vendor": "node scripts/vendor.js"
   },

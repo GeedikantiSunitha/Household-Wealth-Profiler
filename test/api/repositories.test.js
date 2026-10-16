@@ -1,4 +1,4 @@
-// apps/api/src/repositories: the file store and the PostgreSQL store must behave the same, so the
+// backend/src/repositories: the file store and the PostgreSQL store must behave the same, so the
 // same checks run against both. Files always; PostgreSQL when TEST_DATABASE_URL points at an empty
 // scratch database (tables are created there and, by design, cannot be deleted afterwards).
 'use strict';
@@ -8,8 +8,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createStore, ID_RE, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+const { createStore, ID_RE, DEFAULT_FIRM_ID } = require('../../backend/src/repositories');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const sealer = createSealer(crypto.randomBytes(32));

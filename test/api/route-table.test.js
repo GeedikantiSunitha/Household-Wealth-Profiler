@@ -1,10 +1,10 @@
-// apps/api/src/routes/table.js: a route table maps method and path to a controller, checks ids,
+// backend/src/routes/table.js: a route table maps method and path to a controller, checks ids,
 // runs the route's guards in order, and either answers 405 (strict) or leaves the path to the
 // next table.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createRouteTable } = require('../../apps/api/src/routes/table.js');
+const { createRouteTable } = require('../../backend/src/routes/table.js');
 
 const ID = '00000000-0000-4000-8000-000000000001';
 const sent = [];

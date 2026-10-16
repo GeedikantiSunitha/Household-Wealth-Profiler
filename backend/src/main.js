@@ -15,7 +15,7 @@
    than 10 seconds it exits 1. */
 'use strict';
 const path = require('path');
-const HWP = require('../../../packages/core/core.js');
+const HWP = require('../../packages/core/core.js');
 const { load } = require('./config');
 const { createSealer } = require('./crypto/seal.js');
 const { createStore, DEFAULT_FIRM_ID } = require('./repositories');

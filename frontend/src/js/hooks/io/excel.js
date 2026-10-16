@@ -1,4 +1,4 @@
-/* Excel workbooks: the import reader (one sheet per data type, matched by sheet name and column title) and the template / export builder. SheetJS is loaded only when a workbook is needed, from this app's own copy (apps/web/public/vendor, pinned by hash; see scripts/vendor.js). Only the standalone demo file, opened from disk with no server, may fetch it from SheetJS's CDN instead. */
+/* Excel workbooks: the import reader (one sheet per data type, matched by sheet name and column title) and the template / export builder. SheetJS is loaded only when a workbook is needed, from this app's own copy (frontend/src/vendor, pinned by hash; see scripts/vendor.js). Only the standalone demo file, opened from disk with no server, may fetch it from SheetJS's CDN instead. */
 import { Store } from '../store.js';
 import { memberName } from '../people.js';
 import { state } from '../state.js';

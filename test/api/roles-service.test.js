@@ -9,10 +9,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
-const { createHouseholdService } = require('../../apps/api/src/services/households.js');
-const { createFirmService } = require('../../apps/api/src/services/firm.js');
-const { createFileStore, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+const { createHouseholdService } = require('../../backend/src/services/households.js');
+const { createFirmService } = require('../../backend/src/services/firm.js');
+const { createFileStore, DEFAULT_FIRM_ID } = require('../../backend/src/repositories');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
 
 // A signed-in account: userId is its id (what separation of duties compares); roles is optional (several on one membership)
 const as = (role, name, extra = {}) => ({ user: `${role}@example.com`, email: `${role}@example.com`, name, firmId: DEFAULT_FIRM_ID, session: {}, role, userId: `acct-${role}`, ...extra });

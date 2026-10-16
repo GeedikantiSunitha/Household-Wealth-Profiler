@@ -23,8 +23,8 @@ Reorganise the code into one structure with clear layers, **without changing beh
 | Folder | Role |
 | --- | --- |
 | `packages/core/` | Business rules: the only copy |
-| `apps/api/` | Backend, in layers (config, http, auth, routes, services, crypto, repositories, db) |
-| `apps/web/` | Front end, split into modules |
+| `backend/` | Backend, in layers (config, http, auth, routes, services, crypto, repositories, db) |
+| `frontend/` | Front end, split into modules |
 | `db/migrations/` | Database schema as numbered migrations (done in step B4) |
 | `ops/` | Operating tools: data import, backup, restore, admin, keys |
 | `deploy/` | Where and how the app runs |
@@ -62,7 +62,7 @@ Reorganise the code into one structure with clear layers, **without changing beh
 
 ## Outcome (steps B1 to B21)
 
-Done as planned: `packages/core`, `apps/api` in layers, `apps/web` as browser modules,
+Done as planned: `packages/core`, `backend` in layers, `frontend` as browser modules,
 `db/migrations`, tests grouped by layer, and the local launcher in `deploy/local`. `core.js` is
 unchanged from the baseline. Where the result differs from the plan above:
 
@@ -71,7 +71,7 @@ unchanged from the baseline. Where the result differs from the plan above:
   - The Supabase migrations can also run on plain PostgreSQL 14+.
 - **One accepted difference in B10:** a malformed request body with no length or chunking now
   gets Node's own 400 reply instead of a 404. Every valid request is answered exactly as before.
-- **`import-files` stays in `apps/api/src/cli`**, not `ops/`. It is built on the API's own
+- **`import-files` stays in `backend/src/cli`**, not `ops/`. It is built on the API's own
   storage code, so moving it would make operations tooling depend on the API's internals.
 - **`docs/` holds only decisions and the screen checklist.** Architecture, API and data-model
   pages were not added; the READMEs in each folder and the API contract test cover them.
@@ -92,7 +92,7 @@ unchanged from the baseline. Where the result differs from the plan above:
 ## Update 2026-10-15: the middleware layer
 
 The API's security checks, until now written inline in `app.js`, are a layer of their own,
-`apps/api/src/middleware/`, with one file per check and a fixed order that `app.js` runs and
+`backend/src/middleware/`, with one file per check and a fixed order that `app.js` runs and
 `test/api/app.test.js` and `test/api/middleware.test.js` pin: parse-url, health, api-only,
 authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf. The
 per-route guards (`guards.js`: the stage a sign-in route needs, the per-address rate limit, the
@@ -108,7 +108,7 @@ running the front end, the API and the database as separate services.
 
 The route files are now tables only (`routes/table.js` runs them: method and path to a
 controller, the route's parameters and id checks, its guards in order, 405 where the API has
-always said so). The handler bodies moved, unchanged, into `apps/api/src/controllers/`, one file
+always said so). The handler bodies moved, unchanged, into `backend/src/controllers/`, one file
 per route file, including the sign-in handlers from `routes/auth.js`, whose route table stays
 where it was. The direction is now the rule and `test/ci/layers.test.js` enforces it on every
 `require()`: app.js to middleware and routes, routes to controllers, controllers to services,
@@ -117,7 +117,7 @@ route never skips the controller to call a service.
 
 ## Update 2026-10-15: the auth folder dissolved into the layers
 
-`apps/api/src/auth/` held both decisions and storage. Its files moved, unchanged, to where the
+`backend/src/auth/` held both decisions and storage. Its files moved, unchanged, to where the
 layers say: `services/auth/` (password, sessions, totp, invites, notify, mail) and
 `repositories/auth-store.js` (accounts, sessions and the auth event log in PostgreSQL). The
 progressive-delay schedule after failed sign-ins now lives with the store that applies it, and
@@ -126,7 +126,7 @@ covers the result.
 
 ## Update 2026-10-15: the front end in layers
 
-`apps/web/public/js` is now pages, components, hooks and services, in that direction: the screens
+`frontend/src/js` is now pages, components, hooks and services, in that direction: the screens
 and the sign-in screens are `pages/`; the side rail and top bar joined `components/`; the state,
 the store, the people and firm look-ups and the Excel and download helpers are `hooks/`, what
 pages share; `services/api/` is the only code that calls the server (`client.js` for the API,
@@ -147,3 +147,17 @@ bearer token in the store, the API client and the sign-out action) went with it,
 `services/api` is now the whole truth of how the front end reaches the server. The migration
 runner tracks one table. `packages/core/core.js` is untouched and is now the only copy of the
 rules. Every screen is unchanged; the full suite and the screen check are the proof.
+
+## Update 2026-10-16: frontend/ and backend/, and the front end built from src to dist
+
+The folders carry the names the company's other applications use: `apps/web/public` is now
+`frontend/src`, `apps/api` is `backend`, moved with `git mv` so history follows; every path in the
+code, the tests, the Dockerfiles, the compose file and the documents was updated, and the five paths
+that climbed to the repository root are one level shorter. The front end gained a build,
+`scripts/build-web.js`: `frontend/src` becomes `frontend/dist`, with `core.js` (from
+`packages/core`) and the pinned libraries copied byte for byte and `js/main.js` bundled and minified
+by esbuild as ES modules with no inline code, so the content security policy is unchanged. In
+development the server still serves `frontend/src` as it is; `WEB_DIR=frontend/dist` serves the
+build, which is what `frontend/Dockerfile` puts in nginx. The screen check passes against both.
+The back end still answers the same domain through the web tier's proxy: no cross-origin calls, no
+CORS. Behaviour, replies and screens are unchanged.

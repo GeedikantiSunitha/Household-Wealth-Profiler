@@ -1,6 +1,6 @@
 # A rehearsal of the deployment on your own machine: the web tier, the API, a one-off migration and
-# PostgreSQL as separate containers, the way they run on DCDeploy (apps/web/Dockerfile and
-# apps/api/Dockerfile). For trying the set-up only, never for real client data: the database
+# PostgreSQL as separate containers, the way they run on DCDeploy (frontend/Dockerfile and
+# backend/Dockerfile). For trying the set-up only, never for real client data: the database
 # passwords are fixed, mail goes to the API's log, cookies are not Secure (no TLS here).
 #
 #   HWP_DATA_KEY=$(node server.js gen-key) docker compose -f deploy/local/compose.yml up --build
@@ -28,7 +28,7 @@ services:
   migrate:
     build:
       context: ../..
-      dockerfile: apps/api/Dockerfile
+      dockerfile: backend/Dockerfile
     command: ["node", "server.js", "migrate"]
     environment:
       NODE_ENV: development
@@ -42,7 +42,7 @@ services:
   api:
     build:
       context: ../..
-      dockerfile: apps/api/Dockerfile
+      dockerfile: backend/Dockerfile
     environment:
       NODE_ENV: development
       SERVE_WEB: "0"
@@ -57,7 +57,7 @@ services:
   web:
     build:
       context: ../..
-      dockerfile: apps/web/Dockerfile
+      dockerfile: frontend/Dockerfile
     environment:
       API_UPSTREAM: http://api:8080
     ports:

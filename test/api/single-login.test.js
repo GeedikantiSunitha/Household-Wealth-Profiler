@@ -43,7 +43,7 @@ test('a migration with a role reference no rule covers is refused before anythin
 });
 
 test('DB_LOGIN_MODE=single: one login; the owner and operator connections are DATABASE_URL with the modes on', () => {
-  const { load } = require('../../apps/api/src/config');
+  const { load } = require('../../backend/src/config');
   const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'hwp-cfg-'));
   try {
     const base = { DATA_KEY: crypto.randomBytes(32).toString('base64'), DATABASE_URL: 'postgres://u:p@db.internal:5432/hwp' };

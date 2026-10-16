@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const util = require('util');
 
-const ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const ROOT = path.resolve(__dirname, '..', '..', '..');
 const BACKUP_COMMANDS = ['backup', 'restore-drill'];
 // Commands run by the platform operator (cli/accounts.js, cli/platform.js): they need no sign-in users and no DATA_KEY
 const OPERATOR_COMMANDS = ['create-user', 'set-password', 'firm-create', 'firm-list', 'firm-seats', 'firm-status', 'access-review', 'grant-operator'];
@@ -143,8 +143,11 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     newKey,
     hsts: env.HSTS !== '0',
     // SERVE_WEB=0: the API answers /api/, /healthz and /readyz only; the screens are served by the
-    // web tier (apps/web as its own service, behind the same domain). The default, one server, is for development.
+    // web tier (frontend as its own service, behind the same domain). The default, one server, is for development.
     serveWeb: env.SERVE_WEB !== '0',
+    // The folder the screens are served from: frontend/src as it is (development), or a built
+    // frontend/dist (node scripts/build-web.js) to check the build the web tier serves
+    webDir: env.WEB_DIR ? path.resolve(env.WEB_DIR) : path.join(root, 'frontend', 'src'),
     // TOTP_REQUIRED=0 switches the second step (authenticator code) off: the password alone signs in.
     // Development and early trials only; never with real client data.
     totpRequired: env.TOTP_REQUIRED !== '0',

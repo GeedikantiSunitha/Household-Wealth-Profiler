@@ -53,7 +53,7 @@ DCDeploy's private network only.
 4. Take DCDeploy's database backup before every deploy that includes a migration, and restore one into a scratch database before going live to prove it.
 5. The first firm and administrator: `node server.js firm-create "NAME" SEATS`, `node server.js create-user EMAIL "NAME" FIRM_ID admin` and `set-password`, from the same one-off worker.
 
-Two services instead of one, the front end apart from the back end: the web service from `apps/web/Dockerfile` (nginx serving the screens and `core.js` as they are, and passing `/api/`, `/healthz` and `/readyz` to the API over the private network, so everything stays on one domain) and the API service from `apps/api/Dockerfile` (`SERVE_WEB=0`). Build context `./` for both; `API_UPSTREAM` on the web service names the API; `PUBLIC_URL` on the API is the web service's public address. `deploy/local/compose.yml` rehearses this shape on your own machine and `node deploy/local/check.js URL` checks either shape after a deploy. The full process is [ops/DEPLOYMENT.md](ops/DEPLOYMENT.md).
+Two services instead of one, the front end apart from the back end: the web service from `frontend/Dockerfile` (nginx serving the screens and `core.js` as they are, and passing `/api/`, `/healthz` and `/readyz` to the API over the private network, so everything stays on one domain) and the API service from `backend/Dockerfile` (`SERVE_WEB=0`). Build context `./` for both; `API_UPSTREAM` on the web service names the API; `PUBLIC_URL` on the API is the web service's public address. `deploy/local/compose.yml` rehearses this shape on your own machine and `node deploy/local/check.js URL` checks either shape after a deploy. The full process is [ops/DEPLOYMENT.md](ops/DEPLOYMENT.md).
 
 ### Any other host
 
@@ -153,7 +153,7 @@ npm start                   # as hwp_app
 In development `npm start` applies migrations itself (with `DATABASE_OWNER_URL` when set, else
 `DATABASE_URL`). With `NODE_ENV=production` it never does: it refuses to start while a migration
 is pending, so a schema change is always a deliberate deploy step. The start-up line shows where the data is kept.
-`.env` belongs on the server only, never in `apps/web/public/`: everything there is sent to browsers.
+`.env` belongs on the server only, never in `frontend/src/`: everything there is sent to browsers.
 Add `?sslmode=require` when the database is on another machine, and URL-encode special
 characters in the password.
 
@@ -171,7 +171,7 @@ The index is a keyed hash, filled in for households saved before it existed with
 are resolved, and 0006 refuses until every row names its firm.
 
 Every household and firm settings record is held to field rules before it is stored (text lengths,
-numbers, dates, dropdown options, row counts; see apps/api/src/services/validate.js), and a request
+numbers, dates, dropdown options, row counts; see backend/src/services/validate.js), and a request
 that breaks one is refused with the field path and the rule. Before enforcing the rules on a database
 that was filled under older rules, list what would be refused, without changing anything:
 
@@ -237,7 +237,7 @@ echo "a passphrase of at least 12 characters" | node server.js set-password dana
 
 **Roles.** A person has one or more roles in a firm (a primary role, and any extra ones, for example an
 administrator who is also a compliance reviewer). They can do whatever any of their roles allows, and
-the services check this on every call (the table is in `apps/api/src/services/access.js`; the screens
+the services check this on every call (the table is in `backend/src/services/access.js`; the screens
 only mirror it):
 
 | | Administrator | Adviser | Compliance reviewer |
@@ -439,7 +439,7 @@ To run the PostgreSQL tests, point them at an empty scratch database:
 ### 5. The spreadsheet library
 
 Excel import and export use SheetJS 0.20.3, served by the app itself from
-`apps/web/public/vendor/` and never from a CDN: the Content Security Policy allows scripts from
+`frontend/src/vendor/` and never from a CDN: the Content Security Policy allows scripts from
 this server only. The copy is pinned by hash; `npm run vendor` downloads it again from SheetJS
 and refuses anything that does not match, and a test checks the committed file. Only the
 single-file demo build, opened from disk, fetches it from SheetJS's own CDN.
@@ -454,7 +454,7 @@ single-file demo build, opened from disk, fetches it from SheetJS's own CDN.
 | Versions | Every save is kept in `versions/` (or `household_versions`). Two people editing at once cannot overwrite each other: the second save is refused and they reload |
 | Audit trail | The server compares each save with the previous version and logs who changed which field, when, from what and to what |
 | No duplicates | Each create carries an `Idempotency-Key`; a repeat within a day (a double-click, a retried request) returns the first household instead of making a second; the same key with a different request is refused (422). A record that cannot be read is logged and left out of the list rather than hiding every other household |
-| Field rules | Every household and firm settings record is held to one rule per field type before it is stored (text lengths, numbers, real dates, dropdown options, row counts; apps/api/src/services/validate.js). A value outside the rules is refused with 400 `invalid_field` and a list of field paths and rules, never the value. Every error reply carries a `code` (`duplicate_reference`, `version_conflict`, `invalid_field`, `idempotency_mismatch`, `busy`, `not_found`, ...) so the app can show the right message |
+| Field rules | Every household and firm settings record is held to one rule per field type before it is stored (text lengths, numbers, real dates, dropdown options, row counts; backend/src/services/validate.js). A value outside the rules is refused with 400 `invalid_field` and a list of field paths and rules, never the value. Every error reply carries a `code` (`duplicate_reference`, `version_conflict`, `invalid_field`, `idempotency_mismatch`, `busy`, `not_found`, ...) so the app can show the right message |
 | Retention | There is no delete endpoint. The Money Laundering Regulations require records for 5 years after the relationship ends (`RETENTION_YEARS`). After that a household may be purged when one administrator or compliance user requests it and a different one approves; the purge register keeps who, when and what was removed |
 | Access log | Every read of a client file, every export and every refused attempt is logged (who, when, which household, outcome), and can never be changed. A subject access export gives a client everything kept about the household |
 | Backups | `node server.js backup`: an encrypted (own `BACKUP_KEY`), consistent, checksummed backup with a signed manifest; `node server.js restore-drill` proves it restores, with every record readable and firms kept apart |
@@ -525,7 +525,7 @@ income is included.
 
 ```
 packages/core/core.js  schema, tax engine, balance sheet, KYC/AML rules (browser and Node; served as /core.js)
-apps/api/src/       the API, in layers that call downwards only:
+backend/src/       the API, in layers that call downwards only:
   middleware/         the security layer: ten global gates in a fixed order (parse-url, health, api-only,
                       authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf),
                       the per-route guards (stage, rate limit, role) and the Basic provider for development
@@ -536,7 +536,7 @@ apps/api/src/       the API, in layers that call downwards only:
   repositories/       storage: PostgreSQL (row-level security, per-firm keys), the file store, idempotency,
                       the sign-in store (accounts, sessions, the auth event log)
   http/ db/ crypto/ config/ cli/   replies and files, the connection pool, encryption, settings, commands
-apps/web/public/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js), in layers:
+frontend/src/    the interface: index.html, styles.css, js/ (browser modules, starting at js/main.js), in layers:
   js/pages/           one file per screen, the sign-in screens, and the page switch
   js/components/      form fields, banners, the side rail, the top bar
   js/hooks/           what pages share: the state, the store (autosave, conflicts), look-ups, Excel and downloads
@@ -551,7 +551,7 @@ scripts/build.js    builds dist/wealth-profiler.html, a single file that runs wi
 test/               unit (rules), api, db, ci and e2e (npm run screens) tests
 ```
 
-Each of `apps/api`, `apps/web` and `packages/core` has its own README with the detail.
+Each of `backend`, `frontend` and `packages/core` has its own README with the detail.
 
 ### Adding a field
 

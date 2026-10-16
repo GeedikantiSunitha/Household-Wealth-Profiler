@@ -1,4 +1,4 @@
-// apps/api/src/auth/mail.js: sending the sign-in emails (reset and invitation links, warnings)
+// backend/src/auth/mail.js: sending the sign-in emails (reset and invitation links, warnings)
 // over SMTP with Node alone, and the log fallback outside production. Checked against a fake SMTP
 // server here: plain, and with STARTTLS using a throwaway certificate made by openssl (skipped
 // when openssl is not installed).
@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { createMailer, parseSmtpUrl, dot } = require('../../apps/api/src/services/auth/mail.js');
+const { createMailer, parseSmtpUrl, dot } = require('../../backend/src/services/auth/mail.js');
 
 // A fake SMTP server: records what it was told; offers STARTTLS when given a certificate
 function fakeSmtp({ cert = null, auth = true } = {}) {

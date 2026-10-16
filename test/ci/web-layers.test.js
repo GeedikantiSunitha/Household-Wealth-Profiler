@@ -1,6 +1,6 @@
 // The front end runs one direction only: pages -> components -> hooks -> services/api, with lib
 // and content below everything. Only services/api talks to the server: no other browser module
-// may call fetch. This reads every import in apps/web/public/js (static, side-effect and dynamic)
+// may call fetch. This reads every import in frontend/src/js (static, side-effect and dynamic)
 // and fails on the first edge that breaks the rule, naming the file.
 'use strict';
 const test = require('node:test');
@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const JS = path.join(__dirname, '..', '..', 'apps', 'web', 'public', 'js');
+const JS = path.join(__dirname, '..', '..', 'frontend', 'src', 'js');
 
 // What each folder may import (its own folder is always allowed). main.js and events/ are the
 // shell that wires everything, so they may import anything.
@@ -32,7 +32,7 @@ function* files(dir) {
 const folderOf = file => path.relative(JS, file).split(path.sep)[0];
 const IMPORT = /(?:from\s*'|import\s*'|import\(\s*')(\.\.?\/[^']+)'/g;
 
-test('every import in apps/web/public/js points to the same folder or one below it', () => {
+test('every import in frontend/src/js points to the same folder or one below it', () => {
   const problems = [];
   for (const file of files(JS)) {
     const folder = folderOf(file);

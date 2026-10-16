@@ -1,4 +1,4 @@
-// apps/api/src/auth/sessions.js: server-side sessions in a cookie. Random 256-bit id, stored
+// backend/src/auth/sessions.js: server-side sessions in a cookie. Random 256-bit id, stored
 // hashed; idle and absolute limits; rotation; revocation; a CSRF token bound to the session.
 // Checked here against an in-memory store with a fake clock; the PostgreSQL store is covered by
 // session-api.test.js.
@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const { createSessions, sessionSecretFrom, COOKIE_SECURE, COOKIE_PLAIN, TOUCH_MS } = require('../../apps/api/src/services/auth/sessions.js');
+const { createSessions, sessionSecretFrom, COOKIE_SECURE, COOKIE_PLAIN, TOUCH_MS } = require('../../backend/src/services/auth/sessions.js');
 
 // The slice of the sign-in store that sessions use, in memory
 function fakeStore() {

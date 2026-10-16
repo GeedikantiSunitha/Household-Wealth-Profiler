@@ -1,13 +1,13 @@
-// apps/api/src/cli and the server.js entry point: the commands people and deploy scripts run.
+// backend/src/cli and the server.js entry point: the commands people and deploy scripts run.
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { hashPasswordCommand, genKeyCommand } = require('../../apps/api/src/cli');
-const { parseUsers } = require('../../apps/api/src/config');
-const { createBasicAuth } = require('../../apps/api/src/middleware/basic.js');
-const { DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories/ids.js');
+const { hashPasswordCommand, genKeyCommand } = require('../../backend/src/cli');
+const { parseUsers } = require('../../backend/src/config');
+const { createBasicAuth } = require('../../backend/src/middleware/basic.js');
+const { DEFAULT_FIRM_ID } = require('../../backend/src/repositories/ids.js');
 
 const ROOT = path.join(__dirname, '..', '..');
 const USAGE = 'Usage: node server.js hash-password NAME PASSWORD (name without : or ;)';
@@ -22,7 +22,7 @@ test('hash-password prints an AUTH_USERS entry that signs in', t => {
 });
 
 test('migrate and index-references need a database setting', () => {
-  const run = args => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, encoding: 'utf8', timeout: 15000, env: { ...process.env, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', PUBLIC_URL: '', AUTH_USERS: 'x', DATA_KEY: '', ALLOW_PLAINTEXT: '1' } });
+  const run = args => spawnSync(process.execPath, ['server.js', ...args], { cwd: ROOT, encoding: 'utf8', timeout: 15000, env: { ...process.env, DATABASE_URL: '', DATABASE_OWNER_URL: '', SMTP_URL: '', SMTP_FROM: '', OPERATOR_EMAIL: '', DB_LOGIN_MODE: '', PUBLIC_URL: '', AUTH_USERS: 'x', DATA_KEY: '', ALLOW_PLAINTEXT: '1' } });
   const m = run(['migrate']);
   assert.equal(m.status, 1); assert.match(m.stderr, /Set DATABASE_OWNER_URL \(or DATABASE_URL\) to the database to migrate/);
   const i = run(['index-references']);

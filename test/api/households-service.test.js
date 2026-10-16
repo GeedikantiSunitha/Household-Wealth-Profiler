@@ -1,4 +1,4 @@
-// apps/api/src/services/households.js: the household flow without HTTP. A fixed clock and ids
+// backend/src/services/households.js: the household flow without HTTP. A fixed clock and ids
 // make every result exact; expected summaries are worked out with packages/core directly.
 // Every call carries the context { user, firmId }: the store is scoped to that firm.
 'use strict';
@@ -8,9 +8,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const H = require('../../packages/core/core.js');
-const { createHouseholdService, summarise, AUDIT_LIMIT } = require('../../apps/api/src/services/households.js');
-const { createFileStore, DEFAULT_FIRM_ID } = require('../../apps/api/src/repositories');
-const { createSealer } = require('../../apps/api/src/crypto/seal.js');
+const { createHouseholdService, summarise, AUDIT_LIMIT } = require('../../backend/src/services/households.js');
+const { createFileStore, DEFAULT_FIRM_ID } = require('../../backend/src/repositories');
+const { createSealer } = require('../../backend/src/crypto/seal.js');
 
 const SAM = { user: 'sam', firmId: DEFAULT_FIRM_ID }, CHRIS = { user: 'chris', firmId: DEFAULT_FIRM_ID };
 const OTHER_FIRM = { user: 'sam', firmId: '0f1e0000-0000-4000-8000-000000000002' };

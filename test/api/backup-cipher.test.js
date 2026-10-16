@@ -1,4 +1,4 @@
-// apps/api/src/crypto/backup-cipher.js: backups are encrypted with BACKUP_KEY so that any change,
+// backend/src/crypto/backup-cipher.js: backups are encrypted with BACKUP_KEY so that any change,
 // cut, reordering, repetition or extension of the file, or the wrong key, fails decryption, and the
 // manifest beside it cannot be altered unseen.
 'use strict';
@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { Readable, Writable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
-const { encryptStream, decryptStream, keyId, signManifest, verifyManifest, HEADER_LEN } = require('../../apps/api/src/crypto/backup-cipher.js');
+const { encryptStream, decryptStream, keyId, signManifest, verifyManifest, HEADER_LEN } = require('../../backend/src/crypto/backup-cipher.js');
 
 const KEY = crypto.randomBytes(32);
 async function run(input, transform, { pieces = 7 } = {}) {

@@ -1,10 +1,10 @@
 # The API as a service of its own (the back end). It answers /api/, /healthz and /readyz only
-# (SERVE_WEB=0); the screens come from the web tier (apps/web/Dockerfile) on the same domain.
+# (SERVE_WEB=0); the screens come from the web tier (frontend/Dockerfile) on the same domain.
 # The one-service image that serves the screens itself is the Dockerfile at the repository root.
 #
 # Build from the repository root, so the workspace manifest and packages/core are in the context:
-#   docker build -f apps/api/Dockerfile -t hwp-api .
-# On DCDeploy: build context ./, Dockerfile path apps/api/Dockerfile, port 8080, the variables
+#   docker build -f backend/Dockerfile -t hwp-api .
+# On DCDeploy: build context ./, Dockerfile path backend/Dockerfile, port 8080, the variables
 # from ops/DEPLOYMENT.md section 6. No volume: with DATABASE_URL set nothing is written to disk.
 #
 # There is no build step (plain Node, no TypeScript), so one stage is honest: npm ci --omit=dev
@@ -17,7 +17,7 @@ COPY package.json package-lock.json ./
 COPY packages/core/package.json ./packages/core/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server.js ./
-COPY apps/api ./apps/api
+COPY backend ./backend
 COPY db ./db
 COPY packages ./packages
 # The node image's unprivileged user; 8080 needs no privilege

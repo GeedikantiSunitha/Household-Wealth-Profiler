@@ -1,4 +1,4 @@
-# apps/api: backend (Node.js)
+# backend: backend (Node.js)
 
 The server: settings, sign-in, encryption, storage, the household API and the audit trail.
 

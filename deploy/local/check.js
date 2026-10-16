@@ -30,8 +30,8 @@ const expect = (cond, msg) => { if (!cond) throw new Error(msg); };
     expect(served.equals(core), `differs (${served.length} vs ${core.length} bytes)`);
     return `${core.length} bytes`;
   });
-  await check('a page module and the vendored library are served', async () => {
-    for (const p of ['/js/pages/render.js', '/js/services/api/client.js', '/vendor/xlsx.full.min.js', '/styles.css']) {
+  await check('the bundle, the vendored library and the styles are served', async () => {
+    for (const p of ['/js/main.js', '/vendor/xlsx.full.min.js', '/styles.css']) {
       const r = await fetch(base + p); expect(r.status === 200, `${p}: ${r.status}`);
     }
   });
