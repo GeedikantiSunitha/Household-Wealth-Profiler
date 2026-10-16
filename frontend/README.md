@@ -11,6 +11,27 @@ Without a server, use the single-file build: `npm run build`, then open `dist/we
 That build bundles the modules into the page with esbuild (a development-only tool; it is not in
 the Docker image and never reaches users).
 
+## How the front end reaches the back end
+
+One address for everything. The browser loads the screens and calls the API on the same domain;
+the front-end container passes every `/api/` call to the back end over the host's private network.
+The back end is never on the internet, and no cross-site (CORS) setting exists to get wrong.
+
+```
+Browser ── https://profiler.yourfirm.co.uk/          the screens   ┐
+Browser ── https://profiler.yourfirm.co.uk/api/...   the API       ┘ front-end container (nginx)
+                                                                     │  passes /api/, /healthz, /readyz
+                                                                     ▼  over the private network
+                                                     back-end container (Node), BACKEND_URL
+```
+
+The front end's one setting is `BACKEND_URL`, the back end's internal address:
+`http://<back-end internal hostname>:8080` (on DCDeploy, the back-end service's internal link, with
+both services in the same environment). It holds no secret. Its earlier name, `API_UPSTREAM`, is still
+accepted when `BACKEND_URL` is not set; without either, `http://api:8080` (the local compose file).
+Two checks: `https://<front-end address>/healthz` answers `{"ok":true}` when the two are connected; a
+container that stops at start with "host not found in upstream" in its log has a wrong `BACKEND_URL`.
+
 ## Layout
 
 | Path | Holds |

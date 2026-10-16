@@ -7,8 +7,10 @@
 # Build from the repository root, so packages/core and the build script are in the context:
 #   docker build -f frontend/Dockerfile -t hwp-web .
 # Settings (substituted into nginx.conf.template at start):
-#   API_UPSTREAM  where the API answers: http://api:8080 on a private network, or the API service's
-#                 https address when the host has none (then set API_HOST to that host name)
+#   BACKEND_URL   the back end's internal address, where the browser's /api/ calls are passed:
+#                 http://<back-end internal hostname>:8080 on the host's private network (DCDeploy:
+#                 the back-end service's internal link). Default http://api:8080 (the local compose
+#                 file). API_UPSTREAM, its earlier name, is still accepted when BACKEND_URL is unset.
 #   API_HOST      the Host header sent to the API; "$host" (the default) keeps the public domain
 
 # Stage 1: the build (esbuild is a development dependency; nothing from this stage but dist/ goes on)
@@ -24,8 +26,11 @@ RUN node scripts/build-web.js
 
 # Stage 2: nginx, unprivileged, port 8080
 FROM nginxinc/nginx-unprivileged:1.27-alpine
-ENV API_UPSTREAM=http://api:8080 API_HOST='$host' NGINX_ENVSUBST_FILTER=^API_
+ENV API_HOST='$host' NGINX_ENVSUBST_FILTER=^(API_HOST|BACKEND_URL)$
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 EXPOSE 8080
+# BACKEND_URL, else the earlier API_UPSTREAM, else the default; then nginx's own start-up fills in the template
+ENTRYPOINT ["/bin/sh", "-c", "export BACKEND_URL=\"${BACKEND_URL:-${API_UPSTREAM:-http://api:8080}}\"; exec /docker-entrypoint.sh \"$@\"", "--"]
+CMD ["nginx", "-g", "daemon off;"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD wget -qO- http://127.0.0.1:8080/health || exit 1

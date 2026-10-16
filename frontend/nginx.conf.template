@@ -1,5 +1,5 @@
 # The web tier (frontend/Dockerfile): the screens as static files, and the API on the same domain.
-# ${API_UPSTREAM} and ${API_HOST} are filled in from the environment when the container starts;
+# ${BACKEND_URL} (the back end's internal address) and ${API_HOST} are filled in from the environment when the container starts;
 # every other $name is an nginx variable.
 server {
     listen 8080;
@@ -20,7 +20,7 @@ server {
     # the public host, with its port as the browser sent it, go with each request (the API's same-site
     # check compares it with the Origin header).
     location ~ ^/(api/|healthz$|readyz$) {
-        proxy_pass ${API_UPSTREAM};
+        proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
         proxy_set_header Host ${API_HOST};

@@ -210,7 +210,7 @@ Both variables are needed together: the loader refuses an owner connection whose
 ### Or two services (front end and back end apart)
 
 1. **api**: same repository and branch; build context `./`, Dockerfile path `backend/Dockerfile`; port `8080`; the variables below. Not reachable from the internet if DCDeploy allows a private service; otherwise note its public address.
-2. **web**: same repository and branch; build context `./`, Dockerfile path `frontend/Dockerfile`; port `8080`; this is the public one, with the domain and TLS. Variables: `API_UPSTREAM` = `http://api:8080` on a private network, or the api service's `https://` address when there is none, and then also `API_HOST` = that address's host name.
+2. **web**: same repository and branch; build context `./`, Dockerfile path `frontend/Dockerfile`; port `8080`; this is the public one, with the domain and TLS. Variables: `BACKEND_URL` = the api service's internal address, `http://<internal hostname>:8080` (its internal link; both services in the same environment). Only if the host has no private network: the api service's `https://` address, and then also `API_HOST` = that address's host name. `API_UPSTREAM`, the earlier name, is still accepted. A wrong address stops the web container at start with "host not found in upstream" in its log.
 3. `PUBLIC_URL` on the api service is the web service's public address (the one users open), not the api's own.
 4. After deploy, `node deploy/local/check.js https://HOST` proves the split: the page and `core.js` byte for byte with the headers, the API behind the same domain, a cross-site write refused, a same-site one reaching the API.
 
