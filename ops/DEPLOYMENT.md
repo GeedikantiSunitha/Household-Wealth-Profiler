@@ -2,7 +2,7 @@
 
 **Version:** 1.0
 **Last updated:** 16 October 2026
-**Applies to:** the Node API edition on `develop` and later (`apps/api`, `apps/web`, `db/migrations`); the Supabase edition under `supabase/` is frozen and not deployed.
+**Applies to:** the Node API edition on `develop` and later (`apps/api`, `apps/web`, `db/migrations`); the former Supabase edition was retired in Phase 6, so "Supabase" below means only the PostgreSQL host option.
 
 Step-by-step instructions for deploying to development, staging and production, with the checks before, the validation after, and how to roll back. Everything here is what the code actually does; where a step is still to be decided, it says so.
 

@@ -5,8 +5,7 @@ sheet, risk profile, data checks, KYC/AML onboarding, reviews, mandate checks an
 
 Moved here unchanged from `public/core.js` in step B2. It is the npm workspace package
 `@hwp/core`. Code loads it by relative path (`require('../packages/core/core.js')`), and the
-server sends it to the browser as `/core.js`. The Supabase Edge Function keeps a synced copy in
-`supabase/functions/_shared/core.js` (`npm run sync:supabase`; a test fails if it drifts).
+server sends it to the browser as `/core.js`. It is the only copy.
 
 ## Rules
 

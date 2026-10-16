@@ -42,7 +42,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Tests (unit, API in both storage modes, migrations, Supabase edition)
+      - name: Tests (unit, API in both storage modes, migrations, CI guards)
         run: npm test
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/hwp_test
@@ -80,7 +80,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          if ! git diff --quiet "$BASE" "$HEAD" -- packages/core/core.js supabase/functions/_shared/core.js; then
+          if ! git diff --quiet "$BASE" "$HEAD" -- packages/core/core.js; then
             if [ "$HAS_LABEL" != "true" ]; then
               echo "::error::packages/core/core.js changed. Add the 'rules-change' label and name the compliance sign-off in the pull request."
               exit 1

@@ -21,7 +21,6 @@ function bundle(entry) {
   return out.outputFiles[0].text;
 }
 const body = html.slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))
-  .replace(/<script src="(config|cloud)\.js"><\/script>\n?/g, '') // the single file has no server or cloud sign-in
   // Marks the page as the standalone demo: the only version allowed to keep data in the browser
   .replace('<script src="core.js"></script>', () => `<script>window.HWP_STANDALONE=true;</script>\n<script>\n${safe(readCore())}\n</script>`)
   .replace('<script type="module" src="js/main.js"></script>', () => `<script>\n${safe(bundle('js/main.js'))}\n</script>`);

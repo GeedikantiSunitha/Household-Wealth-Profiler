@@ -15,7 +15,7 @@ the Docker image and never reaches users).
 
 | Path | Holds |
 | --- | --- |
-| `public/` | `index.html`, `styles.css`, `config.js` (non-secret settings only), `cloud.js`, `vendor/` (SheetJS 0.20.3, pinned by hash in `scripts/vendor.js`) |
+| `public/` | `index.html`, `styles.css`, `vendor/` (SheetJS 0.20.3, pinned by hash in `scripts/vendor.js`) |
 | `public/js/main.js` | Start-up only: signs in or finds the server, then draws the first screen |
 | `public/js/pages/` | One file per screen, the sign-in screens (`sign-in.js`), and `render.js`, which draws the screen on show |
 | `public/js/components/` | Form fields, banners, the live-effect panel, the side rail, the top bar |
@@ -35,7 +35,7 @@ hooks use services; services use nothing above them; `lib/` and `content/` sit b
 - Calculations come from `packages/core`; screens only display them.
 - Nothing secret is ever sent to the browser.
 - Modules import from each other with relative paths ending in `.js`; nothing is global except
-  what other scripts provide (`window.HWP` from core.js, `window.HWP_CONFIG`, `window.HWPCloud`).
+  what other scripts provide (`window.HWP` from core.js).
 - A module that only registers listeners (`events/editing.js`, `events/toolbar.js`) must be imported
   for its effect (`import './events/editing.js'`): nothing else loads it.
 - After any change here, `npm run screens` must report `SAME`, or `LOOK` with every difference

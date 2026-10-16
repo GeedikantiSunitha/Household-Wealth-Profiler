@@ -1,8 +1,6 @@
 /* Household Wealth Profiler: user interface, start-up.
    Every calculation comes from window.HWP (core.js). Where data is kept:
    - server: the API in server.js (sign-in, encrypted storage, versions, audit trail)
-   - cloud:  the Supabase edition (config.js sets supabaseUrl): signs in through cloud.js and calls
-             the `api` Edge Function with a bearer token
    - local:  only in the standalone single file (npm run build), which has no server; a page served
              by a server that does not answer stops with an error instead of keeping data here
 
@@ -33,7 +31,7 @@ setGate(runGate);
 (async()=>{
   // Sign in (or find the server), then the firm settings: if either fails, the app does not open
   try{await Store.init();await Store.loadFirm()}catch(e){document.body.classList.add('gated');
-    $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p>${Store.cloud?'<div class="addrow"><button class="btn" type="button" data-act="signOut">Sign out</button></div>':''}</div>`;return}
+    $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p></div>`;return}
   if(Store.mode==='server'){setState(H.blank());state.VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}
   resetUI(false);render();

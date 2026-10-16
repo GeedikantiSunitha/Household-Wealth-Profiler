@@ -1,5 +1,5 @@
 /* User accounts: the people who can sign in to the firm, their roles, invitations and seats. Administrators only (the server refuses anyone else).
-   The server's reply is { members, seats, used }; the older Supabase edition answers with a plain list and sends the seats with /me. */
+   The server's reply is { members, seats, used }. */
 import { Store } from '../hooks/store.js';
 import { bannerHTML } from '../components/banner.js';
 import { $, esc } from '../lib/dom.js';
@@ -26,7 +26,7 @@ export async function renderTeam(){
     <ul class="muted" style="margin:10px 0 0;padding-left:18px">${Object.keys(ROLE_HELP).map(r=>`<li>${esc(ROLE_HELP[r])}</li>`).join('')}<li>Tick more than one when someone does more than one job. Nobody can sign off a file they have worked on, whatever their roles.</li></ul>
     <div class="addrow"><button class="btn primary" type="button" data-act="invite"${used>=seats?' disabled':''}>Send invitation</button></div></div>`;
   const row=x=>{const self=x.email===Store.email;const [cls,label]=statusOf(x);
-    // The app's own sign-in changes roles in place (tick or untick); the Supabase edition has two fixed roles shown as text
+    // The app's own sign-in changes roles in place (tick or untick)
     const roleCell=self||!Store.session?esc(rolesOf(x).map(r=>ROLE_LABEL[r]||r).join(' + ')):`<div role="group" aria-label="Roles of ${esc(x.name||x.email)}">${boxes('role-'+x.userId,rolesOf(x),` data-act="memberRoles" data-uid="${esc(x.userId)}"`)}</div>`;
     return `<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.email)}</td><td>${roleCell}</td><td><span class="pill ${cls}">${label}</span></td><td>${self?'<span class="muted">You</span>':`<button class="btn" type="button" data-act="memberActive" data-uid="${esc(x.userId)}" data-on="${x.active?'0':'1'}">${x.active?'Deactivate':x.invitation==='declined'?'Invite again':'Reactivate'}</button>`}</td></tr>`};
   h+=`<div class="panel"><div class="tbl-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div></div>`;

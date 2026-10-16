@@ -136,3 +136,14 @@ store instead of the store loading a page; and the balance sheet groups became c
 by the page and the Excel export. `test/ci/web-layers.test.js` enforces the direction and the
 fetch rule. Every screen is unchanged. (The screen check's own requires of the moved sign-in
 services, missed by the previous commit, are corrected here.)
+
+## Update 2026-10-16: the Supabase edition retired (Phase 6)
+
+The second backend is gone: `supabase/` (its migrations, the Edge Function and its copy of
+`core.js`), `scripts/firms.js`, `scripts/deploy-supabase.sh`, `scripts/supabase-db.js`,
+`scripts/build-web.js`, the browser's `cloud.js` and `config.js`, the `sync:supabase` and
+`build:web` scripts and the Supabase test. The browser's one dead branch (the cloud sign-in and
+bearer token in the store, the API client and the sign-out action) went with it, so
+`services/api` is now the whole truth of how the front end reaches the server. The migration
+runner tracks one table. `packages/core/core.js` is untouched and is now the only copy of the
+rules. Every screen is unchanged; the full suite and the screen check are the proof.

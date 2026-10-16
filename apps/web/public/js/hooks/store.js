@@ -1,6 +1,6 @@
 /* The connection to the backend and saving, for every screen.
-     Store       where the household is kept and how it is saved: on the server (the API, or the
-                 Supabase edition through cloud.js) or, with no server, in this browser only.
+     Store       where the household is kept and how it is saved: on the server (the API) or, with no
+                 server, in this browser only.
                  Edits mark the household dirty; it is saved 1.2 s after the last edit. A save that
                  finds someone else's newer version shows the conflict banner and saves nothing; a
                  save the server refuses by code (duplicate_reference, invalid_field) shows what to
@@ -9,7 +9,7 @@
      logChange   the audit trail kept in the browser when there is no server
    The network itself is services/api/client.js: this module decides what each reply means. */
 import { state, setState } from './state.js';
-import { probe, request, CFG } from '../services/api/client.js';
+import { probe, request } from '../services/api/client.js';
 import { $, esc } from '../lib/dom.js';
 
 const H = window.HWP;
@@ -35,10 +35,8 @@ function describeProblem(p,firmSettings){const m=/^(\w+)(?:\[(\d+)\])?(?:\.(\w+)
 const problemList=(body,firm)=>'<ul>'+((body&&body.errors)||[]).map(p=>'<li>'+describeProblem(p,firm)+'</li>').join('')+'</ul>';
 // A reply from /api/me with the app's own sign-in: the session's details
 function sessionFrom(S,j){Object.assign(S,{mode:'server',session:true,user:j.user,email:j.email||'',name:j.name||'',firmId:j.firmId||'',firmName:j.firmName||'',role:j.role||'',roles:j.roles||(j.role?[j.role]:[]),csrf:j.csrf||'',encrypted:!!j.encrypted,production:!!j.production,totpRequired:j.totpRequired!==false})}
-const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,cloud:null,role:'',roles:[],review:null,reviewStale:false,firm:'',seats:0,session:false,csrf:'',email:'',name:'',firmId:'',firmName:'',
+const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,encrypted:false,production:false,role:'',roles:[],review:null,reviewStale:false,firm:'',seats:0,session:false,csrf:'',email:'',name:'',firmId:'',firmName:'',
   async init(){
-    if(CFG.supabaseUrl&&window.HWPCloud){this.cloud=await window.HWPCloud.gate();const j=await this.api('GET','me');
-      Object.assign(this,{mode:'server',user:j.user,email:j.email,role:j.role,firmName:j.firm,seats:j.seats,encrypted:!!j.encrypted});return}
     // Only the standalone single file (npm run build) keeps data in this browser: it has no server
     if(window.HWP_STANDALONE===true){this.mode='local';try{this.user=localStorage.getItem(LS_USER)||''}catch(e){this.user=''}return}
     // Served by the server: the server must answer. Never fall back to browser storage, or client
@@ -56,14 +54,13 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
   },
   loadLocal(){try{const r=localStorage.getItem(LS);return r?window.HWP.normalise(JSON.parse(r)):null}catch(e){return null}},
   saveLocal(){try{localStorage.setItem(LS,JSON.stringify(state.S))}catch(e){}},
-  async api(method,path,body,extraHeaders){const r=await request(method,path,body,extraHeaders,{csrf:this.csrf,session:this.session,cloud:this.cloud});const j=r.body;
-    if(this.cloud&&(r.status===401||(j&&j.code==='mfa_required'))){location.reload();return new Promise(()=>{})}
+  async api(method,path,body,extraHeaders){const r=await request(method,path,body,extraHeaders,{csrf:this.csrf,session:this.session});const j=r.body;
     // The session has ended (signed out elsewhere, idle too long, deactivated): back to the sign-in page
     if(this.session&&r.status===401&&j&&j.code==='sign_in_required'){location.reload();return new Promise(()=>{})}
     if(j&&j.csrf&&this.session)this.csrf=j.csrf;
     if(!r.ok){const err=new Error((j&&j.error)||('Request failed ('+r.status+')'));err.status=r.status;err.body=j;throw err}return j},
   async list(){return this.api('GET','households')},
-  // What this person may change. The server decides; this only keeps the screens honest. With HTTP Basic, the standalone file and the Supabase edition there is no role here and nothing is locked.
+  // What this person may change. The server decides; this only keeps the screens honest. With HTTP Basic and the standalone file there is no role here and nothing is locked.
   // A person can hold several roles in a firm (roles; role is the primary one): they can do whatever any of them allows.
   hasRole(r){return (this.roles&&this.roles.length?this.roles:[this.role]).includes(r)},
   canEditHousehold(){return !this.session||this.hasRole('admin')||this.hasRole('adviser')},
@@ -93,7 +90,7 @@ const Store={mode:'local',user:'',id:null,version:0,dirty:false,saving:false,enc
     const j=await this.api('POST','households',{state:household},{'Idempotency-Key':key});this.id=j.id;this.version=j.version;this.review=null;this.reviewStale=false;return j},
   // An export of the open household made in this browser (Excel, JSON, print) is recorded in the server's
   // access log. Best effort: the export goes ahead even if the log cannot be written (decided 2026-10-13)
-  logExport(kind){if(this.mode!=='server'||this.cloud||!this.id)return;this.api('POST','households/'+encodeURIComponent(this.id)+'/exports',{kind}).catch(e=>console.warn('export not logged:',e.message))},
+  logExport(kind){if(this.mode!=='server'||!this.id)return;this.api('POST','households/'+encodeURIComponent(this.id)+'/exports',{kind}).catch(e=>console.warn('export not logged:',e.message))},
   async audit(){return this.mode==='server'&&this.id?this.api('GET','households/'+encodeURIComponent(this.id)+'/audit'):(state.S.audit||[]).slice().reverse()},
   touch(){if(this.mode==='local'){clearTimeout(this.t);this.t=setTimeout(()=>this.saveLocal(),300);return}
     if(!this.id)return;this.dirty=true;saveStatus();clearTimeout(this.t);this.t=setTimeout(()=>this.flush(),1200)},
@@ -120,4 +117,4 @@ function logChange(path,from,to){if(Store.mode!=='local')return;state.S.audit=st
   if(last&&last.field===path&&last.user===Store.user&&now-new Date(last.ts).getTime()<15000){last.to=to;last.ts=new Date(now).toISOString();return}
   state.S.audit.push({ts:new Date(now).toISOString(),user:Store.user||'Unnamed user',field:path,from:from??'',to:to??''});if(state.S.audit.length>2000)state.S.audit.shift()}
 
-export { Store, saveStatus, logChange, LS_USER, CFG };
+export { Store, saveStatus, logChange, LS_USER };

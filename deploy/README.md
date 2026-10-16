@@ -8,5 +8,5 @@
 Setting **names** live here, never their values. Values go in the hosting platform's secret
 settings or a local `.env`, which git ignores.
 
-The older deploy files (`Dockerfile`, `fly.toml`, `scripts/deploy-fly.sh`,
-`scripts/deploy-supabase.sh`) stay where they are until they are replaced or retired.
+The older Fly.io deploy files (`fly.toml`, `scripts/deploy-fly.sh`) stay where they are until they
+are replaced or retired.

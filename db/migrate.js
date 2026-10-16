@@ -1,5 +1,5 @@
 /* Ordered SQL migrations with a record of what has been applied. No dependencies.
-   Used by server.js (db/migrations) and scripts/supabase-db.js (supabase/migrations).
+   Used by server.js (db/migrations).
 
    - Files run in name order, each in its own transaction with its tracking row, so a failed
      migration leaves nothing half-applied and is retried on the next run
@@ -27,16 +27,6 @@ const TRACKING = {
     key: file => file,
     record: `insert into schema_migrations (name, checksum) values ($1, $2)`,
     params: (file, sum) => [file, sum],
-  },
-  // Supabase CLI's own table, so `supabase db push` and this runner agree on what is applied.
-  // 20261008000000_init.sql is version 20261008000000, name init.
-  supabase: {
-    create: `create schema if not exists supabase_migrations;
-      create table if not exists supabase_migrations.schema_migrations (version text primary key, statements text[], name text)`,
-    applied: `select version as key, null as checksum from supabase_migrations.schema_migrations`,
-    key: file => file.split('_')[0],
-    record: `insert into supabase_migrations.schema_migrations (version, name) values ($1, $2)`,
-    params: file => [file.split('_')[0], file.replace(/^[^_]*_/, '').replace(/\.sql$/, '')],
   },
 };
 
@@ -91,7 +81,7 @@ async function migrate(db, { dir, tracking = 'app', before, log = () => {}, sing
 async function pending(db, { dir, tracking = 'app' }) {
   const t = TRACKING[tracking];
   const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
-  const table = tracking === 'app' ? 'schema_migrations' : 'supabase_migrations.schema_migrations';
+  const table = 'schema_migrations';
   const [{ exists }] = await db.query(`select to_regclass($1) is not null as exists`, [table]);
   if (!exists) return files;
   const applied = new Set((await db.query(t.applied)).map(r => r.key));

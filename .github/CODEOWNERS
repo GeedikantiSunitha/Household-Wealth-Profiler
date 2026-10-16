@@ -2,11 +2,10 @@
 # (enforced once "Require review from Code Owners" is on in branch protection).
 # The business rules, the database, the API contract, sign-in, storage and encryption.
 packages/core/                      @umesh-ttf
-supabase/functions/_shared/core.js  @umesh-ttf
 db/migrations/                      @umesh-ttf
-supabase/migrations/                @umesh-ttf
 test/api/api-contract.js            @umesh-ttf
-apps/api/src/auth/                  @umesh-ttf
+apps/api/src/services/auth/         @umesh-ttf
+apps/api/src/middleware/            @umesh-ttf
 apps/api/src/crypto/                @umesh-ttf
 apps/api/src/repositories/          @umesh-ttf
 .github/                            @umesh-ttf

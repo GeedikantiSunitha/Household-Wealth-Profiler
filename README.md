@@ -12,77 +12,11 @@ package is `pg`, and it is used only when the data is kept in PostgreSQL.
 
 ```sh
 npm install
-npm test          # rules (tax, balance sheet, IHT, KYC), the API, migrations, Supabase edition
+npm test          # rules (tax, balance sheet, IHT, KYC), the API, migrations, the CI guards
 npm run dev       # http://localhost:8080, sign in as demo / demo, data in ./data-dev
 ```
 
 `npm run dev` turns off encryption and HSTS. Use it only for trying the app locally.
-
-## Supabase edition (hosted, for selling to multiple firms)
-
-One deployment serves many customer firms. Each firm's records are kept apart, each
-person has their own login with two-step verification, and you control each firm's seats
-and can suspend a firm.
-
-| Part | Where |
-|---|---|
-| Database, sign-in, API | Supabase project in London (eu-west-2): `supabase/migrations`, `supabase/functions/api` |
-| Web front end | Any static host. The scripts use Cloudflare Pages. `npm run build:web` builds `dist/web` with security headers |
-
-How it differs from the self-hosted server:
-
-- **Sign-in:** Supabase Auth with email and password plus an authenticator-app code (TOTP). Public sign-up is off: you create firms, and firm administrators invite their own staff from the **Team** screen.
-- **Data:** Postgres. All reads and writes go through the `api` Edge Function, which uses the same `core.js` rules, versioning and field-level audit trail as `server.js`. Browsers have no direct table access.
-- **Retention:** database triggers stop anyone deleting households or changing or deleting versions and audit entries, including the service role.
-- **Encryption at rest:** Supabase encrypts its storage (AES-256). There is no separate `DATA_KEY`.
-
-### Deploy
-
-1. Create a Supabase project in **London (eu-west-2)**. Use the Pro plan or above for real client data: Free projects pause and have no backups.
-2. In Supabase under Authentication > Emails, set up **custom SMTP** (Postmark, Resend, SES). The built-in sender only emails your own team, so customer invitations would not arrive.
-3. Install the Supabase CLI, run `supabase login` and `npx wrangler login`, then:
-
-```sh
-export SUPABASE_PROJECT_REF=abcdefghijklmnopqrst
-export SUPABASE_PUBLISHABLE_KEY=sb_publishable_...      # never the secret key
-export APP_ORIGIN=https://wealth-profiler.pages.dev    # or your own domain
-export PAGES_PROJECT=wealth-profiler
-scripts/deploy-supabase.sh
-```
-
-### The database on other PostgreSQL servers
-
-`supabase db push` (in the deploy script) applies `supabase/migrations`. The same migrations
-also run on self-hosted Supabase or on plain PostgreSQL 14+ with:
-
-```sh
-DATABASE_URL=postgres://... node scripts/supabase-db.js migrate    # new migrations only
-DATABASE_URL=postgres://... node scripts/supabase-db.js backfill   # recompute client-list columns
-```
-
-It records migrations in the Supabase CLI's own table, so it and `supabase db push` can be
-mixed. On plain PostgreSQL it first creates stand-ins for Supabase's `auth` schema and roles
-([supabase/plain-postgres.sql](supabase/plain-postgres.sql)); run that first time as a
-superuser. `backfill` fills columns added by later migrations (such as review due dates) for
-households saved before them. It changes only those list columns, never saved data, versions
-or the audit trail. Sign-in and the API still need Supabase Auth and Edge Functions.
-
-### Running the service
-
-```sh
-export SUPABASE_URL=https://<ref>.supabase.co SUPABASE_SECRET_KEY=sb_secret_... APP_ORIGIN=https://...
-node scripts/firms.js create "Alder Wealth" jo@alderwealth.co.uk "Jo Alder" 5   # firm, seats, first administrator
-node scripts/firms.js list
-node scripts/firms.js seats <firm-id> 10
-node scripts/firms.js suspend <firm-id>     # e.g. unpaid; data is kept
-```
-
-Not built yet: self-service sign-up and card billing (for example Stripe), which would call
-the same actions as `firms.js`. Before selling, you will also need a data processing agreement
-with each customer, Supabase's DPA, a privacy notice, ICO registration, and usually Cyber
-Essentials and a penetration test. Regulated firms will ask for these in their supplier due diligence.
-
-After changing `packages/core/core.js`, run `npm run sync:supabase`. A test fails until you do.
 
 ## Deploy (self-hosted, one firm)
 
@@ -576,7 +510,7 @@ server can fetch monthly prices from Alpha Vantage if `ALPHAVANTAGE_KEY` is set 
 requests a day). **Mandate › Fund performance** shows growth of £10,000, cumulative and annualised
 returns, the five discrete 12-month periods, volatility and worst fall, with the past-performance
 warning and data source required by COBS 4.6. Use accumulation units or total-return indices so
-income is included. The Supabase edition imports CSVs but does not yet fetch prices.
+income is included.
 
 ## Calculations
 
@@ -608,17 +542,13 @@ apps/web/public/    the interface: index.html, styles.css, js/ (browser modules,
   js/hooks/           what pages share: the state, the store (autosave, conflicts), look-ups, Excel and downloads
   js/services/api/    the only code that calls the server
   js/lib/ js/content/ js/events/   helpers, text, and the shell that wires typing and buttons
-apps/web/public/cloud.js  sign-in and two-step verification for the Supabase edition
 server.js           starts the API (npm start) and runs its commands (hash-password, gen-key, import-files)
 db/                 PostgreSQL migrations and the migration runner for the self-hosted API
 deploy/             how the app runs: deploy/local/dev.js is npm run dev
 ops/                operating a deployment: backups, restores, data migrations (being filled in)
 docs/               decision records and the manual screen checklist
-supabase/           database migrations and the `api` Edge Function (Supabase edition)
-scripts/firms.js    create and manage customer firms (Supabase edition)
-scripts/supabase-db.js  apply Supabase migrations to any PostgreSQL 14+, backfill list columns
 scripts/build.js    builds dist/wealth-profiler.html, a single file that runs without a server
-test/               unit (rules), api, db, supabase and e2e (npm run screens) tests
+test/               unit (rules), api, db, ci and e2e (npm run screens) tests
 ```
 
 Each of `apps/api`, `apps/web` and `packages/core` has its own README with the detail.

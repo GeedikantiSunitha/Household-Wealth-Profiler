@@ -30,7 +30,7 @@ document.addEventListener('click',async e=>{
   if(['goClients','team','diary','tasks','firmSettings'].includes(act)){await Store.flush();state.VIEW=act==='goClients'?'clients':act;state.banner=null;render();return}
   if(act==='signOut'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}
     if(Store.session){try{await Store.api('POST','auth/sign-out',{})}catch(err){/* the session may have ended already */}location.reload();return}
-    await Store.cloud.signOut();location.reload();return}
+    location.reload();return}
   if(act==='records'){await Store.flush();state.VIEW='records';state.banner=null;render();window.scrollTo({top:0});return}
   if(act==='account'){await Store.flush();state.VIEW='account';state.banner=null;render();window.scrollTo({top:0});return}
   if(act==='switchFirm'){await Store.flush();if(Store.dirty||Store.err){toast('Changes are not saved yet. Try again in a moment.');return}const {firmPicker}=await import('../pages/sign-in.js');await firmPicker();location.reload();return}
