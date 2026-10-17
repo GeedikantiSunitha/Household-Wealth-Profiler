@@ -6,3 +6,7 @@ dist
 frontend/dist
 test
 .git
+# the tests of each side and of the rules never go into an image
+backend/test
+frontend/test
+packages/core/test

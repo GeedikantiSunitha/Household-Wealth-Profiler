@@ -33,7 +33,7 @@ Two shapes, same code, same database:
 - **One service** (the simplest): the repository's root `Dockerfile` (Node 22, port 8080) serves the API and the screens together.
 - **Two services** (the front end apart from the back end, as in the ModelMyWealth and mahimapareek deployments): `frontend/Dockerfile` is an nginx container serving `frontend/src` and `core.js` as they are and passing `/api/`, `/healthz` and `/readyz` to the API; `backend/Dockerfile` is the API alone (`SERVE_WEB=0`). Only the web tier faces the internet. One domain for both, so the session cookie, the CSRF token, the same-site check and the content security policy are unchanged; the web tier sends the same page headers the API does, and a test pins that.
 
-In both shapes the PostgreSQL database is a separate service, migrations are run from your machine before the deploy, and the production server refuses to start while one is pending. There is no volume: with `DATABASE_URL` set, nothing is written to disk. `deploy/local/compose.yml` rehearses the two-service shape on your own machine, and `deploy/local/check.js` is the smoke check for either shape.
+In both shapes the PostgreSQL database is a separate service, migrations are run before the deploy (on DCDeploy from a one-off worker inside its private network, because its database has no TLS; on a host with TLS, from your machine), and the production server refuses to start while one is pending. There is no volume: with `DATABASE_URL` set, nothing is written to disk. `deploy/local/compose.yml` rehearses the two-service shape on your own machine, and `deploy/local/check.js` is the smoke check for either shape.
 
 ---
 
@@ -44,7 +44,7 @@ In both shapes the PostgreSQL database is a separate service, migrations are run
 - [ ] `npm run check` (migrations only add; every runtime package licence is allowed)
 - [ ] Full suite with PostgreSQL on a scratch cluster, one suite at a time, three test files at a time on a low-memory machine:
   ```sh
-  TEST_DATABASE_URL=postgres://postgres@localhost:5498/hwp_test node --test --test-timeout=300000 --test-concurrency=3 "test/**/*.test.js"
+  TEST_DATABASE_URL=postgres://postgres@localhost:5498/hwp_test npm test
   ```
   Expected: 0 fail, 0 cancelled (1 skipped on Windows: the signal test). The database name must end in `_test`.
 - [ ] Screen check in both modes, no `FAIL`:
@@ -67,7 +67,7 @@ Under full-suite load the `import-files` test fails in roughly half of default-p
 ### Environment preparation
 
 - [ ] Database created with the three roles (section 4)
-- [ ] Migrations applied from your machine (section 5)
+- [ ] Migrations applied: on DCDeploy from the one-off worker, then `check-db-posture` "safe"; elsewhere from your machine (section 5)
 - [ ] `grant-operator` run after any migration that adds tables
 - [ ] Variables set on the DCDeploy service (section 6)
 - [ ] `DATA_KEY` generated once and kept in the password manager; losing it means losing the records
@@ -88,7 +88,8 @@ Node.js 22 or later (24 is used locally); PostgreSQL 14 or later for the databas
 git checkout develop
 git pull sunitha develop
 npm install
-cp .env.example .env     # then fill in (never commit .env; never print a key)
+cp backend/.env.example backend/.env     # the back end's settings; fill in (never commit it; never print a key)
+cp frontend/.env.example frontend/.env   # optional: the front end's (no secrets), for npm start --workspace frontend
 ```
 
 Two ways to run:
@@ -172,7 +173,10 @@ A login with `rolsuper` or `rolbypassrls` true would make every row-security pol
 
 `db/migrations/NNNN_name.sql`, applied in order by `node server.js migrate` as the owner. Each file runs in its own transaction with its tracking row and checksum; an advisory lock serialises concurrent runs; a changed applied file is refused. Migrations only add (the CI guard checks), and the retention triggers refuse deletes anyway.
 
-### Before each deploy, from your machine
+### Before each deploy, from your machine (a database with TLS only)
+
+Not for DCDeploy: its database has no TLS and is reachable only over its private network, so there
+migrations run on the one-off worker (Rules, below, and section 6). For a database reachable over TLS:
 
 Never paste a connection string into `.env` or a command line. Prompt for it, so neither the shell history nor a file holds it:
 
@@ -210,20 +214,26 @@ Both variables are needed together: the loader refuses an owner connection whose
 ### Or two services (front end and back end apart)
 
 1. **api**: same repository and branch; build context `./`, Dockerfile path `backend/Dockerfile`; port `8080`; the variables below. Not reachable from the internet if DCDeploy allows a private service; otherwise note its public address.
-2. **web**: same repository and branch; build context `./`, Dockerfile path `frontend/Dockerfile`; port `8080`; this is the public one, with the domain and TLS. Variables: `API_UPSTREAM` = `http://api:8080` on a private network, or the api service's `https://` address when there is none, and then also `API_HOST` = that address's host name.
+2. **web**: same repository and branch; build context `./`, Dockerfile path `frontend/Dockerfile`; port `8080`; this is the public one, with the domain and TLS. Variables: `BACKEND_URL` = the api service's internal address, `http://<internal hostname>:8080` (its internal link; both services in the same environment). Only if the host has no private network: the api service's `https://` address, and then also `API_HOST` = that address's host name. `API_UPSTREAM`, the earlier name, is still accepted. A wrong address stops the web container at start with "host not found in upstream" in its log.
 3. `PUBLIC_URL` on the api service is the web service's public address (the one users open), not the api's own.
 4. After deploy, `node deploy/local/check.js https://HOST` proves the split: the page and `core.js` byte for byte with the headers, the API behind the same domain, a cross-site write refused, a same-site one reaching the API.
 
 Rehearse first on your machine: `HWP_DATA_KEY=$(node server.js gen-key) docker compose -f deploy/local/compose.yml up --build`, then `node deploy/local/check.js http://localhost:8088`.
 
-### Variables
+### Variables, per service
+
+Each service has its own environment variables in DCDeploy; there is no `.env` file in an image. The
+lists with their meanings: `backend/.env.example` and `frontend/.env.example` (tests keep both complete).
+
+**Back-end service** (and the one-off worker, with the same values):
 
 | Variable | Value | Notes |
 |---|---|---|
 | `NODE_ENV` | `production` | set by the Dockerfile already; keeps the refusals on |
-| `DATABASE_URL` | the `hwp_app` connection string, `sslmode=verify-full` (+ `sslrootcert` for Supabase) | the server's only database access |
+| `DB_LOGIN_MODE` | `single` on DCDeploy | its one login cannot create roles (section 4) |
+| `DATABASE_URL` | DCDeploy: the database's internal address and its one login, no `sslmode` (no TLS; private network only). Another host: the `hwp_app` string with `sslmode=verify-full` (+ `sslrootcert` for Supabase) | the server's only database access |
 | `DATA_KEY` | from `node server.js gen-key`, new per environment | never the local one; never reused between staging and production |
-| `PUBLIC_URL` | `https://HOST` exactly, no path | the Secure cookie and every emailed link depend on it |
+| `PUBLIC_URL` | the front end's public address, `https://HOST` exactly, no path | the Secure cookie and every emailed link depend on it |
 | `SMTP_URL` | `smtps://USER:PASSWORD@smtp.resend.com:465` | TLS from the start; `tls=off` is refused |
 | `SMTP_FROM` | `Household Wealth Profiler <no-reply@thetimefintech.com>` | a verified sender domain |
 | `PORT` | `8080` | |
@@ -233,11 +243,20 @@ Rehearse first on your machine: `HWP_DATA_KEY=$(node server.js gen-key) docker c
 | `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`, `RETENTION_YEARS` | optional | defaults 30, 12, 5 |
 | `ALPHAVANTAGE_KEY` | unset | its licence is non-commercial; prices stay off |
 
-Never set on a service: `AUTH_USERS`, `ALLOW_PLAINTEXT`, `HSTS=0` (the server refuses to start), `DATABASE_OWNER_URL`, `DATABASE_OPERATOR_URL` (those belong on your machine only), `BACKUP_*` (those belong to the backup job).
+**Front-end service:**
+
+| Variable | Value | Notes |
+|---|---|---|
+| `BACKEND_URL` | the back-end service's internal address, `http://<internal hostname>:8080` | its internal link; both in the same environment. `API_UPSTREAM`, the earlier name, still works |
+| `API_HOST` | unset | only when `BACKEND_URL` must be the back end's public https address (no private network) |
+
+Nothing else on the front end: it holds no secret, and no back-end variable belongs there.
+
+Never set on any service: `AUTH_USERS`, `ALLOW_PLAINTEXT`, `HSTS=0` (the server refuses to start), `DATABASE_OWNER_URL`, `DATABASE_OPERATOR_URL` (single login on DCDeploy; elsewhere they belong on your machine only), `BACKUP_*` (those belong to the backup job).
 
 ### Order
 
-1. `migrate` and `grant-operator` from your machine (section 5).
+1. DCDeploy: on the one-off worker, `node server.js migrate`, then `node server.js check-db-posture` (must end "safe for client data"). Another host with TLS: `migrate` and `grant-operator` from your machine (section 5).
 2. Deploy the service.
 3. `GET /healthz` → `{"ok":true}` at once; `GET /readyz` → `{"ok":true}` once the database answers and no migration is pending. If it stays 503, the logs name the refusal (section 10).
 4. First account (below).
@@ -247,7 +266,7 @@ Never set on a service: `AUTH_USERS`, `ALLOW_PLAINTEXT`, `HSTS=0` (the server re
 Two ways:
 
 - **Registration** on the sign-in page: name, email, firm, password; the verification link arrives by email; sign in. The registrant is the administrator of a new firm and invites colleagues from the Team page.
-- **The operator**, from your machine, with the `hwp_operator` string in `DATABASE_OPERATOR_URL` and the `hwp_app` string in `DATABASE_URL` (prompted as in section 5):
+- **The operator**: on DCDeploy, from the one-off worker (the commands below, with the back end's settings: single-login mode switches operator mode on for these commands itself). On another host, from your machine, with the `hwp_operator` string in `DATABASE_OPERATOR_URL` and the `hwp_app` string in `DATABASE_URL` (prompted as in section 5):
   ```powershell
   node server.js firm-create "Firm name" 5
   node server.js create-user you@example.com "Your Name" FIRM_ID admin
@@ -363,7 +382,7 @@ The server prints one line and exits; the line names the setting.
 | `NODE_ENV=production: SMTP_URL is required` / `with tls=off is not accepted` | mail not set, or TLS off | set `SMTP_URL` with `smtps://` or `smtp://` with STARTTLS |
 | `NODE_ENV=production: AUTH_USERS ... not accepted` / `ALLOW_PLAINTEXT` / `HSTS=0` | a development setting on a production service | remove it |
 | `DATA_KEY must be 32 bytes, base64-encoded` | a bad or missing key | `node server.js gen-key` |
-| `/readyz` stays 503 | the database does not answer, or a migration is pending | check the connection string and TLS; run `migrate` from your machine |
+| `/readyz` stays 503 | the database does not answer, or a migration is pending | check the connection string (and TLS, on a host that has it); run `migrate` (on DCDeploy, from the worker) |
 | `... was changed after it was applied` | an applied migration file was edited | restore the file; put the change in a new number |
 | 503 `busy` on requests | the connection pool is exhausted | known Phase 5 item; check `DATABASE_POOL_MAX` against the host's limit |
 | `permission denied` during `migrate` | not connected as `hwp_owner`, or the schema grants of section 4 missing | use the owner string; grant usage and create |
@@ -373,7 +392,7 @@ The server prints one line and exits; the line names the setting.
 ## 11. Related
 
 - `README.md`: "Signing in", "The platform operator", "Backups and the restore drill", "Changing the database"
-- `.env.example`: every setting with its meaning
+- `backend/.env.example` and `frontend/.env.example`: every setting of each side with its meaning
 - `docs/decisions/0001-structure.md`: the layering and its updates
 - `docs/checklists/screen-smoke.md`: reading a screen check
 - `ops/README.md`: the operating tools

@@ -25,5 +25,5 @@ user needs a restart. These are the reasons sign-in is due to be replaced (see t
 ## Decision
 
 Keep the behaviour as it is through Stage B. The new module documents these limits in its header, and
-its tests (`test/api/auth.test.js`) describe today's behaviour, so the fix in Stage C will show up as
+its tests (`backend/test/api/auth.test.js`) describe today's behaviour, so the fix in Stage C will show up as
 a deliberate test change.

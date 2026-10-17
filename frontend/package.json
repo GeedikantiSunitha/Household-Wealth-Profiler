@@ -1,0 +1,15 @@
+{
+  "name": "@hwp/frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Household Wealth Profiler front end: the screens, as browser modules, built from src into dist",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node scripts/dev-server.js",
+    "build": "node ../scripts/build-web.js",
+    "test": "node --test --test-timeout=300000 \"test/**/*.test.js\""
+  }
+}

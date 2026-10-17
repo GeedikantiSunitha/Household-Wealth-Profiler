@@ -6,7 +6,9 @@
   "license": "UNLICENSED",
   "main": "server.js",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "backend",
+    "frontend"
   ],
   "engines": {
     "node": ">=22"
@@ -14,7 +16,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node deploy/local/dev.js",
-    "test": "node --test --test-timeout=300000 \"test/**/*.test.js\"",
+    "test": "node --test --test-timeout=300000 \"test/**/*.test.js\" \"backend/test/**/*.test.js\" \"frontend/test/**/*.test.js\" \"packages/core/test/**/*.test.js\"",
+    "test:backend": "npm test --workspace backend",
+    "test:frontend": "npm test --workspace frontend",
+    "test:core": "npm test --workspace packages/core",
     "screens": "node test/e2e/screens.js",
     "build": "node scripts/build.js",
     "build:web": "node scripts/build-web.js",
@@ -24,8 +29,5 @@
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
     "esbuild": "0.28.2"
-  },
-  "dependencies": {
-    "pg": "8.23.1"
   }
 }

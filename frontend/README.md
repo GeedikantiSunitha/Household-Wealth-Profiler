@@ -11,6 +11,44 @@ Without a server, use the single-file build: `npm run build`, then open `dist/we
 That build bundles the modules into the page with esbuild (a development-only tool; it is not in
 the Docker image and never reaches users).
 
+## How the front end reaches the back end
+
+One address for everything. The browser loads the screens and calls the API on the same domain;
+the front-end container passes every `/api/` call to the back end over the host's private network.
+The back end is never on the internet, and no cross-site (CORS) setting exists to get wrong.
+
+```
+Browser ── https://profiler.yourfirm.co.uk/          the screens   ┐
+Browser ── https://profiler.yourfirm.co.uk/api/...   the API       ┘ front-end container (nginx)
+                                                                     │  passes /api/, /healthz, /readyz
+                                                                     ▼  over the private network
+                                                     back-end container (Node), BACKEND_URL
+```
+
+The front end's one setting is `BACKEND_URL`, the back end's internal address:
+`http://<back-end internal hostname>:8080` (on DCDeploy, the back-end service's internal link, with
+both services in the same environment). It holds no secret. Its earlier name, `API_UPSTREAM`, is still
+accepted when `BACKEND_URL` is not set; without either, `http://api:8080` (the local compose file).
+Two checks: `https://<front-end address>/healthz` answers `{"ok":true}` when the two are connected; a
+container that stops at start with "host not found in upstream" in its log has a wrong `BACKEND_URL`.
+
+## Running and testing the front end on its own
+
+```sh
+npm start --workspace frontend    # http://localhost:5173; /api/ goes to BACKEND_URL (default http://localhost:8080)
+npm test --workspace frontend     # frontend/test: the API client, the build, the layers, the web tier, this server
+npm run build --workspace frontend   # src into dist, as the container builds it
+```
+
+`scripts/dev-server.js` does what the container's nginx does (the screens, `/core.js`, `/health`, and
+`/api/`, `/healthz`, `/readyz` passed to the back end with the public host) and sends the security
+headers it reads from `nginx.conf.template`, so a page in development is as locked down as in
+production. `FRONTEND_DIR=frontend/dist` serves a build instead of `src`.
+
+The front end's settings, with their meanings, are in `.env.example` beside this file: `BACKEND_URL`
+(and, for the development server, `FRONTEND_PORT` and `FRONTEND_DIR`). None is secret. On DCDeploy they are
+the front-end service's environment variables; on your machine the development server also reads `frontend/.env`.
+
 ## Layout
 
 | Path | Holds |
@@ -27,7 +65,7 @@ the Docker image and never reaches users).
 
 The layers run one direction: pages use components, hooks and services; components use hooks;
 hooks use services; services use nothing above them; `lib/` and `content/` sit below everything.
-`test/ci/web-layers.test.js` fails on an import that looks up, and on any `fetch` outside
+`frontend/test/ci/web-layers.test.js` fails on an import that looks up, and on any `fetch` outside
 `services/api/`.
 
 ## The build
@@ -37,7 +75,7 @@ hooks use services; services use nothing above them; `lib/` and `content/` sit b
 minified by esbuild as ES modules, split at dynamic imports, with no inline code, so the content security policy
 stays `script-src 'self'`. `dist/` is what `frontend/Dockerfile` serves; it is never committed. To check a build
 the way the web tier serves it, point the server at it: `WEB_DIR=frontend/dist npm start`, or
-`WEB_DIR=frontend/dist npm run screens`. `test/ci/web-build.test.js` proves the build changes the packaging only.
+`WEB_DIR=frontend/dist npm run screens`. `frontend/test/ci/web-build.test.js` proves the build changes the packaging only.
 
 ## Rules
 

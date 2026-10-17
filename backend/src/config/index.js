@@ -1,5 +1,5 @@
-/* Server settings, read once at start-up from the environment and from .env in the project root.
-   Variables already in the environment win over .env. load() returns every setting or throws an
+/* Server settings, read once at start-up from the environment and from the back end's .env file
+   (backend/.env, else .env in the project root). Variables already in the environment win over the file. load() returns every setting or throws an
    Error whose message is what the server prints before it stops. */
 'use strict';
 const fs = require('fs');
@@ -36,8 +36,12 @@ function parseUsers(text) {
   return users;
 }
 
+// The back end's settings file: backend/.env when there is one, else the project root's .env (where it
+// always was). One file only, never both, so a setting cannot come from two places.
+const envFileOf = root => { const own = path.join(root, 'backend', '.env'); return fs.existsSync(own) ? own : path.join(root, '.env'); };
+
 function load({ env = process.env, root = ROOT, command } = {}) {
-  readEnvFile(path.join(root, '.env'), env);
+  readEnvFile(envFileOf(root), env);
 
   let key = null;
   if (env.DATA_KEY) {
@@ -168,4 +172,4 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   };
 }
 
-module.exports = { load, parseUsers, ROOT, OPERATOR_COMMANDS };
+module.exports = { load, parseUsers, envFileOf, ROOT, OPERATOR_COMMANDS };
