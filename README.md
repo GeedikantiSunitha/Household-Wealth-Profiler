@@ -57,18 +57,31 @@ To add or change users later, run the script again with every username. It keeps
 
 ### DCDeploy
 
-DCDeploy builds the Dockerfile from a GitHub repository. Its data centre is in Frankfurt (EU). Its
-PostgreSQL (17) gives **one login, which cannot create roles**, and **no TLS**, so the app runs there
-in single-login mode (see "Single-login mode" under step 4), and the database is reached over
-DCDeploy's private network only.
+DCDeploy builds each service's Dockerfile from this GitHub repository. Its data centre is in Frankfurt
+(EU). Its PostgreSQL (17) gives **one login, which cannot create roles**, and **no TLS**, so the app
+runs there in single-login mode (see "Single-login mode" under step 4) and the database is reached over
+DCDeploy's private network only. Never switch on the database's public TCP proxy: without TLS,
+passwords and data would cross the internet unencrypted.
 
-1. Create a PostgreSQL database service, and the app as a service from this repository (Dockerfile at `./`), in the same environment, so they share its private network. Never switch on the database's public TCP proxy: without TLS, passwords and data would cross the internet unencrypted.
-2. App settings: `NODE_ENV=production`, `DB_LOGIN_MODE=single`, `DATABASE_URL` (the database's internal address and its one login), `DATA_KEY`, `PUBLIC_URL`, `SMTP_URL`, `SMTP_FROM`, `OPERATOR_EMAIL`, and `CLIENT_IP_HEADER=cf-connecting-ip` once DCDeploy confirms it sets that header on every request. Leave `DATABASE_OWNER_URL`, `DATABASE_OPERATOR_URL` and `AUTH_USERS` unset.
-3. Migrations are a separate step before each deploy, run inside DCDeploy (a one-off worker from the same image, in the same environment): `node server.js migrate`, then `node server.js check-db-posture`, which must end "safe for client data". A production server refuses to start while a migration is pending, so a failed migration stops the deploy and the running version stays up.
-4. Take DCDeploy's database backup before every deploy that includes a migration, and restore one into a scratch database before going live to prove it.
-5. The first firm and administrator: `node server.js firm-create "NAME" SEATS`, `node server.js create-user EMAIL "NAME" FIRM_ID admin` and `set-password`, from the same one-off worker.
+Four pieces, all in the **same DCDeploy environment** so they share its private network:
 
-Two services instead of one, the front end apart from the back end: the web service from `frontend/Dockerfile` (nginx serving the screens and `core.js` as they are, and passing `/api/`, `/healthz` and `/readyz` to the API over the private network, so everything stays on one domain) and the API service from `backend/Dockerfile` (`SERVE_WEB=0`). Build context `./` for both; `BACKEND_URL` on the web service is the API's internal address (`API_UPSTREAM`, its earlier name, still works); `PUBLIC_URL` on the API is the web service's public address. `deploy/local/compose.yml` rehearses this shape on your own machine and `node deploy/local/check.js URL` checks either shape after a deploy. The full process is [ops/DEPLOYMENT.md](ops/DEPLOYMENT.md).
+| Service | Built from | Public? | Settings (environment variables of that service) |
+|---|---|---|---|
+| **Database** | DCDeploy's PostgreSQL 17 | No | (DCDeploy's own; note its internal address and its login) |
+| **Back end** | `backend/Dockerfile`, port 8080 | No | `DB_LOGIN_MODE=single`, `DATABASE_URL` (the database's internal address and its one login), `DATA_KEY` (`node server.js gen-key`, new per environment), `PUBLIC_URL` (the front end's public https address), `SMTP_URL`, `SMTP_FROM`; optional `OPERATOR_EMAIL`, `TOTP_REQUIRED`, `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`, `RETENTION_YEARS`, and `CLIENT_IP_HEADER=cf-connecting-ip` once DCDeploy confirms the header. Full list: [backend/.env.example](backend/.env.example) |
+| **Front end** | `frontend/Dockerfile`, port 8080 | **Yes**: the domain users open | `BACKEND_URL` = the back end's internal address, `http://<back-end internal hostname>:8080` (its internal link). Nothing else, and never a secret. List: [frontend/.env.example](frontend/.env.example) |
+| **Worker** (one-off) | `backend/Dockerfile` | No | The back end's settings. Runs commands on demand: `node server.js migrate`, `node server.js check-db-posture`, the first firm and administrator |
+
+Never set on any service: `AUTH_USERS`, `ALLOW_PLAINTEXT`, `HSTS=0` (the back end refuses to start),
+`DATABASE_OWNER_URL`, `DATABASE_OPERATOR_URL` (single login), `BACKUP_*` (the backup job's own).
+
+Order for each deploy:
+
+1. Take DCDeploy's database backup when the deploy includes a migration (and, before going live, restore one into a scratch database to prove it).
+2. On the worker: `node server.js migrate`, then `node server.js check-db-posture`, which must end "safe for client data". Migrations always run here, inside DCDeploy, never from your machine: the database has no TLS.
+3. Deploy the back end; it refuses to start while a migration is pending, so a failed migration stops the deploy and the running version stays up.
+4. Deploy the front end. Check `https://<front-end address>/healthz`: `{"ok":true}` means the front end reaches the back end; a front end that stops at start with "host not found in upstream" in its log has a wrong `BACKEND_URL`.
+5. First time only, on the worker: `node server.js firm-create "NAME" SEATS`, `node server.js create-user EMAIL "NAME" FIRM_ID admin` and `set-password` (or register on the sign-in page).
 
 ### Any other host
 
@@ -81,7 +94,7 @@ node server.js gen-key
 ```
 
 Put the user lines in `AUTH_USERS`, separated by `;`, and the key in `DATA_KEY`
-(see `.env.example`). Keep both in your host's secrets store, not in git.
+(see [backend/.env.example](backend/.env.example)). Keep both in your host's secrets store, not in git.
 `AUTH_USERS` (HTTP Basic sign-in) is for development and for the file store only: a production
 server refuses it and people sign in through the app's own sign-in, which needs PostgreSQL
 (see Signing in, under step 4).
@@ -149,7 +162,7 @@ create database wealth_profiler owner hwp_owner;
 A database made before these roles existed belongs to the user that created it; hand its tables
 over once, as an administrator: `psql -d wealth_profiler -f db/handover-owner.sql` (ownership only, no data touched).
 
-Then put the settings in `.env` next to `server.js` (copy [.env.example](.env.example)):
+Then put the settings in `backend/.env` (copy [backend/.env.example](backend/.env.example); a `.env` in the project root still works when there is no `backend/.env`):
 
 ```ini
 AUTH_USERS=sam:...                 # node server.js hash-password sam 'a long passphrase'
@@ -214,7 +227,7 @@ sends the first five characters of the password's SHA-1 hash and nothing else.
 | Invitations | A link by email, valid 24 hours and once; the person chooses a password and sets up the authenticator |
 | Registration | Name, email, firm and password (checked as everywhere); a firm of their own, with the registrant as its administrator; a verification link by email, valid 24 hours and once, before the first sign-in. The reply is the same whether or not the address already has an account (its holder is told by email). At most 3 from one address an hour |
 
-What production needs (the server refuses to start without them, see `.env.example`):
+What production needs (the server refuses to start without them, see `backend/.env.example`):
 
 ```ini
 NODE_ENV=production

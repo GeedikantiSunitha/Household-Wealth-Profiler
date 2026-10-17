@@ -56,8 +56,17 @@ function createDevServer({ backendUrl = 'http://localhost:8080', dir = path.join
 
 module.exports = { createDevServer, pageHeaders };
 
+// frontend/.env, the front end's own settings file (frontend/.env.example lists them); the environment wins
+function readEnvFile(file = path.join(__dirname, '..', '.env'), env = process.env) {
+  if (!fs.existsSync(file)) return;
+  for (const [k, v] of Object.entries(require('util').parseEnv(fs.readFileSync(file, 'utf8')))) if (!(k in env)) env[k] = v;
+}
+
+module.exports.readEnvFile = readEnvFile;
+
 if (require.main === module) {
-  const backendUrl = process.env.BACKEND_URL || 'http://localhost:8080';
+  readEnvFile();
+  const backendUrl = process.env.BACKEND_URL || process.env.API_UPSTREAM || 'http://localhost:8080'; // as the container: the earlier name still works
   const port = +process.env.FRONTEND_PORT || 5173;
   const dir = process.env.FRONTEND_DIR ? path.resolve(process.env.FRONTEND_DIR) : undefined;
   createDevServer({ backendUrl, dir }).listen(port, '127.0.0.1', () => console.log(`Front end on http://localhost:${port} · /api/ passed to ${backendUrl}`));

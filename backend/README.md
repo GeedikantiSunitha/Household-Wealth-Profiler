@@ -13,6 +13,10 @@ npm start --workspace backend     # the API on port 8080 (SERVE_WEB=0: no screen
 npm test --workspace backend      # backend/test: api/, db/, ci/ (PostgreSQL tests with TEST_DATABASE_URL)
 ```
 
+Its settings, with their meanings, are in `.env.example` beside this file; on your machine the back end
+reads `backend/.env` (or the project root's `.env` when there is none), on DCDeploy the back-end service's
+environment variables. A test fails when the code reads a setting that file does not list.
+
 Its runtime packages are in `backend/package.json` (`pg`, and the rules as `@hwp/core`). Development
 tools are listed in the root `package.json`: npm installs a workspace's own devDependencies even
 with `--omit=dev`, so listed here they would reach the production image.

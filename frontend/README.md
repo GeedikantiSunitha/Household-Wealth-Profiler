@@ -45,6 +45,10 @@ npm run build --workspace frontend   # src into dist, as the container builds it
 headers it reads from `nginx.conf.template`, so a page in development is as locked down as in
 production. `FRONTEND_DIR=frontend/dist` serves a build instead of `src`.
 
+The front end's settings, with their meanings, are in `.env.example` beside this file: `BACKEND_URL`
+(and, for the development server, `FRONTEND_PORT` and `FRONTEND_DIR`). None is secret. On DCDeploy they are
+the front-end service's environment variables; on your machine the development server also reads `frontend/.env`.
+
 ## Layout
 
 | Path | Holds |
