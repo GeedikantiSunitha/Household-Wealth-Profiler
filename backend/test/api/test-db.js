@@ -13,10 +13,19 @@ function testDatabaseUrl(env = process.env) {
   return url;
 }
 
-// The database roles the migrations (hwp_owner, hwp_app) and db/operator.sql (hwp_operator) expect, with a known password for the tests. Test files
-// run at the same time and each needs them, and PostgreSQL refuses two "alter role" statements on
-// one role at once ("tuple concurrently updated"), so the work is done under an advisory lock.
-async function ensureRoles(admin, password) {
+// The password the test roles get: one for every test file of a run. Test files run at the same time
+// in separate processes and each sets the roles' password; with a password of its own, one file's
+// "alter role" locked the others out mid-run ("password authentication failed", seen on CI, whose
+// PostgreSQL checks passwords; a local cluster with trust authentication never shows it). Derived from
+// TEST_DATABASE_URL, so every process of a run agrees without sharing anything. Scratch clusters only.
+const TEST_ROLE_PASSWORD = require('crypto').createHash('sha256').update('hwp test roles:' + (process.env.TEST_DATABASE_URL || '')).digest('hex').slice(0, 24);
+
+// The database roles the migrations (hwp_owner, hwp_app) and db/operator.sql (hwp_operator) expect, with
+// TEST_ROLE_PASSWORD. PostgreSQL refuses two "alter role" statements on one role at once ("tuple
+// concurrently updated"), so the work is done under an advisory lock. Any other password is refused:
+// it would lock out the test files running beside this one.
+async function ensureRoles(admin, password = TEST_ROLE_PASSWORD) {
+  if (password !== TEST_ROLE_PASSWORD) throw new Error('ensureRoles: use TEST_ROLE_PASSWORD; a password of one test file\'s own locks the other files out');
   await admin.query('select pg_advisory_lock(7206101)');
   try {
     for (const r of ['hwp_owner', 'hwp_app', 'hwp_operator']) {
@@ -26,4 +35,4 @@ async function ensureRoles(admin, password) {
   } finally { await admin.query('select pg_advisory_unlock(7206101)'); }
 }
 
-module.exports = { testDatabaseUrl, ensureRoles };
+module.exports = { testDatabaseUrl, ensureRoles, TEST_ROLE_PASSWORD };

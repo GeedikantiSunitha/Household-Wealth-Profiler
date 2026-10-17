@@ -44,8 +44,12 @@ test('SIGTERM: no new connections, the request in flight finishes, then the proc
     req.write(body.slice(0, 200)); // an upload that is still in progress when the signal arrives
     await new Promise(r => setTimeout(r, 200));
     const exited = new Promise(ok => p.on('exit', ok));
+    // The server logs "SIGTERM: stopping" in the same step as it closes its listening socket: wait for that
+    // line rather than a fixed time, which a loaded CI machine can overrun (a new connection then got in)
+    let out = '';
+    const stopping = new Promise((ok, no) => { const t = setTimeout(() => no(new Error('no "stopping" line within 15 s: ' + out)), 15000); p.stdout.on('data', d => { out += d; if (/SIGTERM: stopping/.test(out)) { clearTimeout(t); ok(); } }); });
     p.kill('SIGTERM');
-    await new Promise(r => setTimeout(r, 300));
+    await stopping;
     await assert.rejects(fetch(`http://127.0.0.1:${port}/healthz`), 'a new connection is refused while stopping');
     req.end(body.slice(200));
     const r = await reply;

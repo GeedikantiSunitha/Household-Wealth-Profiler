@@ -18,7 +18,7 @@ const A = 'f1a00000-0000-4000-8000-000000000001', B = '0f1e0000-0000-4000-8000-0
 test.describe('access log and approved purge, in the database', { skip: !BASE_URL && 'set TEST_DATABASE_URL to run' }, () => {
   const { Client } = require('pg');
   const schema = 'hwp_dp_' + crypto.randomBytes(4).toString('hex');
-  const PW = crypto.randomBytes(12).toString('hex');
+  const PW = require('../api/test-db.js').TEST_ROLE_PASSWORD; // one password for every test file of a run
   const urlFor = user => { const u = new URL(BASE_URL); u.username = user; u.password = PW; u.searchParams.set('options', `-c search_path=${schema}`); return u.toString(); };
   let admin, app, owner;
   // One transaction as the given client with the firm set; rolled back unless keep

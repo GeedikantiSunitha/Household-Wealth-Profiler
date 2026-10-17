@@ -192,7 +192,7 @@ suite('the file store', async () => {
 suite('PostgreSQL (as hwp_app)', async () => {
   const { Client } = require('pg');
   const schema = 'hwp_records_' + crypto.randomBytes(4).toString('hex');
-  const PW = crypto.randomBytes(12).toString('hex');
+  const PW = require('./test-db.js').TEST_ROLE_PASSWORD; // one password for every test file of a run
   const urlFor = user => { const u = new URL(BASE_URL); u.username = user; u.password = PW; u.searchParams.set('options', `-c search_path=${schema}`); return u.toString(); };
   const admin = new Client({ connectionString: BASE_URL }); await admin.connect();
   await require('./test-db.js').ensureRoles(admin, PW);
