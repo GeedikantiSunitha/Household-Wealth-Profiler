@@ -6,6 +6,17 @@ It was split out of the original single `server.js` (steps B5 to B11) without ch
 API does. `server.js` at the project root is now a one-line pointer to `src/main.js`, so
 `npm start`, the Dockerfile and the `node server.js …` commands work as before.
 
+## Running and testing the back end on its own
+
+```sh
+npm start --workspace backend     # the API on port 8080 (SERVE_WEB=0: no screens), settings from the environment and .env
+npm test --workspace backend      # backend/test: api/, db/, ci/ (PostgreSQL tests with TEST_DATABASE_URL)
+```
+
+Its runtime packages are in `backend/package.json` (`pg`, and the rules as `@hwp/core`). Development
+tools are listed in the root `package.json`: npm installs a workspace's own devDependencies even
+with `--omit=dev`, so listed here they would reach the production image.
+
 ## Layers (each calls only the ones below it)
 
 | Path | Holds |
@@ -26,6 +37,6 @@ API does. `server.js` at the project root is now a one-line pointer to `src/main
 
 - Rules and calculations come from `packages/core`; nothing here re-implements them.
 - Settings come only from `src/config/`; no other file reads `process.env`.
-- The API's replies are fixed by `test/api/api-contract.js`, which runs against both the file store
+- The API's replies are fixed by `backend/test/api/api-contract.js`, which runs against both the file store
   and PostgreSQL. A change that alters a reply is a behaviour change: it needs its own commit and
   tests, and the pull request says so.

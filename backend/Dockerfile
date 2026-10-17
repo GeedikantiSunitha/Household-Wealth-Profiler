@@ -15,6 +15,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 # Workspace manifests must be present before npm ci
 COPY packages/core/package.json ./packages/core/
+COPY backend/package.json ./backend/
+COPY frontend/package.json ./frontend/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server.js ./
 COPY backend ./backend

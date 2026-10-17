@@ -29,7 +29,7 @@ by setting the repository variable `CODEQL` to `1`.
 
 ## Keeping the app healthy
 
-- **Tests:** `npm test` runs the rules (`test/unit`), the API in both storage modes (`test/api`), database migrations (`test/db`) and the CI guards (`test/ci`). Set `TEST_DATABASE_URL` to an empty scratch database to include the PostgreSQL tests; never point it at a real database. Add a test with every fix.
+- **Tests:** `npm test` runs everything: the rules (`packages/core/test`), the back end (`backend/test`: the API in both storage modes, the database, migrations), the front end (`frontend/test`) and the repository checks (`test/ci`); `npm run test:backend`, `test:frontend` and `test:core` run one part. Set `TEST_DATABASE_URL` to an empty scratch database to include the PostgreSQL tests; never point it at a real database. Add a test with every fix.
 - **Dependencies:** the only runtime dependency is `pg` (used only when `DATABASE_URL` is set). Development dependencies are PGlite (tests) and esbuild (bundles the interface's modules for `npm run build`; never shipped). Keep it that way unless agreed.
 - **Tax year:** the bands and allowances in `packages/core/core.js` (`assumptions` defaults) need checking against HMRC each April.
 - **Spreadsheet library:** SheetJS is vendored in `frontend/src/vendor/` and pinned by hash. To upgrade, change the version, URL and hash in `scripts/vendor.js`, run `npm run vendor`, and commit the result; a test checks the committed file.

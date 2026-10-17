@@ -3,7 +3,7 @@
 # The business rules, the database, the API contract, sign-in, storage and encryption.
 packages/core/                      @umesh-ttf
 db/migrations/                      @umesh-ttf
-test/api/api-contract.js            @umesh-ttf
+backend/test/api/api-contract.js            @umesh-ttf
 backend/src/services/auth/         @umesh-ttf
 backend/src/middleware/            @umesh-ttf
 backend/src/crypto/                @umesh-ttf

@@ -5,6 +5,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 # Workspace manifests must be present before npm ci
 COPY packages/core/package.json ./packages/core/
+COPY backend/package.json ./backend/
+COPY frontend/package.json ./frontend/
 # Only "pg" (for DATABASE_URL); dev packages are left out
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server.js ./

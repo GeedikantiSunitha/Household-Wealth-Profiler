@@ -1,0 +1,21 @@
+{
+  "name": "@hwp/backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Household Wealth Profiler back end: the API, its middleware, services, repositories and commands",
+  "license": "UNLICENSED",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node scripts/start.js",
+    "test": "node --test --test-timeout=300000 \"test/**/*.test.js\"",
+    "migrate": "node ../server.js migrate",
+    "check-db-posture": "node ../server.js check-db-posture"
+  },
+  "dependencies": {
+    "@hwp/core": "1.0.0",
+    "pg": "8.23.1"
+  }
+}

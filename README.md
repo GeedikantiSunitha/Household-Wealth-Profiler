@@ -12,9 +12,24 @@ package is `pg`, and it is used only when the data is kept in PostgreSQL.
 
 ```sh
 npm install
-npm test          # rules (tax, balance sheet, IHT, KYC), the API, migrations, the CI guards
+npm test          # everything: the rules, the back end, the front end, the repository checks
 npm run dev       # http://localhost:8080, sign in as demo / demo, data in ./data-dev
 ```
+
+The front end and the back end are separate, each with its own `package.json`, tests and start
+command (npm workspaces: `frontend`, `backend`, and the rules in `packages/core`):
+
+| Command | Runs |
+|---|---|
+| `npm run test:frontend` | the front end's tests (`frontend/test`): the API client, the build, the layers, the web tier, the development server |
+| `npm run test:backend` | the back end's tests (`backend/test`): the API in both storage modes, services, the database, migrations, single-login mode, backups (the PostgreSQL ones with `TEST_DATABASE_URL`) |
+| `npm run test:core` | the business rules (`packages/core/test`) |
+| `npm start --workspace backend` | the back end alone: the API on port 8080, no screens |
+| `npm start --workspace frontend` | the front end alone on http://localhost:5173, passing `/api/` to `BACKEND_URL` (default http://localhost:8080), with the same headers as its container |
+| `npm start` | both in one process, as before |
+
+`test/` at the root keeps what spans both: the repository checks (`test/ci/guards.test.js`) and the
+screen check (`npm run screens`, the whole app in a browser).
 
 `npm run dev` turns off encryption and HSTS. Use it only for trying the app locally.
 
@@ -434,7 +449,7 @@ retention triggers on every kept table; `purge_household()` as a security define
 `pg_temp` last; and no migration pending. Run it before every deploy.
 
 To run the PostgreSQL tests, point them at an empty scratch database:
-`TEST_DATABASE_URL=postgres://... node --test test/api/postgres.test.js`.
+`TEST_DATABASE_URL=postgres://... node --test backend/test/api/postgres.test.js`.
 
 ### 5. The spreadsheet library
 

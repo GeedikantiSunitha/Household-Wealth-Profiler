@@ -4,5 +4,8 @@
   "private": true,
   "description": "Household Wealth Profiler business rules: UK tax, IHT, economic balance sheet, risk profile, KYC/AML onboarding, reviews, mandate checks and the audit diff",
   "main": "core.js",
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  }
 }

@@ -18,6 +18,8 @@ FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/core/package.json ./packages/core/
+COPY backend/package.json ./backend/
+COPY frontend/package.json ./frontend/
 RUN npm ci && npm cache clean --force
 COPY packages/core ./packages/core
 COPY frontend/src ./frontend/src

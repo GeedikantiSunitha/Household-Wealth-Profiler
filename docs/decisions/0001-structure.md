@@ -93,7 +93,7 @@ unchanged from the baseline. Where the result differs from the plan above:
 
 The API's security checks, until now written inline in `app.js`, are a layer of their own,
 `backend/src/middleware/`, with one file per check and a fixed order that `app.js` runs and
-`test/api/app.test.js` and `test/api/middleware.test.js` pin: parse-url, health, api-only,
+`backend/test/api/app.test.js` and `backend/test/api/middleware.test.js` pin: parse-url, health, api-only,
 authenticate, sign-in-required, second-step, firm-required, same-site, json-body, csrf. The
 per-route guards (`guards.js`: the stage a sign-in route needs, the per-address rate limit, the
 role an action needs) sit beside them; the sign-in routes run theirs from their route table. The
@@ -110,7 +110,7 @@ The route files are now tables only (`routes/table.js` runs them: method and pat
 controller, the route's parameters and id checks, its guards in order, 405 where the API has
 always said so). The handler bodies moved, unchanged, into `backend/src/controllers/`, one file
 per route file, including the sign-in handlers from `routes/auth.js`, whose route table stays
-where it was. The direction is now the rule and `test/ci/layers.test.js` enforces it on every
+where it was. The direction is now the rule and `backend/test/ci/layers.test.js` enforces it on every
 `require()`: app.js to middleware and routes, routes to controllers, controllers to services,
 services to repositories, repositories to the database; no layer requires one above it, and a
 route never skips the controller to call a service.
@@ -133,7 +133,7 @@ pages share; `services/api/` is the only code that calls the server (`client.js`
 `auth.js` for the sign-in). Three small edits made the rule true: the store's three network calls
 went to `client.js` and its decisions stayed in the store; main.js hands the sign-in pages to the
 store instead of the store loading a page; and the balance sheet groups became content, shared
-by the page and the Excel export. `test/ci/web-layers.test.js` enforces the direction and the
+by the page and the Excel export. `frontend/test/ci/web-layers.test.js` enforces the direction and the
 fetch rule. Every screen is unchanged. (The screen check's own requires of the moved sign-in
 services, missed by the previous commit, are corrected here.)
 

@@ -44,7 +44,7 @@ In both shapes the PostgreSQL database is a separate service, migrations are run
 - [ ] `npm run check` (migrations only add; every runtime package licence is allowed)
 - [ ] Full suite with PostgreSQL on a scratch cluster, one suite at a time, three test files at a time on a low-memory machine:
   ```sh
-  TEST_DATABASE_URL=postgres://postgres@localhost:5498/hwp_test node --test --test-timeout=300000 --test-concurrency=3 "test/**/*.test.js"
+  TEST_DATABASE_URL=postgres://postgres@localhost:5498/hwp_test npm test
   ```
   Expected: 0 fail, 0 cancelled (1 skipped on Windows: the signal test). The database name must end in `_test`.
 - [ ] Screen check in both modes, no `FAIL`:
