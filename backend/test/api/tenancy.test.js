@@ -25,7 +25,7 @@ const rec = (id, version, name, by = 'sam') => ({ id, version, state: { househol
 test.describe('tenant isolation', { skip: !BASE_URL && 'set TEST_DATABASE_URL to run' }, () => {
   const { Client } = require('pg');
   const schema = 'hwp_tenancy_' + crypto.randomBytes(4).toString('hex');
-  const PW = crypto.randomBytes(12).toString('hex');
+  const PW = require('./test-db.js').TEST_ROLE_PASSWORD; // one password for every test file of a run
   const urlFor = user => { const u = new URL(BASE_URL); u.username = user; u.password = PW; u.searchParams.set('options', `-c search_path=${schema}`); return u.toString(); };
   const asRole = async (user, fn) => { const c = new Client({ connectionString: urlFor(user) }); await c.connect(); try { return await fn(c); } finally { await c.end(); } };
   let admin, store, A, B;

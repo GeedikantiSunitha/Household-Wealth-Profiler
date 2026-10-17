@@ -141,7 +141,7 @@ test.describe('backup and restore drill', { skip: pgToolsUsable() }, () => {
 
   test('a backup as a role that row security hides rows from is refused, writing nothing', async () => {
     const before = fs.readdirSync(dir).length;
-    const PW = crypto.randomBytes(12).toString('hex');
+    const PW = require('../api/test-db.js').TEST_ROLE_PASSWORD; // one password for every test file of a run
     await require('../api/test-db.js').ensureRoles(admin, PW);
     const u = new URL(url); u.username = 'hwp_app'; u.password = PW;
     const r = await run(['backup'], { BACKUP_DATABASE_URL: u.toString() });
