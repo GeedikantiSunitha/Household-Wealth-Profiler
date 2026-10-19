@@ -24,8 +24,8 @@ command (npm workspaces: `frontend`, `backend`, and the rules in `packages/core`
 | `npm run test:frontend` | the front end's tests (`frontend/test`): the API client, the build, the layers, the web tier, the development server |
 | `npm run test:backend` | the back end's tests (`backend/test`): the API in both storage modes, services, the database, migrations, single-login mode, backups (the PostgreSQL ones with `TEST_DATABASE_URL`) |
 | `npm run test:core` | the business rules (`packages/core/test`) |
-| `npm start --workspace backend` | the back end alone: the API on port 8080, no screens |
-| `npm start --workspace frontend` | the front end alone on http://localhost:5173, passing `/api/` to `BACKEND_URL` (default http://localhost:8080), with the same headers as its container |
+| `npm start --workspace backend` | the back end alone: the API on port 3001, no screens |
+| `npm start --workspace frontend` | the front end alone on http://localhost:5173, passing `/api/` to `BACKEND_URL` (default http://localhost:3001), with the same headers as its container |
 | `npm start` | both in one process, as before |
 
 `test/` at the root keeps what spans both: the repository checks (`test/ci/guards.test.js`) and the
@@ -68,8 +68,8 @@ Four pieces, all in the **same DCDeploy environment** so they share its private 
 | Service | Built from | Public? | Settings (environment variables of that service) |
 |---|---|---|---|
 | **Database** | DCDeploy's PostgreSQL 17 | No | (DCDeploy's own; note its internal address and its login) |
-| **Back end** | `backend/Dockerfile`, port 8080 | No | `DB_LOGIN_MODE=single`, `DATABASE_URL` (the database's internal address and its one login), `DATA_KEY` (`node server.js gen-key`, new per environment), `PUBLIC_URL` (the front end's public https address), `SMTP_URL`, `SMTP_FROM`; optional `OPERATOR_EMAIL`, `TOTP_REQUIRED`, `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`, `RETENTION_YEARS`, and `CLIENT_IP_HEADER=cf-connecting-ip` once DCDeploy confirms the header. Full list: [backend/.env.example](backend/.env.example) |
-| **Front end** | `frontend/Dockerfile`, port 8080 | **Yes**: the domain users open | `BACKEND_URL` = the back end's internal address, `http://<back-end internal hostname>:8080` (its internal link). Nothing else, and never a secret. List: [frontend/.env.example](frontend/.env.example) |
+| **Back end** | `backend/Dockerfile`, port **3001** | No | `DB_LOGIN_MODE=single`, `DATABASE_URL` (the database's internal address and its one login), `DATA_KEY` (`node server.js gen-key`, new per environment), `PUBLIC_URL` (the front end's public https address), `SMTP_URL`, `SMTP_FROM`; optional `OPERATOR_EMAIL`, `TOTP_REQUIRED`, `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`, `RETENTION_YEARS`, and `CLIENT_IP_HEADER=cf-connecting-ip` once DCDeploy confirms the header. Full list: [backend/.env.example](backend/.env.example) |
+| **Front end** | `frontend/Dockerfile`, port 8080 | **Yes**: the domain users open | `BACKEND_URL` = the back end's internal address, `http://<back-end internal hostname>:3001` (its internal link). Nothing else, and never a secret. List: [frontend/.env.example](frontend/.env.example) |
 | **Worker** (one-off) | `backend/Dockerfile` | No | The back end's settings. Runs commands on demand: `node server.js migrate`, `node server.js check-db-posture`, the first firm and administrator |
 
 Never set on any service: `AUTH_USERS`, `ALLOW_PLAINTEXT`, `HSTS=0` (the back end refuses to start),

@@ -59,7 +59,7 @@ services:
       context: ../..
       dockerfile: frontend/Dockerfile
     environment:
-      BACKEND_URL: http://api:8080
+      BACKEND_URL: http://api:3001
     ports:
       - "8088:8080"
     depends_on:

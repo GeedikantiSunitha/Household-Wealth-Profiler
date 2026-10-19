@@ -213,7 +213,7 @@ Both variables are needed together: the loader refuses an owner connection whose
 
 ### Or two services (front end and back end apart)
 
-1. **api**: same repository and branch; build context `./`, Dockerfile path `backend/Dockerfile`; port `8080`; the variables below. Not reachable from the internet if DCDeploy allows a private service; otherwise note its public address.
+1. **api**: same repository and branch; build context `./`, Dockerfile path `backend/Dockerfile`; port `3001` (the back end's own; the front end stays on `8080`); the variables below. Not reachable from the internet if DCDeploy allows a private service; otherwise note its public address.
 2. **web**: same repository and branch; build context `./`, Dockerfile path `frontend/Dockerfile`; port `8080`; this is the public one, with the domain and TLS. Variables: `BACKEND_URL` = the api service's internal address, `http://<internal hostname>:8080` (its internal link; both services in the same environment). Only if the host has no private network: the api service's `https://` address, and then also `API_HOST` = that address's host name. `API_UPSTREAM`, the earlier name, is still accepted. A wrong address stops the web container at start with "host not found in upstream" in its log.
 3. `PUBLIC_URL` on the api service is the web service's public address (the one users open), not the api's own.
 4. After deploy, `node deploy/local/check.js https://HOST` proves the split: the page and `core.js` byte for byte with the headers, the API behind the same domain, a cross-site write refused, a same-site one reaching the API.
@@ -236,7 +236,7 @@ lists with their meanings: `backend/.env.example` and `frontend/.env.example` (t
 | `PUBLIC_URL` | the front end's public address, `https://HOST` exactly, no path | the Secure cookie and every emailed link depend on it |
 | `SMTP_URL` | `smtps://USER:PASSWORD@smtp.resend.com:465` | TLS from the start; `tls=off` is refused |
 | `SMTP_FROM` | `Household Wealth Profiler <no-reply@thetimefintech.com>` | a verified sender domain |
-| `PORT` | `8080` | |
+| `PORT` | `3001` | set by `backend/Dockerfile` already; the DCDeploy port must match. (The one-service root `Dockerfile` uses `8080`) |
 | `TOTP_REQUIRED` | `0` on staging if the authenticator step is not wanted yet; unset (required) in production | never `0` with real client data |
 | `OPERATOR_EMAIL` | optional | no longer used by the sign-in |
 | `CLIENT_IP_HEADER` | only if DCDeploy confirms the header it sets on every request | otherwise every failed sign-in counts against the proxy's address |
@@ -247,7 +247,7 @@ lists with their meanings: `backend/.env.example` and `frontend/.env.example` (t
 
 | Variable | Value | Notes |
 |---|---|---|
-| `BACKEND_URL` | the back-end service's internal address, `http://<internal hostname>:8080` | its internal link; both in the same environment. `API_UPSTREAM`, the earlier name, still works |
+| `BACKEND_URL` | the back-end service's internal address, `http://<internal hostname>:3001` | its internal link; both in the same environment. `API_UPSTREAM`, the earlier name, still works |
 | `API_HOST` | unset | only when `BACKEND_URL` must be the back end's public https address (no private network) |
 
 Nothing else on the front end: it holds no secret, and no back-end variable belongs there.

@@ -4,7 +4,7 @@
    /readyz to the back end at BACKEND_URL, so the browser sees one address. The security headers on
    the screens are read from nginx.conf.template, the container's own configuration, so a page here is
    as locked down as in production (and a script the policy would block fails here too).
-     BACKEND_URL     the back end (default http://localhost:8080: npm start --workspace backend)
+     BACKEND_URL     the back end (default http://localhost:3001: npm start --workspace backend)
      FRONTEND_PORT   where to listen (default 5173)
      FRONTEND_DIR    what to serve (default frontend/src; frontend/dist checks a build)
    Development only: production serves frontend/dist from the nginx container. */
@@ -25,7 +25,7 @@ function pageHeaders(template = fs.readFileSync(path.join(__dirname, '..', 'ngin
   return headers;
 }
 
-function createDevServer({ backendUrl = 'http://localhost:8080', dir = path.join(ROOT, 'frontend', 'src'), coreFile = path.join(ROOT, 'packages', 'core', 'core.js') } = {}) {
+function createDevServer({ backendUrl = 'http://localhost:3001', dir = path.join(ROOT, 'frontend', 'src'), coreFile = path.join(ROOT, 'packages', 'core', 'core.js') } = {}) {
   const backend = new URL(backendUrl);
   const headers = pageHeaders();
   const root = path.resolve(dir);
@@ -66,7 +66,7 @@ module.exports.readEnvFile = readEnvFile;
 
 if (require.main === module) {
   readEnvFile();
-  const backendUrl = process.env.BACKEND_URL || process.env.API_UPSTREAM || 'http://localhost:8080'; // as the container: the earlier name still works
+  const backendUrl = process.env.BACKEND_URL || process.env.API_UPSTREAM || 'http://localhost:3001'; // as the container: the earlier name still works
   const port = +process.env.FRONTEND_PORT || 5173;
   const dir = process.env.FRONTEND_DIR ? path.resolve(process.env.FRONTEND_DIR) : undefined;
   createDevServer({ backendUrl, dir }).listen(port, '127.0.0.1', () => console.log(`Front end on http://localhost:${port} · /api/ passed to ${backendUrl}`));

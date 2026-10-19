@@ -8,8 +8,8 @@
 #   docker build -f frontend/Dockerfile -t hwp-web .
 # Settings (substituted into nginx.conf.template at start):
 #   BACKEND_URL   the back end's internal address, where the browser's /api/ calls are passed:
-#                 http://<back-end internal hostname>:8080 on the host's private network (DCDeploy:
-#                 the back-end service's internal link). Default http://api:8080 (the local compose
+#                 http://<back-end internal hostname>:3001 on the host's private network (DCDeploy:
+#                 the back-end service's internal link). Default http://api:3001 (the local compose
 #                 file). API_UPSTREAM, its earlier name, is still accepted when BACKEND_URL is unset.
 #   API_HOST      the Host header sent to the API; "$host" (the default) keeps the public domain
 
@@ -33,6 +33,6 @@ COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 EXPOSE 8080
 # BACKEND_URL, else the earlier API_UPSTREAM, else the default; then nginx's own start-up fills in the template
-ENTRYPOINT ["/bin/sh", "-c", "export BACKEND_URL=\"${BACKEND_URL:-${API_UPSTREAM:-http://api:8080}}\"; exec /docker-entrypoint.sh \"$@\"", "--"]
+ENTRYPOINT ["/bin/sh", "-c", "export BACKEND_URL=\"${BACKEND_URL:-${API_UPSTREAM:-http://api:3001}}\"; exec /docker-entrypoint.sh \"$@\"", "--"]
 CMD ["nginx", "-g", "daemon off;"]
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD wget -qO- http://127.0.0.1:8080/health || exit 1

@@ -4,13 +4,16 @@
 #
 # Build from the repository root, so the workspace manifest and packages/core are in the context:
 #   docker build -f backend/Dockerfile -t hwp-api .
-# On DCDeploy: build context ./, Dockerfile path backend/Dockerfile, port 8080, the variables
+# On DCDeploy: build context ./, Dockerfile path backend/Dockerfile, port 3001, the variables
 # from ops/DEPLOYMENT.md section 6. No volume: with DATABASE_URL set nothing is written to disk.
 #
 # There is no build step (plain Node, no TypeScript), so one stage is honest: npm ci --omit=dev
 # installs the one runtime package (pg) and links packages/core as @hwp/core.
 FROM node:22-alpine
-ENV NODE_ENV=production PORT=8080 SERVE_WEB=0
+# Port 3001: the back end has a port of its own, apart from the front end's 8080 (each runs in its
+# own container, so the same number would not clash either; a distinct one keeps them easy to tell apart).
+# PORT set on the service changes it, and the health check follows it.
+ENV NODE_ENV=production PORT=3001 SERVE_WEB=0
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Workspace manifests must be present before npm ci
@@ -25,8 +28,8 @@ COPY server.js ./
 COPY backend ./backend
 COPY db ./db
 COPY packages ./packages
-# The node image's unprivileged user; 8080 needs no privilege
+# The node image's unprivileged user; a port above 1024 needs no privilege
 USER node
-EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD wget -qO- "http://127.0.0.1:${PORT}/healthz" || exit 1
 CMD ["node", "server.js"]

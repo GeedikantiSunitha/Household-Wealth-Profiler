@@ -10,6 +10,20 @@ const { spawn, execFileSync } = require('node:child_process');
 const { waitForServer } = require('./servers.js');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
+const { backendDefaults, BACKEND_PORT } = require('../../scripts/start.js');
+
+test('alone, the back end defaults to port 3001 and the API only; the environment or the .env file wins', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-be-defaults-'));
+  try {
+    const none = path.join(dir, 'missing.env');
+    assert.equal(BACKEND_PORT, '3001');
+    assert.deepEqual(backendDefaults({}, none), { SERVE_WEB: '0', PORT: '3001' });
+    assert.deepEqual(backendDefaults({ PORT: '4000' }, none), { PORT: '4000', SERVE_WEB: '0' }, 'the environment wins');
+    const file = path.join(dir, '.env');
+    fs.writeFileSync(file, 'PORT=8080\nSERVE_WEB=1\n');
+    assert.deepEqual(backendDefaults({}, file), {}, 'so does the .env file: its values are read by the server as for every setting');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('the back end alone: /healthz and /api/ answer, the screens are not served', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-be-'));

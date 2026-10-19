@@ -26,16 +26,16 @@ Browser ── https://profiler.yourfirm.co.uk/api/...   the API       ┘ front
 ```
 
 The front end's one setting is `BACKEND_URL`, the back end's internal address:
-`http://<back-end internal hostname>:8080` (on DCDeploy, the back-end service's internal link, with
+`http://<back-end internal hostname>:3001` (on DCDeploy, the back-end service's internal link, with
 both services in the same environment). It holds no secret. Its earlier name, `API_UPSTREAM`, is still
-accepted when `BACKEND_URL` is not set; without either, `http://api:8080` (the local compose file).
+accepted when `BACKEND_URL` is not set; without either, `http://api:3001` (the local compose file).
 Two checks: `https://<front-end address>/healthz` answers `{"ok":true}` when the two are connected; a
 container that stops at start with "host not found in upstream" in its log has a wrong `BACKEND_URL`.
 
 ## Running and testing the front end on its own
 
 ```sh
-npm start --workspace frontend    # http://localhost:5173; /api/ goes to BACKEND_URL (default http://localhost:8080)
+npm start --workspace frontend    # http://localhost:5173; /api/ goes to BACKEND_URL (default http://localhost:3001)
 npm test --workspace frontend     # frontend/test: the API client, the build, the layers, the web tier, this server
 npm run build --workspace frontend   # src into dist, as the container builds it
 ```

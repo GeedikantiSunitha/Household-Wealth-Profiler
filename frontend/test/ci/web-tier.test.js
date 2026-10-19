@@ -28,11 +28,14 @@ test('the images copy what they must, and the API image answers the API only', (
   assert.match(web, /COPY --from=build \/app\/frontend\/dist \/usr\/share\/nginx\/html/, 'nginx serves the build');
   assert.match(read('scripts/build-web.js'), /'packages', 'core', 'core\.js'/, 'the build copies core.js from packages/core, the one copy');
   assert.match(web, /NGINX_ENVSUBST_FILTER=\^\(API_HOST\|BACKEND_URL\)\$/, 'only BACKEND_URL and API_HOST are substituted; nginx variables stay');
-  assert.match(web, /export BACKEND_URL=\\"\$\{BACKEND_URL:-\$\{API_UPSTREAM:-http:\/\/api:8080\}\}\\"/, 'BACKEND_URL, else the earlier API_UPSTREAM, else the local default');
+  assert.match(web, /export BACKEND_URL=\\"\$\{BACKEND_URL:-\$\{API_UPSTREAM:-http:\/\/api:3001\}\}\\"/, 'BACKEND_URL, else the earlier API_UPSTREAM, else the local default');
   const conf = read('frontend/nginx.conf.template');
   assert.match(conf, /proxy_pass \$\{BACKEND_URL\};/, 'the API is reached at BACKEND_URL');
   assert.doesNotMatch(conf, /API_UPSTREAM/, 'the template knows one name only');
   assert.match(api, /SERVE_WEB=0/);
+  assert.match(api, /PORT=3001/, 'the back end has a port of its own, apart from the front end\'s 8080');
+  assert.match(api, /EXPOSE 3001/);
+  assert.match(api, /wget -qO- "http:\/\/127\.0\.0\.1:\$\{PORT\}\/healthz"/, 'the health check follows PORT, so a changed port does not mark a working container unhealthy');
   assert.match(api, /USER node/);
   for (const dir of ['backend', 'db', 'packages']) assert.match(api, new RegExp(`COPY ${dir.replace('/', '\\/')} `), `the API image copies ${dir}`);
   assert.doesNotMatch(api, /COPY frontend(?!\/package\.json )/, 'the API image carries no screens (only the front end\'s package.json, which npm needs to install the workspaces)');

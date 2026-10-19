@@ -9,7 +9,7 @@ API does. `server.js` at the project root is now a one-line pointer to `src/main
 ## Running and testing the back end on its own
 
 ```sh
-npm start --workspace backend     # the API on port 8080 (SERVE_WEB=0: no screens), settings from the environment and .env
+npm start --workspace backend     # the API on port 3001 (SERVE_WEB=0: no screens), settings from the environment and .env
 npm test --workspace backend      # backend/test: api/, db/, ci/ (PostgreSQL tests with TEST_DATABASE_URL)
 ```
 
