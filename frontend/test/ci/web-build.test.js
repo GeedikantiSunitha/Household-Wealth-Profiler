@@ -17,7 +17,7 @@ test('the build copies the page, the styles, the libraries and core.js byte for 
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-web-build-'));
   try {
     execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'build-web.js'), out], { stdio: 'pipe' });
-    for (const f of ['index.html', 'styles.css']) assert.ok(fs.readFileSync(path.join(out, f)).equals(fs.readFileSync(path.join(SRC, f))), `${f} is copied unchanged`);
+    for (const f of ['index.html', 'styles.css', 'runtime-config.js']) assert.ok(fs.readFileSync(path.join(out, f)).equals(fs.readFileSync(path.join(SRC, f))), `${f} is copied unchanged`);
     assert.ok(fs.readFileSync(path.join(out, 'core.js')).equals(fs.readFileSync(path.join(ROOT, 'packages', 'core', 'core.js'))), 'core.js is the one copy of the rules');
     for (const f of fs.readdirSync(path.join(SRC, 'vendor'))) assert.ok(fs.readFileSync(path.join(out, 'vendor', f)).equals(fs.readFileSync(path.join(SRC, 'vendor', f))), `vendor/${f} is the pinned file`);
     const main = fs.readFileSync(path.join(out, 'js', 'main.js'), 'utf8');

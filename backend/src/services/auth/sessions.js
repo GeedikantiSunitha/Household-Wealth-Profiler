@@ -29,9 +29,10 @@ function parseCookies(header) {
   return out;
 }
 
-function createSessions({ store, secret, idleMs = 30 * 60e3, absoluteMs = 12 * 3600e3, secure = true, now = Date.now }) {
+function createSessions({ store, secret, idleMs = 30 * 60e3, absoluteMs = 12 * 3600e3, secure = true, sameSite = 'Strict', now = Date.now }) {
+  if (sameSite === 'None' && !secure) throw new Error('SameSite=None needs a Secure cookie: the browser refuses it otherwise');
   const name = secure ? COOKIE_SECURE : COOKIE_PLAIN;
-  const attrs = `Path=/; HttpOnly${secure ? '; Secure' : ''}; SameSite=Strict`;
+  const attrs = `Path=/; HttpOnly${secure ? '; Secure' : ''}; SameSite=${sameSite}`;
   const cookie = (id, expiresAt) => `${name}=${id}; Max-Age=${Math.max(0, Math.floor((expiresAt - now()) / 1000))}; ${attrs}`;
   const csrfFor = idHash => crypto.createHmac('sha256', secret).update('csrf:' + idHash).digest('base64url');
   const at = () => new Date(now());

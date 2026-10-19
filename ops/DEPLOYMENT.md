@@ -220,6 +220,27 @@ Both variables are needed together: the loader refuses an owner connection whose
 
 Rehearse first on your machine: `HWP_DATA_KEY=$(node server.js gen-key) docker compose -f deploy/local/compose.yml up --build`, then `node deploy/local/check.js http://localhost:8088`.
 
+### Or split addresses (the browser calls the back end's own address, as ModelMyWealth does)
+
+The default above is **one address**: the browser sees only the front end, and its nginx passes `/api/` to the back end. The alternative is **two addresses**, each service with its own public address, the browser loading the page from one and calling the other directly (CORS). It is off unless you set `FRONTEND_ORIGIN` on the back end; nothing in the default changes.
+
+| Where | Variable | Value |
+|---|---|---|
+| back end | `FRONTEND_ORIGIN` | the front end's address, `https://app.example.com` (several, comma-separated; scheme, host and port only; https in production; no wildcard, no path) |
+| back end | `PUBLIC_URL` | the front end's address (emailed links point there), as in the one-address shape |
+| back end | `SESSION_SAMESITE` | leave unset for two unrelated addresses (`None`, picked for you); `strict` when both addresses are subdomains of one registered domain you own |
+| front end | `API_BASE_URL` | the back end's own public address, `https://api.example.com` (no path) |
+
+What the back end then does: it answers the browser's preflight for `/api/`, marks its replies readable by the listed origin only (never `*`), accepts a write whose `Origin` is that origin, and sends the session cookie with `SameSite=None; Secure` (or the one you asked for). What the front end then does: the page calls `API_BASE_URL` with credentials, and its content security policy allows exactly that address; `BACKEND_URL` is not needed (it defaults to `API_BASE_URL`, so the container starts with no private network).
+
+**What it costs, and what to know before choosing it:**
+
+- `SameSite=Strict` is the stronger cookie protection and holds only while the two addresses are one site. On two unrelated addresses (for example two names under a hosting provider's domain, which browsers may treat as unrelated sites) the cookie must be `None`, and a browser that blocks third-party cookies will refuse it, so sign-in fails there. Two subdomains of a domain you own (`app.yourfirm.co.uk`, `api.yourfirm.co.uk`) avoid this: set `SESSION_SAMESITE=strict`.
+- The allowlist is one more thing that can be wrong: a listed origin can read the replies of a signed-in user. List only your own front end.
+- The CSRF token, the JSON check, the sign-in delay and the per-address limits are unchanged and still apply.
+
+To check the split: `node deploy/local/check.js` is for the one-address shape; for two addresses run the screen check with `SCREENS_SPLIT=1 TEST_DATABASE_URL=... npm run screens`, which starts the back end and the front end on two ports and drives a real browser across them.
+
 ### Variables, per service
 
 Each service has its own environment variables in DCDeploy; there is no `.env` file in an image. The
@@ -249,6 +270,7 @@ lists with their meanings: `backend/.env.example` and `frontend/.env.example` (t
 |---|---|---|
 | `BACKEND_URL` | the back-end service's internal address, `http://<internal hostname>:8080` | its internal link; both in the same environment. `API_UPSTREAM`, the earlier name, still works |
 | `API_HOST` | unset | only when `BACKEND_URL` must be the back end's public https address (no private network) |
+| `API_BASE_URL` | unset | only in the split-address mode: the back end's own public address (see above); the back end then needs `FRONTEND_ORIGIN` |
 
 Nothing else on the front end: it holds no secret, and no back-end variable belongs there.
 

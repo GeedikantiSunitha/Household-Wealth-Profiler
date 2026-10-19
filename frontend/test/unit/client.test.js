@@ -54,3 +54,21 @@ test('probe: the server\'s answer to api/me, status 0 when nothing answers, no b
   stubFetch(reply(200, { user: 'x' }, 'text/html'));
   assert.deepEqual(await probe(), { status: 200, body: null }, 'an HTML page answering instead of the server is not a sign-in');
 });
+
+test('the split-address mode: with window.HWP_API_BASE set, every call goes to the back end\'s address and sends the session cookie; unset, nothing changes', async () => {
+  const { request, probe, apiUrl, apiCredentials } = await load();
+  const calls = stubFetch(reply(200, { ok: true }));
+  try {
+    globalThis.window = { HWP_API_BASE: 'https://api.example.com/' };
+    assert.equal(apiUrl('me'), 'https://api.example.com/api/me', 'a trailing slash is dropped');
+    assert.equal(apiCredentials(), 'include');
+    await request('POST', 'households', { a: 1 }, undefined, { csrf: 't', session: true });
+    await probe();
+    assert.equal(calls[0].url, 'https://api.example.com/api/households'); assert.equal(calls[0].credentials, 'include'); assert.equal(calls[0].headers['X-CSRF-Token'], 't');
+    assert.equal(calls[1].url, 'https://api.example.com/api/me'); assert.equal(calls[1].credentials, 'include');
+    globalThis.window = { HWP_API_BASE: '' };
+    assert.equal(apiUrl('me'), 'api/me'); assert.equal(apiCredentials(), 'same-origin');
+    delete globalThis.window;
+    assert.equal(apiUrl('me'), 'api/me', 'no window setting at all: one address'); assert.equal(apiCredentials(), 'same-origin');
+  } finally { delete globalThis.window; }
+});

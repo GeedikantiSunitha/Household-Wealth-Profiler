@@ -16,7 +16,8 @@ test('the web tier sends every security header the API sends with a page, with t
   const conf = read('frontend/nginx.conf.template');
   const headers = securityHeaders({ hsts: false }); // HSTS is the API's and the TLS edge's: a plain http container must not set it
   for (const [name, value] of Object.entries(headers)) {
-    assert.ok(conf.includes(`add_header ${name} "${value}" always;`), `${name} is missing or differs in nginx.conf.template`);
+    // ${CONNECT_SRC_EXTRA} is empty for one address: then the header is exactly the API's; it adds the back end's address only in the split mode
+    assert.ok(conf.split('${CONNECT_SRC_EXTRA}').join('').includes(`add_header ${name} "${value}" always;`), `${name} is missing or differs in nginx.conf.template`);
   }
   assert.match(conf, /location ~ \^\/\(api\/\|healthz\$\|readyz\$\)/, 'the API paths are passed through');
   assert.match(conf, /proxy_set_header X-Forwarded-Host \$http_host;/, 'the public host, with its port, reaches the API for its same-site check against the Origin header');
@@ -27,8 +28,9 @@ test('the images copy what they must, and the API image answers the API only', (
   assert.match(web, /RUN node scripts\/build-web\.js/, 'the screens are built from frontend/src');
   assert.match(web, /COPY --from=build \/app\/frontend\/dist \/usr\/share\/nginx\/html/, 'nginx serves the build');
   assert.match(read('scripts/build-web.js'), /'packages', 'core', 'core\.js'/, 'the build copies core.js from packages/core, the one copy');
-  assert.match(web, /NGINX_ENVSUBST_FILTER=\^\(API_HOST\|BACKEND_URL\)\$/, 'only BACKEND_URL and API_HOST are substituted; nginx variables stay');
-  assert.match(web, /export BACKEND_URL=\\"\$\{BACKEND_URL:-\$\{API_UPSTREAM:-http:\/\/api:8080\}\}\\"/, 'BACKEND_URL, else the earlier API_UPSTREAM, else the local default');
+  assert.match(web, /NGINX_ENVSUBST_FILTER=\^\(API_HOST\|BACKEND_URL\|API_BASE_URL\|CONNECT_SRC_EXTRA\)\$/, 'only the four settings are substituted; nginx variables stay');
+  assert.match(web, /case \\"\$API_BASE_URL\\" in http:\/\/\*\|https:\/\/\*\)/,'API_BASE_URL is validated before it reaches the page\'s script and the policy');
+  assert.match(web, /BACKEND_URL=\\"\$\{BACKEND_URL:-\$\{API_UPSTREAM:-\$\{API_BASE_URL:-http:\/\/api:8080\}\}\}\\"/, 'BACKEND_URL, else the earlier API_UPSTREAM, else the back end\'s own address in the split mode, else the local default');
   const conf = read('frontend/nginx.conf.template');
   assert.match(conf, /proxy_pass \$\{BACKEND_URL\};/, 'the API is reached at BACKEND_URL');
   assert.doesNotMatch(conf, /API_UPSTREAM/, 'the template knows one name only');

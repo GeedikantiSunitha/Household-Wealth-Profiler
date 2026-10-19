@@ -1,0 +1,18 @@
+# The split-address rehearsal: the same stack as compose.yml, but the back end gets its own published
+# port and the front end's page calls it directly (CORS), as in the ModelMyWealth deployment.
+#   http://localhost:8088  the front end (the page)      http://localhost:8089  the back end (the API)
+# Two ports on localhost are one site, so the cookie stays SameSite=Strict here; on two unrelated
+# hosts the back end picks SameSite=None by itself (ops/DEPLOYMENT.md, "Or split addresses").
+#
+#   HWP_DATA_KEY=$(node server.js gen-key) docker compose -f deploy/local/compose.yml -f deploy/local/compose.split.yml up --build
+#   node deploy/local/check-split.js http://localhost:8088 http://localhost:8089
+#   docker compose -f deploy/local/compose.yml -f deploy/local/compose.split.yml down -v
+services:
+  api:
+    environment:
+      FRONTEND_ORIGIN: http://localhost:8088
+    ports:
+      - "8089:8080"
+  web:
+    environment:
+      API_BASE_URL: http://localhost:8089

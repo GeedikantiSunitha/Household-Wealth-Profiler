@@ -136,7 +136,7 @@ function main([cmd, ...args] = []) {
   const records = createRecordsService({ store, HWP, retentionYears: config.retentionYears, production: config.production });
   // The app's own sign-in needs PostgreSQL (sessions, accounts); with files, Basic sign-in is the only way in
   const authStore = store.pool ? createAuthStore({ pool: store.pool }) : null;
-  const sessions = authStore ? createSessions({ store: authStore, secret: sessionSecretFrom(config.key), idleMs: config.sessionIdleMinutes * 60e3, absoluteMs: config.sessionAbsoluteHours * 3600e3, secure: config.secureCookies }) : null;
+  const sessions = authStore ? createSessions({ store: authStore, secret: sessionSecretFrom(config.key), idleMs: config.sessionIdleMinutes * 60e3, absoluteMs: config.sessionAbsoluteHours * 3600e3, secure: config.secureCookies, sameSite: config.sessionSameSite }) : null;
   const { authenticate } = createAuth(config, { authStore, sessions });
   // The sign-in emails: links, warnings, access requests (to the log outside production when SMTP_URL is not set)
   const mailer = createMailer({ smtpUrl: config.smtpUrl, from: config.smtpFrom, production: config.production });

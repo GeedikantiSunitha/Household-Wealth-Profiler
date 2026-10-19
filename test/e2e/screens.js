@@ -321,18 +321,32 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     if (DB) {
       const { codeAt, base32Decode } = require('../../backend/src/services/auth/totp.js');
       const port2 = await freePort(); const BASE2 = `http://127.0.0.1:${port2}/`;
+      // SCREENS_SPLIT=1: the split-address mode. The back end answers /api/ only, on its own port, and lists the
+      // front end's address (FRONTEND_ORIGIN); the front end is its own server on a second port, and the browser
+      // loads the page from there and calls the back end directly, so the browser itself enforces CORS, the
+      // cookie rules and the page's content security policy. Everything else in this run is unchanged.
+      const SPLIT = process.env.SCREENS_SPLIT === '1';
+      const portF = SPLIT ? await freePort() : 0;
+      const FRONT = `http://127.0.0.1:${portF}/`;
+      const PAGE2 = SPLIT ? FRONT : BASE2; // where the page is loaded from
       const key = execFileSync(process.execPath, ['server.js', 'gen-key'], { cwd: ROOT }).toString().trim();
-      const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', PUBLIC_URL: BASE2.replace(/\/$/, '') };
+      const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', DB_LOGIN_MODE: '', PUBLIC_URL: PAGE2.replace(/\/$/, ''),
+        ...(SPLIT ? { SERVE_WEB: '0', FRONTEND_ORIGIN: FRONT.replace(/\/$/, '') } : {}) };
       execFileSync(process.execPath, ['server.js', 'migrate'], { cwd: ROOT, env: env2 });
       execFileSync(process.execPath, ['server.js', 'create-user', 'ava@example.com', 'Ava Adviser'], { cwd: ROOT, env: env2 });
       execFileSync(process.execPath, ['server.js', 'set-password', 'ava@example.com'], { cwd: ROOT, env: env2, input: 'correct horse battery staple\n' });
       let log2 = '';
       const app2 = spawn(process.execPath, ['server.js'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: env2 });
       app2.stdout.on('data', d => { log2 += d; }); app2.stderr.on('data', d => { log2 += d; });
+      let front = null;
+      if (SPLIT) {
+        front = spawn(process.execPath, [path.join(ROOT, 'frontend', 'scripts', 'dev-server.js')], { cwd: ROOT, stdio: 'ignore', env: { ...process.env, FRONTEND_PORT: String(portF), BACKEND_URL: BASE2.replace(/\/$/, ''), API_BASE_URL: BASE2.replace(/\/$/, '') } });
+      }
       expectAuth = true;
       try {
         await waitHttp(BASE2 + 'healthz');
-        const go2 = async (hash = '') => { await page.send('Page.navigate', { url: BASE2 + hash }); await until(`document.readyState === 'complete' && !!document.querySelector('#gate, #main h2')`, 'the app', 30000); };
+        if (SPLIT) await waitHttp(FRONT + 'health');
+        const go2 = async (hash = '') => { await page.send('Page.navigate', { url: PAGE2 + hash }); await until(`document.readyState === 'complete' && !!document.querySelector('#gate, #main h2')`, 'the app', 30000); };
         const fill = (sel, v) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('No field ' + ${JSON.stringify(sel)}); el.value = ${JSON.stringify(v)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
         const submit = () => js(`(() => { document.querySelector('#gate button[type=submit]').click(); return true; })()`);
         const heading = () => js(`document.querySelector('#gate h2')?.textContent || document.querySelector('#main h2')?.textContent || ''`);
@@ -550,7 +564,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
 
             // -- Ned signs in: the invitation is put to him before any firm is chosen; accepting it opens the firm with the roles he was given
             await cookieFor('ned@example.com', null);
-            await page.send('Page.navigate', { url: BASE2 });
+            await page.send('Page.navigate', { url: PAGE2 });
             await until(`document.querySelector('#gate h2')?.textContent === 'You have been invited'`, 'the invitation screen', 30000);
             await expectTrue(js(`/Default firm/.test(document.querySelector('#gate').textContent) && /adviser/.test(document.querySelector('#gate').textContent)`), 'the invitation does not say which firm and roles');
             await expectTrue(js(`!document.querySelector('[data-k]') && !document.querySelector('#main .panel:not(#gate)')`), 'data is on screen before the invitation is accepted');
@@ -574,7 +588,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
             await pool.query(`update memberships set extra_roles = '{}' where user_id = $1 and firm_id = $2`, [uid['dana@example.com'], FIRM]);
           } finally { await pool.end(); }
         });
-      } finally { expectAuth = false; app2.kill(); }
+      } finally { expectAuth = false; app2.kill(); if (front) front.kill(); }
     } else results.push('INFO  the sign-in screens (session mode) were not checked: set TEST_DATABASE_URL to a scratch database');
   } catch (e) { fail('run stopped: ' + e.message); }
   finally {
