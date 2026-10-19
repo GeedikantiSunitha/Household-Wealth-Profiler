@@ -88,7 +88,27 @@ async function pending(db, { dir, tracking = 'app' }) {
   return files.filter(f => !applied.has(t.key(f)));
 }
 
+// Every migration file as applied or pending, read-only (node server.js migrate-status). A file whose
+// checksum differs from the one recorded when it was applied is "changed" (the runner refuses to go on until
+// that is put right); a name applied in the database with no file here is "unknown" (a newer deployment ran it).
+// It never creates the tracking table and never writes: on a database that has none, everything is pending.
+async function status(db, { dir, tracking = 'app' }) {
+  const t = TRACKING[tracking];
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.sql')).sort();
+  const [{ exists }] = await db.query(`select to_regclass('schema_migrations') is not null as exists`);
+  const rows = exists ? await db.query('select name as key, checksum, applied_at from schema_migrations') : [];
+  const applied = new Map(rows.map(r => [r.key, r]));
+  const migrations = files.map(name => {
+    const row = applied.get(t.key(name));
+    if (!row) return { name, state: 'pending', appliedAt: null };
+    const changed = row.checksum && row.checksum !== sha256(read(path.join(dir, name)));
+    return { name, state: changed ? 'changed' : 'applied', appliedAt: row.applied_at };
+  });
+  const known = new Set(files.map(f => t.key(f)));
+  return { migrations, unknown: [...applied.keys()].filter(k => !known.has(k)).sort() };
+}
+
 // Adapter for a node-postgres client (not a pool: the advisory lock belongs to one connection)
 const pgClient = c => ({ query: async (sql, params) => (await c.query(sql, params)).rows, exec: sql => c.query(sql) });
 
-module.exports = { migrate, pending, pgClient, MIN_VERSION };
+module.exports = { migrate, pending, status, pgClient, MIN_VERSION };

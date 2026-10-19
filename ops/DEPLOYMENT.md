@@ -190,6 +190,26 @@ node server.js grant-operator   # after any migration that adds tables
 Remove-Item Env:DATABASE_OWNER_URL, Env:DATABASE_URL
 ```
 
+### Seeing where a database stands
+
+`node server.js migrate-status` (from the `backend` folder: `npm run migrate:status`) lists every migration file as it stands in the database, and **changes nothing**: it runs in a read-only transaction that is always rolled back and never creates the tracking table.
+
+```
+applied  0001_init.sql  2026-10-15 09:12:03 UTC
+...
+PENDING  0016_example.sql
+15 applied, 1 pending.
+```
+
+| Word | Meaning |
+|---|---|
+| `applied` | in the database, with the time it ran |
+| `PENDING` | a file here that the database has not run; `migrate` would apply it |
+| `CHANGED` | applied, but the file's text no longer matches what was recorded; the runner refuses to continue until the change is put in a new file |
+| `UNKNOWN` | applied in this database with no such file here, because a newer version ran it |
+
+Exit 0 only when every file is applied and none is changed or unknown; exit 2 otherwise, so a deploy script can stop on it. It uses the same connection as `migrate` (`DATABASE_OWNER_URL`, else `DATABASE_URL`) and needs no key and no mail settings. `check-db-posture` also fails while a migration is pending, but it is a safety check, not a list.
+
 Both variables are needed together: the loader refuses an owner connection whose host or database differs from the app's, and your local `.env` would otherwise fill `DATABASE_URL` in. The local `DATA_KEY` in `.env` satisfies the loader but is not used by `migrate`: no migration binds anything to a key.
 
 ### Rules

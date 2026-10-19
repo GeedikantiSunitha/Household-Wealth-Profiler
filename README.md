@@ -181,6 +181,7 @@ Apply the migrations as the owner, then start the server as the app role:
 
 ```sh
 node server.js migrate      # any new db/migrations file, as hwp_owner
+node server.js migrate-status   # read-only: every migration as applied or PENDING; exit 2 when anything is pending
 npm start                   # as hwp_app
 ```
 

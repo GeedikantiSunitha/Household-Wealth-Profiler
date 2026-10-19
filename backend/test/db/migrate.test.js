@@ -320,3 +320,50 @@ test('PostgreSQL older than 14 is refused before anything runs', async () => {
   await assert.rejects(migrate(db, { dir: DIR }), /PostgreSQL 14 or later is needed \(this server is 13\)/);
   assert.equal(ran.length, 1);
 });
+
+test('status(): every migration file as applied or pending, changed files and unknown names flagged, nothing written, nothing created', async () => {
+  const { status } = require('../../../db/migrate.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hwp-mig-'));
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    fs.writeFileSync(path.join(dir, '0001_a.sql'), 'create table a (x int);\n');
+    fs.writeFileSync(path.join(dir, '0002_b.sql'), 'create table b (x int);\n');
+    // a database with no tracking table yet: everything pending, and asking creates nothing
+    let s = await status(db, { dir });
+    assert.deepEqual(s.migrations.map(m => [m.name, m.state]), [['0001_a.sql', 'pending'], ['0002_b.sql', 'pending']]);
+    assert.deepEqual(s.unknown, []);
+    assert.equal((await db.query(`select to_regclass('schema_migrations') is not null as made`))[0].made, false, 'status does not create the tracking table');
+    // the first applied, the second still pending
+    fs.rmSync(path.join(dir, '0002_b.sql'));
+    await migrate(db, { dir });
+    fs.writeFileSync(path.join(dir, '0002_b.sql'), 'create table b (x int);\n');
+    s = await status(db, { dir });
+    assert.deepEqual(s.migrations.map(m => [m.name, m.state]), [['0001_a.sql', 'applied'], ['0002_b.sql', 'pending']]);
+    assert.ok(s.migrations[0].appliedAt, 'an applied migration says when');
+    assert.equal(s.migrations[1].appliedAt, null);
+    // a changed applied file is flagged, line endings are not a change
+    fs.writeFileSync(path.join(dir, '0001_a.sql'), 'create table a (x int);\r\n');
+    assert.equal((await status(db, { dir })).migrations[0].state, 'applied', 'line endings do not count');
+    fs.writeFileSync(path.join(dir, '0001_a.sql'), 'create table a (x int, y int);\n');
+    assert.equal((await status(db, { dir })).migrations[0].state, 'changed');
+    // a name applied in the database with no file here is reported (a newer deployment ran it)
+    await db.query(`insert into schema_migrations (name, checksum) values ('0099_from_the_future.sql', 'x')`);
+    assert.deepEqual((await status(db, { dir })).unknown, ['0099_from_the_future.sql']);
+    // and nothing it did changed the data
+    assert.equal((await db.query('select count(*)::int n from schema_migrations'))[0].n, 2);
+  } finally { await pg.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the real chain: status() on a fully migrated database says every file is applied, and on an empty one that every file is pending', async () => {
+  const { status } = require('../../../db/migrate.js');
+  const pg = await pglite(), db = adapt(pg);
+  try {
+    const all = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort();
+    assert.deepEqual((await status(db, { dir: DIR })).migrations.map(m => m.state), all.map(() => 'pending'));
+    await migrate(db, { dir: DIR });
+    const s = await status(db, { dir: DIR });
+    assert.deepEqual(s.migrations.map(m => m.name), all);
+    assert.ok(s.migrations.every(m => m.state === 'applied'), 'all applied');
+    assert.deepEqual(s.unknown, []);
+  } finally { await pg.close(); }
+});

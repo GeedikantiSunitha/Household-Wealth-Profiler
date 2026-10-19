@@ -53,7 +53,8 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   // The backup commands run as a job of their own, apart from the server: the server's settings do not apply to them
   const backupCommand = BACKUP_COMMANDS.includes(command);
   // The platform operator's commands send no email and use their own database connection, so the server's address and mail settings do not apply to them
-  const operatorCommand = OPERATOR_COMMANDS.includes(command);
+  // (migrate-status is read-only and run from a worker or a PC: like those commands it needs no mail, address or key)
+  const operatorCommand = OPERATOR_COMMANDS.includes(command) || command === 'migrate-status';
   if (production && !backupCommand) {
     // (the operator commands use their own connection, so the operator's machine never holds the app's password)
     if (!env.DATABASE_URL && !operatorCommand) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
@@ -136,9 +137,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   }
   const backupRetentionDays = env.BACKUP_RETENTION_DAYS === undefined || env.BACKUP_RETENTION_DAYS === '' ? 35 : +env.BACKUP_RETENTION_DAYS;
   if (!Number.isInteger(backupRetentionDays) || backupRetentionDays < 1 || backupRetentionDays > 3650) throw new Error('BACKUP_RETENTION_DAYS must be a whole number of days from 1 to 3650');
-  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'subject-access-user', 'check-db-posture', ...BACKUP_COMMANDS, ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
+  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'subject-access-user', 'check-db-posture', 'migrate-status', ...BACKUP_COMMANDS, ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
   // The operator commands never touch a client record, so the operator's machine does not need the key
-  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup' && command !== 'check-db-posture' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
+  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup' && command !== 'check-db-posture' && command !== 'migrate-status' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
     root,

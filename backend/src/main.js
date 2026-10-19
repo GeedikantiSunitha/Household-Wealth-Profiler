@@ -4,7 +4,7 @@
      2. settings (stop with a message when one is missing or wrong)
      3. encryption, storage, the household service, sign-in, the request pipeline
      4. a data command (import-files, migrate, index-references, rotate-key, check-records, create-user,
-        set-password, list-requests, reset-mfa, backup, restore-drill, check-db-posture,
+        set-password, list-requests, reset-mfa, backup, restore-drill, check-db-posture, migrate-status,
         subject-access-user), or prepare storage and start
         listening. Development applies new migrations itself; production only checks none is
         pending and refuses to start otherwise (migrations are run as the owner: node server.js
@@ -19,7 +19,7 @@ const HWP = require('../../packages/core/core.js');
 const { load } = require('./config');
 const { createSealer } = require('./crypto/seal.js');
 const { createStore, DEFAULT_FIRM_ID } = require('./repositories');
-const { migrateWith } = require('./db/pool.js');
+const { migrateWith, statusWith } = require('./db/pool.js');
 const { createHouseholdService } = require('./services/households.js');
 const { createFirmService } = require('./services/firm.js');
 const { createMemberService } = require('./services/members.js');
@@ -81,6 +81,21 @@ function main([cmd, ...args] = []) {
     if (!url) { console.error('Set DATABASE_OWNER_URL (or DATABASE_URL) to the database to migrate.'); process.exit(1); }
     migrateWith(url, path.join(config.root, 'db', 'migrations'), { singleLogin: config.singleLogin })
       .then(done => { console.log(done.length ? `Applied ${done.length} migration(s): ${done.join(', ')}` : 'No migrations pending.'); }, e => { console.error(e.message); process.exit(1); });
+    return;
+  }
+  // migrate-status: every migration as applied or pending, read-only (a transaction that is rolled back).
+  // Exit 0 when every file is applied and none changed; 2 when one is pending, changed, or applied here with no file.
+  if (cmd === 'migrate-status') {
+    const url = config.databaseOwnerUrl || config.databaseUrl;
+    if (!url) { console.error('Set DATABASE_OWNER_URL (or DATABASE_URL) to the database to look at.'); process.exit(1); }
+    statusWith(url, path.join(config.root, 'db', 'migrations')).then(({ migrations, unknown }) => {
+      const when = d => (d ? new Date(d).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : '');
+      for (const m of migrations) console.log(`${m.state === 'applied' ? 'applied ' : m.state === 'pending' ? 'PENDING ' : 'CHANGED '} ${m.name}  ${when(m.appliedAt)}`.trimEnd());
+      for (const u of unknown) console.log(`UNKNOWN  ${u}  (applied in this database, no such file here: a newer version ran it)`);
+      const pendingN = migrations.filter(m => m.state === 'pending').length, changedN = migrations.filter(m => m.state === 'changed').length;
+      console.log(`${migrations.length - pendingN - changedN} applied, ${pendingN} pending${changedN ? `, ${changedN} changed after being applied (put the change in a new migration file)` : ''}${unknown.length ? `, ${unknown.length} unknown here` : ''}.`);
+      process.exit(pendingN || changedN || unknown.length ? 2 : 0);
+    }, e => { console.error(e.message); process.exit(1); });
     return;
   }
   if (cmd === 'rotate-key') {
