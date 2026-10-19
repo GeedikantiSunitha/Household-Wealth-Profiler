@@ -30,7 +30,7 @@ test('the back end alone: /healthz and /api/ answer, the screens are not served'
   const port = 21000 + Math.floor(Math.random() * 1000), base = `http://127.0.0.1:${port}`;
   const user = execFileSync(process.execPath, ['server.js', 'hash-password', 'sam', 'correct horse'], { cwd: ROOT }).toString().trim();
   const proc = spawn(process.execPath, [path.join(ROOT, 'backend', 'scripts', 'start.js')], { cwd: ROOT, stdio: 'pipe',
-    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DATA_DIR: dir, ALLOW_PLAINTEXT: '1', DATA_KEY: '', DATABASE_URL: '', DATABASE_OWNER_URL: '', AUTH_USERS: user, HSTS: '0', SERVE_WEB: undefined, NODE_ENV: '', DB_LOGIN_MODE: '' } });
+    env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', HWP_ENV_FILE: path.join(dir, 'no-such.env'), DATA_DIR: dir, ALLOW_PLAINTEXT: '1', DATA_KEY: '', DATABASE_URL: '', DATABASE_OWNER_URL: '', AUTH_USERS: user, HSTS: '0', SERVE_WEB: undefined, NODE_ENV: '', DB_LOGIN_MODE: '' } });
   try {
     await waitForServer(proc, base);
     assert.equal((await fetch(base + '/healthz')).status, 200);

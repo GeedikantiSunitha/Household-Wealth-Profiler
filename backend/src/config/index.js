@@ -38,7 +38,9 @@ function parseUsers(text) {
 
 // The back end's settings file: backend/.env when there is one, else the project root's .env (where it
 // always was). One file only, never both, so a setting cannot come from two places.
-const envFileOf = root => { const own = path.join(root, 'backend', '.env'); return fs.existsSync(own) ? own : path.join(root, '.env'); };
+// The settings file: HWP_ENV_FILE if the environment names one (a file that does not exist means no file: how a test
+// keeps a developer's own settings out), else backend/.env, else the project root's .env
+const envFileOf = root => { if (process.env.HWP_ENV_FILE) return path.resolve(process.env.HWP_ENV_FILE); const own = path.join(root, 'backend', '.env'); return fs.existsSync(own) ? own : path.join(root, '.env'); };
 
 function load({ env = process.env, root = ROOT, command } = {}) {
   readEnvFile(envFileOf(root), env);
@@ -145,7 +147,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     root,
     production,
     port: +env.PORT || 8080,
-    host: env.HOST || '0.0.0.0',
+    // No HOST: every address, IPv6 and IPv4 both (Node binds "::" dual-stack, or 0.0.0.0 where the machine has no
+    // IPv6), as a Node server started with no address does; a HOST names one address exactly
+    host: env.HOST || '',
     dataDir: path.resolve(env.DATA_DIR || path.join(root, 'data')),
     databaseUrl: env.DATABASE_URL || '',
     // The owner connection for migrations (node server.js migrate); the server itself runs as the

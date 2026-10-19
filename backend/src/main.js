@@ -186,9 +186,16 @@ function main([cmd, ...args] = []) {
   if (authStore) dummyHashString().catch(() => {}); // warm: the first unknown-email sign-in then costs the same as any other
   store.init().then(() => {
     stopOnSignal(server, store);
-    server.listen(config.port, config.host, () => console.log(`Household Wealth Profiler on http://${config.host}:${config.port} · ${config.users.size} user(s) · encryption ${config.key ? 'on' : 'OFF'} · ${store.describe}${config.production ? ' · production' : ''}`));
+    server.listen(config.port, config.host || undefined, () => console.log(`Household Wealth Profiler on http://${addressOf(server, config.host)}:${config.port} · ${config.users.size} user(s) · encryption ${config.key ? 'on' : 'OFF'} · ${store.describe}${config.production ? ' · production' : ''}`));
   }, e => { console.error('Could not open storage:', e.message); process.exit(1); });
   return server;
+}
+
+// The address the server actually bound, for the start line: "[::]" is IPv6 and IPv4 both, "0.0.0.0" IPv4 only
+function addressOf(server, named) {
+  const a = server.address();
+  if (!a || typeof a !== 'object') return named || '0.0.0.0';
+  return a.family === 'IPv6' ? `[${a.address}]` : a.address;
 }
 
 module.exports = { main };

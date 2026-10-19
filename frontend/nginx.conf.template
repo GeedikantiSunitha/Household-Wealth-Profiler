@@ -1,9 +1,10 @@
 # The web tier (frontend/Dockerfile): the screens as static files, and the API on the same domain.
 # ${BACKEND_URL} (the back end's internal address), ${API_HOST}, ${API_BASE_URL} (the back end's own public address, split-address
-# mode only) and ${CONNECT_SRC_EXTRA} (derived from it) are filled in from the environment when the container starts;
+# mode only) and ${CONNECT_SRC_EXTRA} (derived from it) and ${LISTEN_V6} (an IPv6 listener where the container has IPv6) are filled in from the environment when the container starts;
 # every other $name is an nginx variable.
 server {
     listen 8080;
+    ${LISTEN_V6}
     server_name _;
     root /usr/share/nginx/html;
     index index.html;

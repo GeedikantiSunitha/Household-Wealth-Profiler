@@ -17,6 +17,7 @@ test('every setting the front end uses is in frontend/.env.example', () => {
   for (const m of fs.readFileSync(path.join(FRONTEND, 'nginx.conf.template'), 'utf8').matchAll(/\$\{([A-Z][A-Z0-9_]+)\}/g)) used.add(m[1]);
   used.delete('API_UPSTREAM'); // the earlier name: accepted, documented as such, not listed as a setting of its own
   used.delete('CONNECT_SRC_EXTRA'); // derived from API_BASE_URL by the container's entrypoint, never set by hand
+  used.delete('LISTEN_V6'); // worked out by the container's entrypoint from the kernel, never set by hand
   assert.deepEqual([...used].sort(), ['API_BASE_URL', 'API_HOST', 'BACKEND_URL', 'FRONTEND_DIR', 'FRONTEND_PORT']);
   const missing = [...used].filter(n => !new RegExp(`^#?\\s*${n}=`, 'm').test(doc()));
   assert.deepEqual(missing, []);

@@ -28,10 +28,13 @@ test('the images copy what they must, and the API image answers the API only', (
   assert.match(web, /RUN node scripts\/build-web\.js/, 'the screens are built from frontend/src');
   assert.match(web, /COPY --from=build \/app\/frontend\/dist \/usr\/share\/nginx\/html/, 'nginx serves the build');
   assert.match(read('scripts/build-web.js'), /'packages', 'core', 'core\.js'/, 'the build copies core.js from packages/core, the one copy');
-  assert.match(web, /NGINX_ENVSUBST_FILTER=\^\(API_HOST\|BACKEND_URL\|API_BASE_URL\|CONNECT_SRC_EXTRA\)\$/, 'only the four settings are substituted; nginx variables stay');
+  assert.match(web, /NGINX_ENVSUBST_FILTER=\^\(API_HOST\|BACKEND_URL\|API_BASE_URL\|CONNECT_SRC_EXTRA\|LISTEN_V6\)\$/, 'only the five settings are substituted; nginx variables stay');
   assert.match(web, /case \\"\$API_BASE_URL\\" in http:\/\/\*\|https:\/\/\*\)/,'API_BASE_URL is validated before it reaches the page\'s script and the policy');
   assert.match(web, /BACKEND_URL=\\"\$\{BACKEND_URL:-\$\{API_UPSTREAM:-\$\{API_BASE_URL:-http:\/\/api:3001\}\}\}\\"/, 'BACKEND_URL, else the earlier API_UPSTREAM, else the back end\'s own address in the split mode, else the local default');
   const conf = read('frontend/nginx.conf.template');
+  assert.match(conf, /^\s*listen 8080;\r?$/m, 'IPv4 always');
+  assert.match(conf, /^\s*\$\{LISTEN_V6\}\r?$/m, 'IPv6 too, where the container has it: the container works the line out');
+  assert.match(web, /if_inet6/, 'the entrypoint adds the IPv6 listener only when the kernel has IPv6');
   assert.match(conf, /proxy_pass \$\{BACKEND_URL\};/, 'the API is reached at BACKEND_URL');
   assert.doesNotMatch(conf, /API_UPSTREAM/, 'the template knows one name only');
   assert.match(api, /SERVE_WEB=0/);

@@ -18,7 +18,8 @@ test('defaults when only users and key are set', () => {
   const r = root();
   const c = load({ env: { AUTH_USERS: USER, DATA_KEY: KEY }, root: r });
   assert.equal(c.port, 8080);
-  assert.equal(c.host, '0.0.0.0');
+  assert.equal(c.host, '', 'no HOST: every address, IPv6 and IPv4 (backend/test/api/listen.test.js)');
+  assert.equal(ok({ HOST: '127.0.0.1' }).host, '127.0.0.1', 'a HOST names one address exactly');
   assert.equal(c.dataDir, path.join(r, 'data'));
   assert.equal(c.databaseUrl, '');
   assert.equal(c.databaseOwnerUrl, '', 'migrations run with DATABASE_URL unless an owner URL is given');
@@ -144,6 +145,16 @@ test('operator commands (Phase 3): no users, no DATA_KEY and, in production, no 
   assert.equal(load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@h:5432/db' }, root: root() }).databaseOperatorUrl, 'postgres://o:y@h:5432/db');
   assert.throws(() => load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@h:5432/other' }, root: root() }), /DATABASE_OPERATOR_URL must point at the same host and database as DATABASE_URL/);
   assert.throws(() => load({ env: { DATA_KEY: KEY, DATABASE_URL: 'postgres://a:x@h:5432/db', DATABASE_OPERATOR_URL: 'postgres://o:y@elsewhere:5432/db' }, root: root() }), /same host and database/);
+});
+
+test('HWP_ENV_FILE names the settings file: another file, or none (a file that does not exist), instead of backend/.env or the root .env', () => {
+  const { envFileOf } = require('../../src/config');
+  const r = root();
+  assert.equal(envFileOf(r), path.join(r, '.env'), 'no backend/.env: the project root\'s');
+  fs.mkdirSync(path.join(r, 'backend')); fs.writeFileSync(path.join(r, 'backend', '.env'), '');
+  assert.equal(envFileOf(r), path.join(r, 'backend', '.env'), 'backend/.env wins over the root');
+  process.env.HWP_ENV_FILE = path.join(r, 'elsewhere.env');
+  try { assert.equal(envFileOf(r), path.join(r, 'elsewhere.env'), 'the named file wins over both'); } finally { delete process.env.HWP_ENV_FILE; }
 });
 
 test('SERVE_WEB: the server serves the screens unless SERVE_WEB=0 (the web tier serves them, the API answers /api/ only)', () => {
