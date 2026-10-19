@@ -75,6 +75,12 @@ Four pieces, all in the **same DCDeploy environment** so they share its private 
 Never set on any service: `AUTH_USERS`, `ALLOW_PLAINTEXT`, `HSTS=0` (the back end refuses to start),
 `DATABASE_OWNER_URL`, `DATABASE_OPERATOR_URL` (single login), `BACKUP_*` (the backup job's own).
 
+By default the browser sees one address and the front end passes `/api/` to the back end. For two
+addresses, as in the company's other applications (the browser calling the back end directly, with CORS),
+set `FRONTEND_ORIGIN` on the back end and `API_BASE_URL` on the front end; it is off unless set, and the
+cost (a weaker `SameSite` cookie unless both addresses are subdomains of one domain you own) is written
+in [ops/DEPLOYMENT.md](ops/DEPLOYMENT.md), "Or split addresses".
+
 Order for each deploy:
 
 1. Take DCDeploy's database backup when the deploy includes a migration (and, before going live, restore one into a scratch database to prove it).
@@ -175,6 +181,7 @@ Apply the migrations as the owner, then start the server as the app role:
 
 ```sh
 node server.js migrate      # any new db/migrations file, as hwp_owner
+node server.js migrate-status   # read-only: every migration as applied or PENDING; exit 2 when anything is pending
 npm start                   # as hwp_app
 ```
 

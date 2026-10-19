@@ -12,6 +12,7 @@
     "start": "node scripts/start.js",
     "test": "node --test --test-timeout=300000 \"test/**/*.test.js\"",
     "migrate": "node ../server.js migrate",
+    "migrate:status": "node ../server.js migrate-status",
     "check-db-posture": "node ../server.js check-db-posture"
   },
   "dependencies": {

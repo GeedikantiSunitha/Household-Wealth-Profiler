@@ -4,7 +4,7 @@
    connection, 15 s per statement, and idle connections are dropped after 30 s. TLS comes from the
    URL (sslmode=verify-full&sslrootcert=... when the database is on another machine). */
 'use strict';
-const { migrate, pending, pgClient } = require('../../../db/migrate.js');
+const { migrate, pending, status, pgClient } = require('../../../db/migrate.js');
 
 const POOL_OPTIONS = { connectionTimeoutMillis: 10000, idleTimeoutMillis: 30000, statement_timeout: 15000, application_name: 'household-wealth-profiler' };
 // PostgreSQL asks the client to run the transaction again: deadlock detected, serialization failure
@@ -79,6 +79,15 @@ async function migrateWith(url, dir, { singleLogin = false } = {}) {
   finally { await c.end(); }
 }
 
+// Every migration as applied or pending, in a read-only transaction that is always rolled back
+async function statusWith(url, dir) {
+  const pg = require('pg');
+  const c = new pg.Client({ connectionString: url });
+  await c.connect();
+  try { await c.query('begin read only'); return await status(pgClient(c), { dir }); }
+  finally { await c.query('rollback').catch(() => {}); await c.end(); }
+}
+
 // The migration files not yet applied, changing nothing
 async function pendingWith(pool, dir) {
   const c = await pool.connect();
@@ -86,4 +95,4 @@ async function pendingWith(pool, dir) {
   finally { c.release(); }
 }
 
-module.exports = { createPool, tx, runMigrations, migrateWith, pendingWith, POOL_OPTIONS, RETRIES };
+module.exports = { createPool, tx, runMigrations, migrateWith, statusWith, pendingWith, POOL_OPTIONS, RETRIES };

@@ -161,3 +161,19 @@ development the server still serves `frontend/src` as it is; `WEB_DIR=frontend/d
 build, which is what `frontend/Dockerfile` puts in nginx. The screen check passes against both.
 The back end still answers the same domain through the web tier's proxy: no cross-origin calls, no
 CORS. Behaviour, replies and screens are unchanged.
+
+## Update 2026-10-19: the split-address mode
+
+The default stays one address: the front end's nginx passes `/api/` to the back end, so the browser
+sees one site and the session cookie is `SameSite=Strict`. At the request of the owner, who wants the
+shape the company's other applications use, there is now an option: `FRONTEND_ORIGIN` on the back end
+and `API_BASE_URL` on the front end put the two on separate addresses, the browser calling the back end
+directly. It is off unless set. The back end gains the `cors` gate (second after health: it answers
+the preflight for `/api/` and lets only the listed origins read replies, never `*`), the same-site gate
+accepts a write from a listed origin, and the session cookie takes the `SameSite` the settings ask for
+(`None` only with `Secure`). The front end reads its one run-time setting from `runtime-config.js`
+(empty by default; the web tier's container writes it from `API_BASE_URL`), and its content security
+policy allows exactly that address. The cost, recorded: `Strict` holds only while the two addresses are
+one site, and third-party-cookie blocking can break sign-in on two unrelated addresses, so two
+subdomains of one owned domain with `SESSION_SAMESITE=strict` is the recommended form. Proof: the
+screen check passes 59 of 59 in both modes, the second with the two servers on two ports in a real browser.

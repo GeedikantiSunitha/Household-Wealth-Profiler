@@ -18,16 +18,17 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 const API = /^\/(api\/|healthz$|readyz$)/;
 
 // The headers nginx adds to the screens (location /), taken from the template itself
-function pageHeaders(template = fs.readFileSync(path.join(__dirname, '..', 'nginx.conf.template'), 'utf8')) {
+// (the one substitution: ${CONNECT_SRC_EXTRA}, the back end's address when it is not this one, else nothing)
+function pageHeaders(template = fs.readFileSync(path.join(__dirname, '..', 'nginx.conf.template'), 'utf8'), apiBase = '') {
   const block = template.slice(template.indexOf('location / {'));
   const headers = {};
-  for (const m of block.matchAll(/add_header ([\w-]+) "([^"]*)" always;/g)) headers[m[1]] = m[2];
+  for (const m of block.matchAll(/add_header ([\w-]+) "([^"]*)" always;/g)) headers[m[1]] = m[2].split('${CONNECT_SRC_EXTRA}').join(apiBase ? ' ' + apiBase : '');
   return headers;
 }
 
-function createDevServer({ backendUrl = 'http://localhost:3001', dir = path.join(ROOT, 'frontend', 'src'), coreFile = path.join(ROOT, 'packages', 'core', 'core.js') } = {}) {
+function createDevServer({ apiBase = '', backendUrl = 'http://localhost:3001', dir = path.join(ROOT, 'frontend', 'src'), coreFile = path.join(ROOT, 'packages', 'core', 'core.js') } = {}) {
   const backend = new URL(backendUrl);
-  const headers = pageHeaders();
+  const headers = pageHeaders(undefined, apiBase);
   const root = path.resolve(dir);
   return http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -41,6 +42,8 @@ function createDevServer({ backendUrl = 'http://localhost:3001', dir = path.join
       req.pipe(up);
       return;
     }
+    // The page's one run-time setting: where the back end is when it is not this address (empty: one address)
+    if (url.pathname === '/runtime-config.js') { res.writeHead(200, { ...headers, 'Content-Type': TYPES['.js'] }); res.end(`window.HWP_API_BASE = '${apiBase}';\n`); return; }
     if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, headers); res.end(); return; }
     let rel;
     try { rel = decodeURIComponent(url.pathname); } catch (e) { res.writeHead(400, headers); res.end(); return; }
@@ -69,5 +72,7 @@ if (require.main === module) {
   const backendUrl = process.env.BACKEND_URL || process.env.API_UPSTREAM || 'http://localhost:3001'; // as the container: the earlier name still works
   const port = +process.env.FRONTEND_PORT || 5173;
   const dir = process.env.FRONTEND_DIR ? path.resolve(process.env.FRONTEND_DIR) : undefined;
-  createDevServer({ backendUrl, dir }).listen(port, '127.0.0.1', () => console.log(`Front end on http://localhost:${port} · /api/ passed to ${backendUrl}`));
+  const apiBase = String(process.env.API_BASE_URL || '').replace(/\/+$/, '');
+  if (apiBase && !/^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?$/.test(apiBase)) { console.error('API_BASE_URL must be the back end\'s address as http(s)://host[:port], no path'); process.exit(1); }
+  createDevServer({ apiBase, backendUrl, dir }).listen(port, '127.0.0.1', () => console.log(`Front end on http://localhost:${port} · /api/ passed to ${backendUrl}`));
 }

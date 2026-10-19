@@ -1,5 +1,6 @@
 # The web tier (frontend/Dockerfile): the screens as static files, and the API on the same domain.
-# ${BACKEND_URL} (the back end's internal address) and ${API_HOST} are filled in from the environment when the container starts;
+# ${BACKEND_URL} (the back end's internal address), ${API_HOST}, ${API_BASE_URL} (the back end's own public address, split-address
+# mode only) and ${CONNECT_SRC_EXTRA} (derived from it) are filled in from the environment when the container starts;
 # every other $name is an nginx variable.
 server {
     listen 8080;
@@ -14,6 +15,15 @@ server {
         access_log off;
         default_type text/plain;
         return 200 "ok\n";
+    }
+
+    # The one run-time setting of the page: where the back end is when it is not on this address. Empty for one
+    # address (calls go to api/ here and are passed on below); the back end's address for the split mode.
+    location = /runtime-config.js {
+        default_type text/javascript;
+        add_header Cache-Control "no-cache" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        return 200 "window.HWP_API_BASE = '${API_BASE_URL}';\n";
     }
 
     # The API, on this domain. Its own replies carry its own headers; the real client address and
@@ -34,7 +44,7 @@ server {
     # page served here is as locked down as one served by the API. HSTS comes from the API's replies
     # and the host's TLS edge. No caching: a deploy must reach every browser at once.
     location / {
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'${CONNECT_SRC_EXTRA}; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "no-referrer" always;
         add_header X-Frame-Options "DENY" always;

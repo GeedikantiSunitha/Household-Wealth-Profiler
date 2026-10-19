@@ -23,7 +23,7 @@ try { esbuild = require('esbuild'); } catch (e) { console.error('npm run build:w
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'js'), { recursive: true });
-for (const f of ['index.html', 'styles.css']) fs.copyFileSync(path.join(src, f), path.join(out, f));
+for (const f of ['index.html', 'styles.css', 'runtime-config.js']) fs.copyFileSync(path.join(src, f), path.join(out, f));
 fs.cpSync(path.join(src, 'vendor'), path.join(out, 'vendor'), { recursive: true });
 fs.copyFileSync(path.join(root, 'packages', 'core', 'core.js'), path.join(out, 'core.js'));
 const result = esbuild.buildSync({

@@ -53,7 +53,8 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   // The backup commands run as a job of their own, apart from the server: the server's settings do not apply to them
   const backupCommand = BACKUP_COMMANDS.includes(command);
   // The platform operator's commands send no email and use their own database connection, so the server's address and mail settings do not apply to them
-  const operatorCommand = OPERATOR_COMMANDS.includes(command);
+  // (migrate-status is read-only and run from a worker or a PC: like those commands it needs no mail, address or key)
+  const operatorCommand = OPERATOR_COMMANDS.includes(command) || command === 'migrate-status';
   if (production && !backupCommand) {
     // (the operator commands use their own connection, so the operator's machine never holds the app's password)
     if (!env.DATABASE_URL && !operatorCommand) throw new Error('NODE_ENV=production: DATABASE_URL is required. Client records are kept in PostgreSQL in production, never in files.');
@@ -93,6 +94,24 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   const minutes = (name, dflt) => { const v = env[name] === undefined || env[name] === '' ? dflt : +env[name]; if (!(v > 0)) throw new Error(`${name} must be a positive number`); return v; };
   const sessionIdleMinutes = minutes('SESSION_IDLE_MINUTES', 30), sessionAbsoluteHours = minutes('SESSION_ABSOLUTE_HOURS', 12);
   const publicUrl = (env.PUBLIC_URL || '').replace(/\/+$/, '');
+  // FRONTEND_ORIGIN: the split-address mode, the front end on another address than this back end (the
+  // browser then calls this address directly, with CORS). A comma-separated list of origins, scheme and
+  // host and port only; unset (the default) means one address, the web tier passing /api/ along. Production
+  // takes https only; there is no wildcard.
+  const frontendOrigins = String(env.FRONTEND_ORIGIN || '').trim() === '' ? [] : String(env.FRONTEND_ORIGIN).split(',').map(s => {
+    const o = s.trim().replace(/\/+$/, '').toLowerCase();
+    if (!/^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/.test(o)) throw new Error(`FRONTEND_ORIGIN: "${s.trim()}" is not an origin. Give the front end's address as https://app.example.com (no path, no wildcard), several separated by commas.`);
+    if (production && !o.startsWith('https://')) throw new Error(`FRONTEND_ORIGIN: production takes https origins only (${o}).`);
+    return o;
+  });
+  // SESSION_SAMESITE: strict, lax or none. Strict (the default) holds while the front end and the back end are one
+  // site (the web tier passing /api/ along, or two subdomains of one registered domain, or two ports on localhost).
+  // On two unrelated addresses the browser needs None, which is Secure and https only: the default there.
+  const sameSiteRaw = String(env.SESSION_SAMESITE || '').trim().toLowerCase();
+  if (sameSiteRaw && !['strict', 'lax', 'none'].includes(sameSiteRaw)) throw new Error('SESSION_SAMESITE must be strict, lax or none');
+  const cookiesSecure = production || /^https:/i.test(publicUrl);
+  if (sameSiteRaw === 'none' && !cookiesSecure) throw new Error('SESSION_SAMESITE=none needs an https PUBLIC_URL (a SameSite=None cookie must be Secure)');
+  const sessionSameSite = sameSiteRaw ? sameSiteRaw[0].toUpperCase() + sameSiteRaw.slice(1) : frontendOrigins.length && cookiesSecure ? 'None' : 'Strict';
   // Email for the sign-in links and warnings: SMTP_URL (smtp:// with STARTTLS, or smtps://), the sender,
   // and the operator who receives access requests. Without SMTP_URL, outside production, messages go to the log.
   const smtpUrl = env.SMTP_URL || '';
@@ -118,9 +137,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
   }
   const backupRetentionDays = env.BACKUP_RETENTION_DAYS === undefined || env.BACKUP_RETENTION_DAYS === '' ? 35 : +env.BACKUP_RETENTION_DAYS;
   if (!Number.isInteger(backupRetentionDays) || backupRetentionDays < 1 || backupRetentionDays > 3650) throw new Error('BACKUP_RETENTION_DAYS must be a whole number of days from 1 to 3650');
-  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'subject-access-user', 'check-db-posture', ...BACKUP_COMMANDS, ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
+  if (!users.size && !env.DATABASE_URL && !['import-files', 'migrate', 'index-references', 'rotate-key', 'check-records', 'subject-access-user', 'check-db-posture', 'migrate-status', ...BACKUP_COMMANDS, ...OPERATOR_COMMANDS].includes(command)) throw new Error('No users configured. Set AUTH_USERS (run: node server.js hash-password NAME PASSWORD), or DATABASE_URL (accounts then sign in through the app).');
   // The operator commands never touch a client record, so the operator's machine does not need the key
-  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup' && command !== 'check-db-posture' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
+  if (!key && env.ALLOW_PLAINTEXT !== '1' && command !== 'backup' && command !== 'check-db-posture' && command !== 'migrate-status' && !OPERATOR_COMMANDS.includes(command)) throw new Error('DATA_KEY is not set. Client data would be stored unencrypted. Set DATA_KEY, or ALLOW_PLAINTEXT=1 for local testing only.');
 
   return {
     root,
@@ -158,7 +177,9 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     sessionIdleMinutes,
     sessionAbsoluteHours,
     publicUrl,
-    secureCookies: production || /^https:/i.test(publicUrl),
+    secureCookies: cookiesSecure,
+    frontendOrigins,
+    sessionSameSite,
     smtpUrl,
     smtpFrom,
     operatorEmail,

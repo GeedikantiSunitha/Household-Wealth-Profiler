@@ -13,8 +13,8 @@ const { createLimiter } = require('../../../backend/src/middleware/rate-limit.js
 const DIR = path.join(__dirname, '..', '..', '..', 'backend', 'src', 'middleware');
 const camel = name => name.replace(/-([a-z])/g, (m, c) => c.toUpperCase());
 
-test('the global gates: ten, in this fixed order, one file each', () => {
-  assert.deepEqual([...mw.ORDER], ['parse-url', 'health', 'api-only', 'authenticate', 'sign-in-required', 'second-step', 'firm-required', 'same-site', 'json-body', 'csrf']);
+test('the global gates: eleven, in this fixed order, one file each', () => {
+  assert.deepEqual([...mw.ORDER], ['parse-url', 'health', 'cors', 'api-only', 'authenticate', 'sign-in-required', 'second-step', 'firm-required', 'same-site', 'json-body', 'csrf']);
   for (const name of mw.ORDER) assert.ok(fs.existsSync(path.join(DIR, name + '.js')), `${name}.js exists`);
   const gates = mw.createGates({ send: () => {}, ready: async () => {}, serveWeb: true, basicUsers: false, authenticate: async () => null });
   for (const name of mw.ORDER) assert.equal(typeof gates[camel(name)], 'function', `gate ${name} is made`);

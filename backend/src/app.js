@@ -29,7 +29,8 @@ const { ID_RE } = require('./repositories/ids.js');
 function createApp({ config, households, firm, prices, records = null, authenticate, authRoutes = null, members = null, ready = async () => {}, basicUsers = config.users ? config.users.size > 0 : true, publicShell = !!authRoutes && !basicUsers, serveWeb = config.serveWeb !== false }) {
   const send = createSend(securityHeaders({ hsts: config.hsts }));
   const serveStatic = createStatic({ publicDir: config.webDir || path.join(config.root, 'frontend', 'src'), coreFile: path.join(config.root, 'packages', 'core', 'core.js'), send });
-  const gates = createGates({ send, ready, serveWeb, basicUsers, authenticate });
+  const origins = config.frontendOrigins || [];
+  const gates = createGates({ send, ready, serveWeb, basicUsers, authenticate, origins });
   const routes = [
     createMeRoute({ send, encrypted: !!config.key, production: !!config.production, totpRequired: config.totpRequired !== false }),
     createFirmRoutes({ firm, send, readBody }),
@@ -44,11 +45,12 @@ function createApp({ config, households, firm, prices, records = null, authentic
     const ctx = { req, res };
     if (gates.parseUrl(ctx)) return;
     if (await gates.health(ctx)) return;
+    if (gates.cors(ctx)) return;
     if (gates.apiOnly(ctx)) return;
     await gates.authenticate(ctx);
     const { p, auth } = ctx;
     if (authRoutes && p.startsWith('/api/auth/')) {
-      const refused = checkWrite(req);
+      const refused = checkWrite(req, origins);
       if (refused) return send(res, ...refused);
       return authRoutes.handle({ req, res, p, auth, send, readBody });
     }
