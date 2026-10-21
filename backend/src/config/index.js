@@ -178,6 +178,10 @@ function load({ env = process.env, root = ROOT, command } = {}) {
     // TOTP_REQUIRED=0 switches the second step (authenticator code) off: the password alone signs in.
     // Development and early trials only; never with real client data.
     totpRequired: env.TOTP_REQUIRED !== '0',
+    // EMAIL_VERIFICATION=0 switches the confirmation link off: registering confirms the address at once and
+    // sends nothing, and an account registered unconfirmed signs in. Until the sender domain is verified at the
+    // mail service; development and early trials only, never with real client data.
+    emailVerification: env.EMAIL_VERIFICATION !== '0',
     sessionIdleMinutes,
     sessionAbsoluteHours,
     publicUrl,

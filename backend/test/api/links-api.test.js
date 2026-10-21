@@ -251,4 +251,45 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
       await fetch(b2 + '/api/auth/sign-out', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookieOf(r), 'X-CSRF-Token': st.csrf }, body: '{}' });
     } finally { app2.server.close(); }
   });
+
+  test('EMAIL_VERIFICATION=0: registration confirms the address at once and sends no email; the account signs in straight away, as does one registered unconfirmed before the switch; an existing address gets the same reply and no email', async () => {
+    const IP = '203.0.113.90';
+    const sent3 = [];
+    const notify3 = createNotify({ mailer: { send: async m => { sent3.push(m); return { delivered: true, logged: false }; } }, publicUrl: PUBLIC, operatorEmail: 'operator@example.com', appName: 'Household Wealth Profiler' });
+    const { authenticate } = createAuth({ users: new Map(), clientIpHeader: 'x-client-ip' }, { authStore: store, sessions });
+    const routes3 = createAuthRoutes({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), notify: notify3, clientIpHeader: 'x-client-ip', now, sealer: createSealer(Buffer.alloc(32, 7)), issuer: 'Household Wealth Profiler', breached: { fetch: async () => ({ ok: true, text: async () => '00000:1\n' }) }, emailVerification: false });
+    const nothing = { list: async () => [], create: async () => ({ id: '0', version: 1 }), get: async () => null, audit: async () => null, save: async () => ({ notFound: true }) };
+    const app3 = createApp({ config: { hsts: false, key: Buffer.alloc(32), root: ROOT, users: new Map() }, households: nothing, firm: { get: async () => ({}), audit: async () => [], save: async () => ({}) }, prices: { enabled: false }, authenticate, authRoutes: routes3, ready: async () => {} });
+    await new Promise(ok => app3.server.listen(0, '127.0.0.1', ok));
+    const b3 = `http://127.0.0.1:${app3.server.address().port}`;
+    const post3 = (p, body, extra = {}) => fetch(b3 + p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Client-IP': IP, ...extra }, body: JSON.stringify(body) });
+    const signOut3 = async (r, st) => { await post3('/api/auth/sign-out', {}, { Cookie: cookieOf(r), 'X-CSRF-Token': st.csrf }); };
+    try {
+      let r = await post3('/api/auth/register', { name: 'Direct Adviser', email: 'Direct@Example.com', firm: 'Birch Wealth', password: 'a passphrase for direct 1' });
+      assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true, verified: true }, 'the reply says the address counts as confirmed');
+      assert.equal(sent3.length, 0, 'no email of any kind');
+      const row = (await asRole('hwp_owner', c => c.query(`select u.name, u.email_verified_at is not null as confirmed, u.password_hash is not null as has_password, m.role, m.accepted_at is not null as accepted, f.name as firm, f.seats
+        from users u join memberships m on m.user_id = u.id join firms f on f.id = m.firm_id where u.email = 'direct@example.com'`))).rows[0];
+      assert.deepEqual(row, { name: 'Direct Adviser', confirmed: true, has_password: true, role: 'admin', accepted: true, firm: 'Birch Wealth', seats: 5 }, 'the account, its firm and its administrator are in the database, confirmed');
+      r = await post3('/api/auth/sign-in', { email: 'direct@example.com', password: 'a passphrase for direct 1' });
+      assert.equal(r.status, 200); let st = await r.json(); assert.equal(st.stage, 'password'); assert.equal(st.next, 'enrol');
+      await signOut3(r, st);
+      assert.deepEqual((await asRole('hwp_owner', c => c.query(`select event, outcome, detail from auth_events where email = 'direct@example.com' order by id`))).rows.map(e => e.event + ':' + e.outcome + (e.event === 'register' ? ' ' + e.detail : '')),
+        ['register:ok firm ' + (await asRole('hwp_owner', c => c.query(`select id from firms where name = 'Birch Wealth'`))).rows[0].id + '; email confirmation off', 'sign_in:ok', 'sign_out:ok']);
+      // registered while the link was required and never confirmed (again0, from the limiter check above): refused there, signs in here
+      r = await post('/api/auth/sign-in', { email: 'again0@example.com', password: 'a passphrase that is fine 1' }, { ip: IP });
+      assert.equal(r.status, 403); assert.equal((await r.json()).code, 'email_unverified');
+      r = await post3('/api/auth/sign-in', { email: 'again0@example.com', password: 'a passphrase that is fine 1' });
+      assert.equal(r.status, 200); st = await r.json(); assert.equal(st.stage, 'password');
+      await signOut3(r, st);
+      // an address that already has an account: the same reply, nothing made, and no email either
+      const users = (await asRole('hwp_owner', c => c.query('select count(*)::int n from users'))).rows[0].n;
+      r = await post3('/api/auth/register', { name: 'Imposter', email: 'sam@example.com', firm: 'Other', password: 'a passphrase for sam 3' });
+      assert.equal(r.status, 200); assert.deepEqual(await r.json(), { ok: true, verified: true });
+      assert.equal(sent3.length, 0); assert.equal((await asRole('hwp_owner', c => c.query('select count(*)::int n from users'))).rows[0].n, users);
+      // the checks on the fields stay
+      r = await post3('/api/auth/register', { name: 'x', email: 'weak2@example.com', firm: 'F', password: 'short' });
+      assert.equal(r.status, 400); assert.equal((await r.json()).code, 'weak_password');
+    } finally { app3.server.close(); }
+  });
 });

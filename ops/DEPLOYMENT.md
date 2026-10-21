@@ -279,6 +279,7 @@ lists with their meanings: `backend/.env.example` and `frontend/.env.example` (t
 | `SMTP_FROM` | `Household Wealth Profiler <no-reply@thetimefintech.com>` | a verified sender domain |
 | `PORT` | `3001` | set by `backend/Dockerfile` already; the DCDeploy port must match. (The one-service root `Dockerfile` uses `8080`) |
 | `TOTP_REQUIRED` | `0` on staging if the authenticator step is not wanted yet; unset (required) in production | never `0` with real client data |
+| `EMAIL_VERIFICATION` | `0` until the sender domain is verified at Resend: registering confirms the address at once, no email; unset (link required) in production | never `0` with real client data |
 | `OPERATOR_EMAIL` | optional | no longer used by the sign-in |
 | `CLIENT_IP_HEADER` | only if DCDeploy confirms the header it sets on every request | otherwise every failed sign-in counts against the proxy's address |
 | `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`, `RETENTION_YEARS` | optional | defaults 30, 12, 5 |
@@ -307,7 +308,7 @@ Never set on any service: `AUTH_USERS`, `ALLOW_PLAINTEXT`, `HSTS=0` (the server 
 
 Two ways:
 
-- **Registration** on the sign-in page: name, email, firm, password; the verification link arrives by email; sign in. The registrant is the administrator of a new firm and invites colleagues from the Team page.
+- **Registration** on the sign-in page: name, email, firm, password; the verification link arrives by email; sign in (with `EMAIL_VERIFICATION=0`, no link: "Registered", then sign in). The registrant is the administrator of a new firm and invites colleagues from the Team page.
 - **The operator**: on DCDeploy, from the one-off worker (the commands below, with the back end's settings: single-login mode switches operator mode on for these commands itself). On another host, from your machine, with the `hwp_operator` string in `DATABASE_OPERATOR_URL` and the `hwp_app` string in `DATABASE_URL` (prompted as in section 5):
   ```powershell
   node server.js firm-create "Firm name" 5

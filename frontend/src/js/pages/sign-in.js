@@ -59,19 +59,22 @@ async function landing(lastEmail = '') {
   }
 }
 
-// Registration: a firm of their own, then a link to confirm the address, then sign in. Resolves with the email given (or null)
+// Registration: a firm of their own, then a link to confirm the address, then sign in; when the server says the
+// address is confirmed already (EMAIL_VERIFICATION=0), straight to sign in. Resolves with the email given (or null)
 async function register() {
   for (;;) {
-    const v = await screen({ title: 'Create an account', intro: 'Your firm gets its own space, with you as its administrator; you invite colleagues from the Team page. A link to confirm your email address is sent first.',
+    const v = await screen({ title: 'Create an account', intro: 'Your firm gets its own space, with you as its administrator; you invite colleagues from the Team page.',
       fields: [{ k: 'name', l: 'Your name', max: 200 }, { k: 'email', l: 'Work email', t: 'email', ac: 'email', max: 254 }, { k: 'firm', l: 'Firm', max: 200 },
         { k: 'password', l: 'Password (at least 12 characters)', t: 'password', ac: 'new-password' }, { k: 'again', l: 'Password again', t: 'password', ac: 'new-password' }],
       submit: 'Register', extra: '<button class="btn ghost" type="button" data-gate="signin">Already registered? Sign in</button>' });
     if (v.action) return null;
     if (!v.name.trim() || !EMAIL.test(v.email.trim()) || !v.firm.trim()) { fail('Give your name, a valid email address and the name of your firm.'); continue; }
     if (v.password !== v.again) { fail('The two passwords do not match.'); continue; }
-    try { await authApi('POST', 'register', { name: v.name, email: v.email, firm: v.firm, password: v.password }); }
+    let r;
+    try { r = await authApi('POST', 'register', { name: v.name, email: v.email, firm: v.firm, password: v.password }); }
     catch (e) { fail(e.message); continue; }
-    await message('Check your email', 'A link to confirm your address is on its way. It works once, for 24 hours. Open it, then sign in with your email address and the password you chose.');
+    if (r && r.verified) await message('Registered', 'Your account and your firm are ready. Sign in with your email address and the password you chose.');
+    else await message('Check your email', 'A link to confirm your address is on its way. It works once, for 24 hours. Open it, then sign in with your email address and the password you chose.');
     return v.email.trim();
   }
 }

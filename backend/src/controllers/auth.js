@@ -18,7 +18,7 @@ const refuse = (status, error, code) => Object.assign(new Error(error), { status
 const BAD_CREDENTIALS = () => refuse(401, 'Email or password is not right', 'bad_credentials');
 const SECOND_STEP = () => refuse(401, 'Finish signing in: enter the code from your authenticator app', 'second_step_required');
 
-function createAuthController({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter, totpRequired = true, log = (...a) => console.error(new Date().toISOString(), ...a) }) {
+function createAuthController({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter, totpRequired = true, emailVerification = true, log = (...a) => console.error(new Date().toISOString(), ...a) }) {
   const event = (ctx, userId, ev, outcome, detail = '') => authStore.event({ userId, email: ctx.email || '', event: ev, outcome, ip: ctx.ip, userAgent: ctx.userAgent, detail });
   const BAD_CODE = (msg = 'That code is not right') => refuse(401, msg, 'bad_code');
   const codeHash = code => crypto.createHash('sha256').update(code).digest('hex');
@@ -136,7 +136,7 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
       }
       return fail('bad_password', user.id, false);
     }
-    if (!user.email_verified_at) { await event(ctx, user.id, 'sign_in', 'unverified'); throw refuse(403, 'Confirm your email address first: open the link we sent you, or ask for a new one.', 'email_unverified'); }
+    if (emailVerification && !user.email_verified_at) { await event(ctx, user.id, 'sign_in', 'unverified'); throw refuse(403, 'Confirm your email address first: open the link we sent you, or ask for a new one.', 'email_unverified'); }
     await authStore.recordSuccess(user.id);
     if (ctx.auth && ctx.auth.session) await sessions.revoke(ctx.auth);
     const s = await sessions.issue({ userId: user.id, stage: 'password', ip: ctx.ip, userAgent: ctx.userAgent });
@@ -231,6 +231,8 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
   // Registration: name, email, firm and password; a firm of their own with the registrant as its
   // administrator; the address is confirmed through a link before the first sign-in. The reply is
   // the same whether or not the address already has an account (its holder is told by email).
+  // With EMAIL_VERIFICATION=0 the address counts as confirmed at once, no email goes out, and the
+  // reply says so ({ ok, verified }) so the screen can send the person straight to sign in.
   const str = v => (typeof v === 'string' ? v : '');
   // The confirmation email, which the account needs before its first sign-in. When the mail server refuses or does
   // not answer, the account stays as it is (accounts are never deleted) and the person is told so plainly, with the
@@ -255,11 +257,16 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
     const count = await breachedCount(password, breached);
     if (count) throw refuse(400, 'That password has appeared in a data breach. Choose a different one.', 'breached_password');
     ctx.email = email;
-    const r = await authStore.register({ email, name, firmName, passwordHash: await hashPassword(password) });
+    const reply = emailVerification ? { ok: true } : { ok: true, verified: true };
+    const r = await authStore.register({ email, name, firmName, passwordHash: await hashPassword(password), verified: !emailVerification });
     if (r.exists) {
       await event(ctx, r.userId, 'register', 'exists');
-      if (notify.alreadyRegistered) await notify.alreadyRegistered(r.user);
-      return { reply: { ok: true } };
+      if (emailVerification && notify.alreadyRegistered) await notify.alreadyRegistered(r.user);
+      return { reply };
+    }
+    if (!emailVerification) {
+      await event(ctx, r.userId, 'register', 'ok', `firm ${r.firmId}; email confirmation off${count === null ? '; breach check skipped' : ''}`);
+      return { reply };
     }
     const { token } = await authStore.issueToken(r.userId, 'verify', VERIFY_TTL_MS);
     await sendVerifyLink(ctx, r.userId, { email, name }, token, 'Your account has been created, but the email to confirm your address could not be sent just now. Try again in a few minutes: choose "Already registered? Sign in", enter your email and password, then "Send the link again".');

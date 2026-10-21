@@ -156,7 +156,7 @@ function main([cmd, ...args] = []) {
   // The sign-in emails: links, warnings, access requests (to the log outside production when SMTP_URL is not set)
   const mailer = createMailer({ smtpUrl: config.smtpUrl, from: config.smtpFrom, production: config.production });
   const notify = createNotify({ mailer, publicUrl: config.publicUrl || `http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}`, operatorEmail: config.operatorEmail });
-  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler', totpRequired: config.totpRequired }) : null;
+  const authRoutes = authStore ? createAuthRoutes({ authStore, sessions, limiter: createLimiter(AUTH_LIMIT), notify, clientIpHeader: config.clientIpHeader, sealer, issuer: 'Household Wealth Profiler', totpRequired: config.totpRequired, emailVerification: config.emailVerification }) : null;
   const members = authStore ? createMemberService({ authStore, notify }) : null;
   const { server } = createApp({ config, households, firm, prices, records, authenticate, authRoutes, members, ready: () => store.ready() });
 
@@ -186,7 +186,7 @@ function main([cmd, ...args] = []) {
   if (authStore) dummyHashString().catch(() => {}); // warm: the first unknown-email sign-in then costs the same as any other
   store.init().then(() => {
     stopOnSignal(server, store);
-    server.listen(config.port, config.host || undefined, () => console.log(`Household Wealth Profiler on http://${addressOf(server, config.host)}:${config.port} · ${config.users.size} user(s) · encryption ${config.key ? 'on' : 'OFF'} · ${store.describe}${config.production ? ' · production' : ''}`));
+    server.listen(config.port, config.host || undefined, () => console.log(`Household Wealth Profiler on http://${addressOf(server, config.host)}:${config.port} · ${config.users.size} user(s) · encryption ${config.key ? 'on' : 'OFF'} · ${store.describe}${config.production ? ' · production' : ''}${config.emailVerification === false ? ' · email confirmation OFF' : ''}`));
   }, e => { console.error('Could not open storage:', e.message); process.exit(1); });
   return server;
 }

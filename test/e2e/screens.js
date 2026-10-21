@@ -330,7 +330,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       const FRONT = `http://127.0.0.1:${portF}/`;
       const PAGE2 = SPLIT ? FRONT : BASE2; // where the page is loaded from
       const key = execFileSync(process.execPath, ['server.js', 'gen-key'], { cwd: ROOT }).toString().trim();
-      const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', DB_LOGIN_MODE: '', PUBLIC_URL: PAGE2.replace(/\/$/, ''),
+      const env2 = { ...process.env, PORT: String(port2), HOST: '127.0.0.1', DATABASE_URL: DB, DATABASE_OWNER_URL: DB, DATA_KEY: key, AUTH_USERS: '', ALPHAVANTAGE_KEY: '', HSTS: '0', SMTP_URL: '', OPERATOR_EMAIL: 'operator@example.com', DB_LOGIN_MODE: '', EMAIL_VERIFICATION: '', TOTP_REQUIRED: '', PUBLIC_URL: PAGE2.replace(/\/$/, ''),
         ...(SPLIT ? { SERVE_WEB: '0', FRONTEND_ORIGIN: FRONT.replace(/\/$/, '') } : {}) };
       execFileSync(process.execPath, ['server.js', 'migrate'], { cwd: ROOT, env: env2 });
       execFileSync(process.execPath, ['server.js', 'create-user', 'ava@example.com', 'Ava Adviser'], { cwd: ROOT, env: env2 });
@@ -373,6 +373,31 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
           await shot('verified');
           await click('[data-gate="signin"]');
           await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'back to sign in');
+        });
+        await step('EMAIL_VERIFICATION=0: registering confirms the address at once; Registered, then the sign-in form with the email filled in, and the password signs in', async () => {
+          // A second server, same database, with the switch off; its own address so the main run's settings stay as they are
+          const port3 = await freePort(); const BASE3 = `http://127.0.0.1:${port3}/`;
+          const app3 = spawn(process.execPath, ['server.js'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...env2, PORT: String(port3), PUBLIC_URL: BASE3.replace(/\/$/, ''), SERVE_WEB: '1', FRONTEND_ORIGIN: '', EMAIL_VERIFICATION: '0' } });
+          let log3 = ''; app3.stdout.on('data', d => { log3 += d; }); app3.stderr.on('data', d => { log3 += d; });
+          try {
+            await waitHttp(BASE3 + 'healthz');
+            await page.send('Page.navigate', { url: BASE3 }); await until(`document.readyState === 'complete' && !!document.querySelector('#gate')`, 'the sign-in form', 30000);
+            await click('[data-gate="register"]');
+            await until(`document.querySelector('#gate h2')?.textContent === 'Create an account'`, 'the registration form');
+            await fill('#g-name', 'Direct Adviser'); await fill('#g-email', 'direct@example.com'); await fill('#g-firm', 'Birch Wealth');
+            await fill('#g-password', 'a passphrase for direct 1'); await fill('#g-again', 'a passphrase for direct 1');
+            await submit();
+            await until(`document.querySelector('#gate h2')?.textContent === 'Registered'`, 'the acknowledgement', 10000);
+            if (/check your email|link/i.test(await text('#gate'))) throw new Error('the screen still speaks of a link: ' + await text('#gate'));
+            await shot('registered-direct');
+            await click('[data-gate="signin"]');
+            await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'back to sign in');
+            if (await js(`document.querySelector('#g-email').value`) !== 'direct@example.com') throw new Error('the email is not filled in: ' + await js(`document.querySelector('#g-email').value`));
+            await fill('#g-password', 'a passphrase for direct 1'); await submit();
+            await until(`document.querySelector('#gate h2')?.textContent === 'Set up two-step verification'`, 'the enrolment screen: signed in with no confirmation link', 15000);
+            if (/#verify=/.test(log3)) throw new Error('a verification link was issued');
+          } finally { app3.kill(); await page.send('Network.clearBrowserCookies'); }
+          await go2(); await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'the sign-in page of the main run', 15000);
         });
         await step('first sign-in: password, then the authenticator is set up (QR code and key) and confirmed with a code; recovery codes shown once; the client list', async () => {
           await fill('#g-email', 'ava@example.com'); await fill('#g-password', 'correct horse battery staple'); await submit();
@@ -588,7 +613,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
             await pool.query(`update memberships set extra_roles = '{}' where user_id = $1 and firm_id = $2`, [uid['dana@example.com'], FIRM]);
           } finally { await pool.end(); }
         });
-      } finally { expectAuth = false; app2.kill(); if (front) front.kill(); }
+      } finally { expectAuth = false; app2.kill(); if (front) front.kill(); fs.writeFileSync(path.join(OUT, 'server-session.log'), log2); } // the server's log beside the report, for a failed step
     } else results.push('INFO  the sign-in screens (session mode) were not checked: set TEST_DATABASE_URL to a scratch database');
   } catch (e) { fail('run stopped: ' + e.message); }
   finally {

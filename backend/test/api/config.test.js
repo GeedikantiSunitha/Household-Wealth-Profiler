@@ -165,6 +165,9 @@ test('SERVE_WEB: the server serves the screens unless SERVE_WEB=0 (the web tier 
   assert.equal(ok().totpRequired, true, 'the second step is required unless switched off');
   assert.equal(ok({ TOTP_REQUIRED: '0' }).totpRequired, false);
   assert.equal(ok({ TOTP_REQUIRED: '1' }).totpRequired, true);
+  assert.equal(ok().emailVerification, true, 'the address is confirmed through a link unless switched off');
+  assert.equal(ok({ EMAIL_VERIFICATION: '0' }).emailVerification, false);
+  assert.equal(ok({ EMAIL_VERIFICATION: '1' }).emailVerification, true);
   const r = root();
   assert.equal(load({ env: { AUTH_USERS: USER, DATA_KEY: KEY }, root: r }).webDir, path.join(r, 'frontend', 'src'), 'the screens come from frontend/src unless WEB_DIR says otherwise');
   assert.equal(ok({ WEB_DIR: 'frontend/dist' }).webDir, path.resolve('frontend/dist'));

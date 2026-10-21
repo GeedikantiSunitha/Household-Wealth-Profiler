@@ -29,15 +29,16 @@ function createAuthStore({ pool, now = () => new Date() }) {
     normaliseEmail,
 
     // Registration: a firm, its administrator and the account's password, in one transaction; the address is
-    // not yet confirmed (email_verified_at null) until the verification link is opened. An address that already
-    // has an account makes nothing and says so to the caller only (the reply to the browser is the same).
-    register: ({ email, name, firmName, passwordHash, seats = 5 }) => withAuth(async c => {
+    // not yet confirmed (email_verified_at null) until the verification link is opened, or confirmed from the
+    // start when the caller says so (verified: the link is switched off). An address that already has an
+    // account makes nothing and says so to the caller only (the reply to the browser is the same).
+    register: ({ email, name, firmName, passwordHash, seats = 5, verified = false }) => withAuth(async c => {
       email = normaliseEmail(email);
       const existing = one(await c.query(`select ${USER_COLUMNS} from users where email = $1`, [email]));
       if (existing) return { exists: true, userId: existing.id, user: existing };
       const firmId = crypto.randomUUID();
       await c.query('insert into firms (id, name, seats) values ($1, $2, $3)', [firmId, firmName, seats]);
-      const user = one(await c.query('insert into users (email, name, password_hash, password_set_at, email_verified_at) values ($1, $2, $3, $4, null) returning id', [email, name, passwordHash, now()]));
+      const user = one(await c.query('insert into users (email, name, password_hash, password_set_at, email_verified_at) values ($1, $2, $3, $4, $5) returning id', [email, name, passwordHash, now(), verified ? now() : null]));
       await c.query("insert into memberships (user_id, firm_id, role, extra_roles, accepted_at) values ($1, $2, 'admin', '{}', $3)", [user.id, firmId, now()]);
       return { exists: false, userId: user.id, firmId };
     }),

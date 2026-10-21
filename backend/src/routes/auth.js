@@ -41,7 +41,8 @@
    POST reset {token, password}     sets the password through the link; every session ends
    POST invite {token, password}    a new account chooses its password through the invitation link
                                     (24 hours, single use); then it signs in and enrols as usual
-   POST register {name, email, firm, password}  a firm of their own with the registrant as its administrator,
+   POST register {name, email, firm, password}  a firm of their own with the registrant as its administrator
+                                    (with EMAIL_VERIFICATION=0: confirmed at once, no email, reply {ok, verified}),
                                     the password checked as everywhere, and a verification link by email (24 hours,
                                     single use); always 200 (an address that already has an account is told by email)
    POST verify {token}              confirms the address through the link; sign-in is refused until then

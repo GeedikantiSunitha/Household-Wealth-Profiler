@@ -68,7 +68,7 @@ Four pieces, all in the **same DCDeploy environment** so they share its private 
 | Service | Built from | Public? | Settings (environment variables of that service) |
 |---|---|---|---|
 | **Database** | DCDeploy's PostgreSQL 17 | No | (DCDeploy's own; note its internal address and its login) |
-| **Back end** | `backend/Dockerfile`, port **3001** | No | `DB_LOGIN_MODE=single`, `DATABASE_URL` (the database's internal address and its one login), `DATA_KEY` (`node server.js gen-key`, new per environment), `PUBLIC_URL` (the front end's public https address), `SMTP_URL`, `SMTP_FROM`; optional `OPERATOR_EMAIL`, `TOTP_REQUIRED`, `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`, `RETENTION_YEARS`, and `CLIENT_IP_HEADER=cf-connecting-ip` once DCDeploy confirms the header. Full list: [backend/.env.example](backend/.env.example) |
+| **Back end** | `backend/Dockerfile`, port **3001** | No | `DB_LOGIN_MODE=single`, `DATABASE_URL` (the database's internal address and its one login), `DATA_KEY` (`node server.js gen-key`, new per environment), `PUBLIC_URL` (the front end's public https address), `SMTP_URL`, `SMTP_FROM`; optional `OPERATOR_EMAIL`, `TOTP_REQUIRED`, `EMAIL_VERIFICATION`, `SESSION_IDLE_MINUTES`, `SESSION_ABSOLUTE_HOURS`, `RETENTION_YEARS`, and `CLIENT_IP_HEADER=cf-connecting-ip` once DCDeploy confirms the header. Full list: [backend/.env.example](backend/.env.example) |
 | **Front end** | `frontend/Dockerfile`, port 8080 | **Yes**: the domain users open | `BACKEND_URL` = the back end's internal address, `http://<back-end internal hostname>:3001` (its internal link). Nothing else, and never a secret. List: [frontend/.env.example](frontend/.env.example) |
 | **Worker** (one-off) | `backend/Dockerfile` | No | The back end's settings. Runs commands on demand: `node server.js migrate`, `node server.js check-db-posture`, the first firm and administrator |
 
@@ -219,7 +219,8 @@ node server.js check-records FIRM_ID    # one firm
 code from an authenticator app (two-step verification is required for everyone unless the server is
 started with `TOTP_REQUIRED=0`, which is for development and early trials only, never with real
 client data). A new person registers on the sign-in page, confirms their email address through a
-link, and signs in; each registration creates a firm with the registrant as its administrator, who
+link (or at once, where the server is started with `EMAIL_VERIFICATION=0`, the same early-trials-only
+setting), and signs in; each registration creates a firm with the registrant as its administrator, who
 invites colleagues from the Team page. Nothing is handed to an outside sign-in provider: accounts, sessions and the sign-in
 event log live in this database, and the only outside call is the breached-password check, which
 sends the first five characters of the password's SHA-1 hash and nothing else.
