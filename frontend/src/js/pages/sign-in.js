@@ -22,7 +22,8 @@ function fieldHtml(f) {
   const control = f.t === 'area'
     ? '<textarea id="' + id + '" name="' + f.k + '" rows="3"' + (max || ' maxlength="1000"') + req + '>' + esc(f.v || '') + '</textarea>'
     : '<input id="' + id + '" name="' + f.k + '" type="' + (f.t || 'text') + '" value="' + esc(f.v || '') + '" autocomplete="' + (f.ac || 'off') + '"' + (f.im ? ' inputmode="' + f.im + '"' : '') + max + req + '>';
-  return '<div class="f"><label for="' + id + '">' + esc(f.l) + '</label>' + control + '</div>';
+  // A required field shows a red asterisk; screen readers learn it from the required attribute instead
+  return '<div class="f"><label for="' + id + '">' + esc(f.l) + (req ? '<span class="req" aria-hidden="true"> *</span>' : '') + '</label>' + control + '</div>';
 }
 // A form; resolves with its values, or { action } for a secondary link (data-gate)
 function screen({ title, intro = '', fields = [], submit = 'Continue', extra = '', before = '' }) {
@@ -63,7 +64,7 @@ async function register() {
   for (;;) {
     const v = await screen({ title: 'Create an account', intro: 'Your firm gets its own space, with you as its administrator; you invite colleagues from the Team page. A link to confirm your email address is sent first.',
       fields: [{ k: 'name', l: 'Your name', max: 200 }, { k: 'email', l: 'Work email', t: 'email', ac: 'email', max: 254 }, { k: 'firm', l: 'Firm', max: 200 },
-        { k: 'password', l: 'Password', t: 'password', ac: 'new-password' }, { k: 'again', l: 'Password again', t: 'password', ac: 'new-password' }],
+        { k: 'password', l: 'Password (at least 12 characters)', t: 'password', ac: 'new-password' }, { k: 'again', l: 'Password again', t: 'password', ac: 'new-password' }],
       submit: 'Register', extra: '<button class="btn ghost" type="button" data-gate="signin">Already registered? Sign in</button>' });
     if (v.action) return null;
     if (!v.name.trim() || !EMAIL.test(v.email.trim()) || !v.firm.trim()) { fail('Give your name, a valid email address and the name of your firm.'); continue; }

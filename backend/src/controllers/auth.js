@@ -18,7 +18,7 @@ const refuse = (status, error, code) => Object.assign(new Error(error), { status
 const BAD_CREDENTIALS = () => refuse(401, 'Email or password is not right', 'bad_credentials');
 const SECOND_STEP = () => refuse(401, 'Finish signing in: enter the code from your authenticator app', 'second_step_required');
 
-function createAuthController({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter, totpRequired = true }) {
+function createAuthController({ authStore, sessions, limiter, notify = {}, clientIpHeader = '', now = Date.now, sealer = { seal: t => t, open: t => t }, issuer = 'Household Wealth Profiler', breached = {}, requestLimiter, totpRequired = true, log = (...a) => console.error(new Date().toISOString(), ...a) }) {
   const event = (ctx, userId, ev, outcome, detail = '') => authStore.event({ userId, email: ctx.email || '', event: ev, outcome, ip: ctx.ip, userAgent: ctx.userAgent, detail });
   const BAD_CODE = (msg = 'That code is not right') => refuse(401, msg, 'bad_code');
   const codeHash = code => crypto.createHash('sha256').update(code).digest('hex');
@@ -232,6 +232,18 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
   // administrator; the address is confirmed through a link before the first sign-in. The reply is
   // the same whether or not the address already has an account (its holder is told by email).
   const str = v => (typeof v === 'string' ? v : '');
+  // The confirmation email, which the account needs before its first sign-in. When the mail server refuses or does
+  // not answer, the account stays as it is (accounts are never deleted) and the person is told so plainly, with the
+  // way to ask for the link again; the server log gets the mail server's reason (never the link or a password).
+  // Without this, the error reached the user as a bare "Server error" and the account looked broken.
+  async function sendVerifyLink(ctx, userId, to, token, unsent) {
+    try { await notify.verifyLink(to, token); }
+    catch (e) {
+      log(`confirmation email for account ${userId} not sent: ${e.message}`);
+      await event(ctx, userId, 'verify_email', 'not_sent');
+      throw refuse(503, unsent, 'email_unavailable');
+    }
+  }
   async function register(ctx) {
     const b = ctx.body || {};
     const name = str(b.name).trim(), email = normaliseEmail(str(b.email)), firmName = str(b.firm).trim(), password = str(b.password);
@@ -250,7 +262,7 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
       return { reply: { ok: true } };
     }
     const { token } = await authStore.issueToken(r.userId, 'verify', VERIFY_TTL_MS);
-    await notify.verifyLink({ email, name }, token);
+    await sendVerifyLink(ctx, r.userId, { email, name }, token, 'Your account has been created, but the email to confirm your address could not be sent just now. Try again in a few minutes: choose "Already registered? Sign in", enter your email and password, then "Send the link again".');
     await event(ctx, r.userId, 'register', 'ok', `firm ${r.firmId}${count === null ? '; breach check skipped' : ''}`);
     return { reply: { ok: true } };
   }
@@ -275,7 +287,7 @@ function createAuthController({ authStore, sessions, limiter, notify = {}, clien
     const user = await authStore.findUserByEmail(email);
     if (user && user.active && !user.email_verified_at) {
       const { token } = await authStore.issueToken(user.id, 'verify', VERIFY_TTL_MS);
-      await notify.verifyLink(user, token);
+      await sendVerifyLink(ctx, user.id, user, token, 'The email could not be sent just now. Try again in a few minutes.');
       await event(ctx, user.id, 'verify_resent', 'sent');
     } else await event(ctx, user ? user.id : null, 'verify_resent', user ? 'not_needed' : 'unknown');
     return { reply: { ok: true } };

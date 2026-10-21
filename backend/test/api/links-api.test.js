@@ -34,6 +34,7 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
   const urlFor = user => { const u = new URL(BASE_URL); u.username = user; u.password = PW; u.searchParams.set('options', `-c search_path=${schema}`); return u.toString(); };
   const asRole = async (user, fn) => { const c = new Client({ connectionString: urlFor(user) }); await c.connect(); try { return await fn(c); } finally { await c.end(); } };
   let admin, pool, store, sessions, server, base, sam, sent, invites;
+  let mailDown = false; const logged = []; // a mail server that refuses, and what the server logs about it
   const clock = { t: Date.parse('2026-10-13T10:00:00Z') };
   const now = () => clock.t;
 
@@ -51,11 +52,11 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
     store = createAuthStore({ pool, now: () => new Date(clock.t) });
     sessions = createSessions({ store, secret: crypto.randomBytes(32), secure: false, now });
     sent = [];
-    const mailer = { send: async m => { sent.push(m); return { delivered: true, logged: false }; } };
+    const mailer = { send: async m => { if (mailDown) throw new Error('connect ECONNREFUSED smtp.example.com:465'); sent.push(m); return { delivered: true, logged: false }; } };
     const notify = createNotify({ mailer, publicUrl: PUBLIC, operatorEmail: 'operator@example.com', appName: 'Household Wealth Profiler' });
     invites = createInvites({ authStore: store, notify, now });
     const { authenticate } = createAuth({ users: new Map(), clientIpHeader: 'x-client-ip' }, { authStore: store, sessions });
-    const authRoutes = createAuthRoutes({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), notify, clientIpHeader: 'x-client-ip', now, sealer: createSealer(Buffer.alloc(32, 7)), issuer: 'Household Wealth Profiler', breached: { fetch: async () => ({ ok: true, text: async () => '00000:1\n' }) } });
+    const authRoutes = createAuthRoutes({ authStore: store, sessions, limiter: createLimiter({ ...AUTH_LIMIT, now }), notify, clientIpHeader: 'x-client-ip', now, sealer: createSealer(Buffer.alloc(32, 7)), issuer: 'Household Wealth Profiler', breached: { fetch: async () => ({ ok: true, text: async () => '00000:1\n' }) }, log: (...a) => logged.push(a.join(' ')) });
     const households = { list: async () => [], create: async () => ({ id: '0', version: 1 }), get: async () => null, audit: async () => null, save: async () => ({ notFound: true }) };
     const firm = { get: async () => ({ version: 0, settings: {}, updatedAt: '', updatedBy: '' }), audit: async () => [], save: async () => ({ version: 1, changes: 1 }) };
     ({ server } = createApp({ config: { hsts: false, key: Buffer.alloc(32, 7), root: ROOT, users: new Map() }, households, firm, prices: { enabled: false }, authenticate, authRoutes, ready: async () => {} }));
@@ -206,6 +207,29 @@ test.describe('links and requests', { skip: !BASE_URL && 'set TEST_DATABASE_URL 
     for (let i = 0; i < 3; i++) await post('/api/auth/register', { name: 'Again', email: `again${i}@example.com`, firm: 'F', password: 'a passphrase that is fine 1' }, { ip: '203.0.113.5' });
     r = await post('/api/auth/register', { name: 'Again', email: 'again9@example.com', firm: 'F', password: 'a passphrase that is fine 1' }, { ip: '203.0.113.5' });
     assert.equal(r.status, 429); assert.equal((await r.json()).code, 'too_many_attempts');
+  });
+
+  test('Registration while the mail server refuses: a clear 503 (never a bare server error), the account kept, the reason logged; the link can be asked for again once mail works', async () => {
+    const IP = '203.0.113.91';
+    mailDown = true;
+    try {
+      let r = await post('/api/auth/register', { name: 'Mail Down', email: 'maildown@example.com', firm: 'Quiet Wealth', password: 'a passphrase for mail 1' }, { ip: IP });
+      assert.equal(r.status, 503);
+      const b = await r.json();
+      assert.equal(b.code, 'email_unavailable'); assert.match(b.error, /account has been created.*could not be sent.*Send the link again/s);
+      assert.ok(logged.some(l => /confirmation email for account .* not sent: connect ECONNREFUSED smtp\.example\.com:465/.test(l)), 'the mail server\'s reason is in the server log');
+      assert.ok(!logged.some(l => /#verify=/.test(l)), 'never the link');
+      r = await post('/api/auth/sign-in', { email: 'maildown@example.com', password: 'a passphrase for mail 1' }, { ip: IP });
+      assert.equal(r.status, 403); assert.equal((await r.json()).code, 'email_unverified', 'the account exists, waiting for its confirmation');
+      r = await post('/api/auth/verify/resend', { email: 'maildown@example.com' }, { ip: IP });
+      assert.equal(r.status, 503); assert.equal((await r.json()).code, 'email_unavailable');
+    } finally { mailDown = false; }
+    const before = sent.length;
+    let r = await post('/api/auth/verify/resend', { email: 'maildown@example.com' }, { ip: IP });
+    assert.equal(r.status, 200); assert.equal(sent.length, before + 1, 'once mail works, the link is sent');
+    r = await post('/api/auth/verify', { token: linkIn(sent[before].text, 'verify') }, { ip: IP });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await events('maildown@example.com'), ['verify_email:not_sent', 'sign_in:unverified', 'verify_email:not_sent', 'verify_resent:sent', 'verify:ok']);
   });
 
   test('TOTP_REQUIRED=0: the password alone opens a full session in the only firm, and /api/me says the second step is off', async () => {
