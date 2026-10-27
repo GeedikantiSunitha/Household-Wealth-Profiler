@@ -1,6 +1,8 @@
 /* The API server: every request goes through the middleware gates (middleware/index.js, in
    their fixed order) and then one route. The order is part of the security:
-     1. parse-url, 2. health, 3. api-only, 4. authenticate
+     1. parse-url, 2. health, 3. api-only
+        the public landing page (/welcome) and its images are served here, before sign-in (http/static.js)
+     4. authenticate
         the sign-in routes (/api/auth/, routes/auth.js) branch off here: same-site and json-body,
         then each route's own guards (stage, rate limit)
         with the app's own sign-in the screens are served here too, before anyone is signed in
@@ -16,7 +18,7 @@
 const http = require('http');
 const path = require('path');
 const { securityHeaders, createSend, readBody } = require('./http/respond.js');
-const { createStatic } = require('./http/static.js');
+const { createStatic, isPublicPage, publicFile } = require('./http/static.js');
 const { createGates, checkWrite } = require('./middleware');
 const { createMeRoute } = require('./routes/me.js');
 const { createHouseholdRoutes } = require('./routes/households.js');
@@ -47,6 +49,7 @@ function createApp({ config, households, firm, prices, records = null, authentic
     if (await gates.health(ctx)) return;
     if (gates.cors(ctx)) return;
     if (gates.apiOnly(ctx)) return;
+    if (serveWeb && req.method === 'GET' && isPublicPage(ctx.p)) return serveStatic(req, res, publicFile(ctx.p));
     await gates.authenticate(ctx);
     const { p, auth } = ctx;
     if (authRoutes && p.startsWith('/api/auth/')) {

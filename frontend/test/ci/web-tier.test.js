@@ -36,6 +36,8 @@ test('the images copy what they must, and the API image answers the API only', (
   assert.match(conf, /^\s*\$\{LISTEN_V6\}\r?$/m, 'IPv6 too, where the container has it: the container works the line out');
   assert.match(web, /if_inet6/, 'the entrypoint adds the IPv6 listener only when the kernel has IPv6');
   assert.match(conf, /proxy_pass \$\{BACKEND_URL\};/, 'the API is reached at BACKEND_URL');
+  assert.match(conf, /rewrite \^\/welcome\$ \/landing\.html last;/, 'the landing page answers at /welcome, as it does from the API');
+  assert.ok(fs.existsSync(path.join(ROOT, 'frontend/src/landing.html')), 'the landing page is in the folder the web image copies');
   assert.doesNotMatch(conf, /API_UPSTREAM/, 'the template knows one name only');
   assert.match(api, /SERVE_WEB=0/);
   assert.match(api, /PORT=3001/, 'the back end has a port of its own, apart from the front end\'s 8080');

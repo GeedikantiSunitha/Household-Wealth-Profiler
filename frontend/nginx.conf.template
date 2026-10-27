@@ -27,6 +27,9 @@ server {
         return 200 "window.HWP_API_BASE = '${API_BASE_URL}';\n";
     }
 
+    # The public landing page at /welcome (the file is frontend/src/landing.html). The app stays at /.
+    rewrite ^/welcome$ /landing.html last;
+
     # The API, on this domain. Its own replies carry its own headers; the real client address and
     # the public host, with its port as the browser sent it, go with each request (the API's same-site
     # check compares it with the Origin header).

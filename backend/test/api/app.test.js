@@ -162,7 +162,7 @@ test('API only (serveWeb false): the back end answers /api/, /healthz and /ready
   await new Promise(r => api.listen(0, '127.0.0.1', r));
   const at = `http://127.0.0.1:${api.address().port}`;
   try {
-    for (const p of ['/', '/index.html', '/js/main.js', '/core.js', '/styles.css']) {
+    for (const p of ['/', '/index.html', '/js/main.js', '/core.js', '/styles.css', '/welcome', '/landing.html', '/site/dashboard.png']) {
       const r = await fetch(at + p, { headers: { Authorization: 'ok' } });
       assert.equal(r.status, 404, p);
       assert.deepEqual(await r.json(), { error: 'Not found', code: 'not_found' }, p);
@@ -175,4 +175,22 @@ test('API only (serveWeb false): the back end answers /api/, /healthz and /ready
     assert.equal(list.status, 200); assert.deepEqual(await list.json(), [{ id: ID }]);
     assert.equal((await fetch(at + '/api/households')).status, 401, 'the API still asks for sign-in');
   } finally { api.close(); }
+});
+
+test('the public landing page and its images are served before sign-in; nothing else is', async () => {
+  for (const p of ['/welcome', '/landing.html']) {
+    const r = await call('GET', p, { auth: '' });
+    assert.equal(r.status, 200, p); assert.match(r.headers.get('content-type'), /^text\/html/);
+    const html = await r.text();
+    assert.match(html, /Household Wealth Profiler/); assert.match(html, /href="\/">Sign in/, 'its sign-in buttons open the app at /');
+    assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/, 'the page carries the same security headers');
+  }
+  const img = await call('GET', '/site/dashboard.png', { auth: '' });
+  assert.equal(img.status, 200); assert.equal(img.headers.get('content-type'), 'image/png');
+  assert.equal((await call('GET', '/welcome', { auth: 'locked' })).status, 200, 'a locked-out address can still read the landing page');
+  // still behind sign-in: the app, its code, the API, other files and anything that only looks like a landing path
+  for (const p of ['/', '/index.html', '/core.js', '/styles.css', '/api/me', '/site/', '/site/x.js', '/site/a/b.png', '/site/..%2fcore.js', '/welcome/', '/landing.html/x'])
+    assert.equal((await call('GET', p, { auth: '' })).status, 401, p);
+  assert.equal((await call('POST', '/welcome', { auth: '', body: 'x' })).status, 401, 'only GET is public');
+  assert.deepEqual(calls, [], 'no service was called');
 });
