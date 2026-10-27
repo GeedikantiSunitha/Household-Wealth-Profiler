@@ -346,15 +346,25 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
       try {
         await waitHttp(BASE2 + 'healthz');
         if (SPLIT) await waitHttp(FRONT + 'health');
-        const go2 = async (hash = '') => { await page.send('Page.navigate', { url: PAGE2 + hash }); await until(`document.readyState === 'complete' && !!document.querySelector('#gate, #main h2')`, 'the app', 30000); };
+        const go2 = async (hash = '') => { await page.send('Page.navigate', { url: PAGE2 + hash }); await until(`document.readyState === 'complete' && !!document.querySelector('#gate, #main h2, #welcome')`, 'the app', 30000); };
+        // Not signed in, the app opens on the landing page; its Sign in opens the sign-in page in place
+        const toSignIn = async () => { await until(`!!document.querySelector('#welcome [data-welcome="signin"]')`, 'the landing page', 30000); await click('#welcome [data-welcome="signin"]'); await until(`document.querySelector('#gate h2')?.textContent === 'Sign in' && !document.querySelector('#welcome')`, 'the sign-in page'); };
         const fill = (sel, v) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) throw new Error('No field ' + ${JSON.stringify(sel)}); el.value = ${JSON.stringify(v)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
         const submit = () => js(`(() => { document.querySelector('#gate button[type=submit]').click(); return true; })()`);
         const heading = () => js(`document.querySelector('#gate h2')?.textContent || document.querySelector('#main h2')?.textContent || ''`);
         let secret, usedStep = 0;
         const nextCode = () => { const now = Math.floor(Date.now() / 30000); const step = now > usedStep ? now : usedStep + 1; usedStep = step; return codeAt(base32Decode(secret), step); };
-        await step('sign-in page: Sign in, with Create an account and Forgotten your password; no data on screen, no Basic prompt', async () => {
+        await step('the landing page first, at the same address (no data on screen, no Basic prompt); its Sign in opens the sign-in page, with Create an account, Forgotten your password and Back to the landing page', async () => {
           await go2();
-          await until(`!!document.querySelector('#gate')`, 'the sign-in form');
+          await until(`!!document.querySelector('#welcome')`, 'the landing page');
+          if (await js(`!!document.querySelector('[data-k]') || !!document.querySelector('#gate') || !!document.querySelector('#welcome a[href="/"], #welcome a[href="/welcome"]')`)) throw new Error('data, the sign-in form or a link to another address on the landing page');
+          if (await js(`getComputedStyle(document.querySelector('body > header.top')).display`) !== 'none') throw new Error('the app\'s top bar shows over the landing page');
+          await shot('welcome');
+          await toSignIn();
+          if (await js(`location.pathname + location.hash`) !== new URL(PAGE2).pathname) throw new Error('the address changed: ' + await js(`location.href`));
+          await click('[data-gate="welcome"]');
+          await until(`!!document.querySelector('#welcome') && !document.querySelector('#gate')`, 'Back to the landing page');
+          await toSignIn();
           if (await heading() !== 'Sign in') throw new Error('heading: ' + await heading());
           if (await js(`!!document.querySelector('[data-k]')`)) throw new Error('a data field is on screen');
           await shot('signin');
@@ -381,7 +391,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
           let log3 = ''; app3.stdout.on('data', d => { log3 += d; }); app3.stderr.on('data', d => { log3 += d; });
           try {
             await waitHttp(BASE3 + 'healthz');
-            await page.send('Page.navigate', { url: BASE3 }); await until(`document.readyState === 'complete' && !!document.querySelector('#gate')`, 'the sign-in form', 30000);
+            await page.send('Page.navigate', { url: BASE3 }); await toSignIn();
             await click('[data-gate="register"]');
             await until(`document.querySelector('#gate h2')?.textContent === 'Create an account'`, 'the registration form');
             await fill('#g-name', 'Direct Adviser'); await fill('#g-email', 'direct@example.com'); await fill('#g-firm', 'Birch Wealth');
@@ -397,7 +407,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
             await until(`document.querySelector('#gate h2')?.textContent === 'Set up two-step verification'`, 'the enrolment screen: signed in with no confirmation link', 15000);
             if (/#verify=/.test(log3)) throw new Error('a verification link was issued');
           } finally { app3.kill(); await page.send('Network.clearBrowserCookies'); }
-          await go2(); await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'the sign-in page of the main run', 15000);
+          await go2(); await toSignIn();
         });
         await step('first sign-in: password, then the authenticator is set up (QR code and key) and confirmed with a code; recovery codes shown once; the client list', async () => {
           await fill('#g-email', 'ava@example.com'); await fill('#g-password', 'correct horse battery staple'); await submit();
@@ -422,7 +432,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
           await until(`document.querySelector('#main h2')?.textContent === 'Account security'`, 'the account page');
           await shot('account-security');
           await click('#who summary'); await click('[data-act="signOut"]');
-          await until(`document.querySelector('#gate h2')?.textContent === 'Sign in'`, 'the sign-in page', 15000);
+          await toSignIn(); // signed out: the landing page again, then its Sign in
         });
         await step('forgotten password: the link (from the log here) opens the new-password screen; the new password and a code sign in', async () => {
           await click('[data-gate="forgot"]');

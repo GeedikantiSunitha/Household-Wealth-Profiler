@@ -23,9 +23,9 @@ try { esbuild = require('esbuild'); } catch (e) { console.error('npm run build:w
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(path.join(out, 'js'), { recursive: true });
-for (const f of ['index.html', 'styles.css', 'runtime-config.js', 'landing.html']) fs.copyFileSync(path.join(src, f), path.join(out, f));
+for (const f of ['index.html', 'styles.css', 'welcome.css', 'runtime-config.js']) fs.copyFileSync(path.join(src, f), path.join(out, f));
 fs.cpSync(path.join(src, 'vendor'), path.join(out, 'vendor'), { recursive: true });
-fs.cpSync(path.join(src, 'site'), path.join(out, 'site'), { recursive: true }); // the landing page's images
+fs.cpSync(path.join(src, 'site'), path.join(out, 'site'), { recursive: true }); // the landing page's screenshots
 fs.copyFileSync(path.join(root, 'packages', 'core', 'core.js'), path.join(out, 'core.js'));
 const result = esbuild.buildSync({
   entryPoints: [path.join(src, 'js', 'main.js')],

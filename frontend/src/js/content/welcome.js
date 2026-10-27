@@ -1,107 +1,10 @@
-<!doctype html>
-<html lang="en-GB">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Household Wealth Profiler</title>
-<meta name="description" content="Client onboarding, KYC and AML, the economic balance sheet, risk profiling, mandates, relationship workflow and mortgage structuring for UK wealth managers. One five-step flow from data to report.">
-<meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#0C1E35">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230C1E35'/%3E%3Cpath d='M8 22V10h3.2l4.8 7.4L20.8 10H24v12h-3v-7l-5 7.3L11 15v7z' fill='%23fff'/%3E%3Crect x='8' y='24.5' width='16' height='1.5' fill='%23A8834A'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap">
-<style>
-:root{--bg:#F4F6F9;--surface:#FFFFFF;--sunk:#EEF1F5;--ink:#0E1B2C;--muted:#5A6A7E;--line:#DDE3EA;--accent:#163A63;--accent-hover:#0F2C4D;--accent-ink:#fff;--accent-soft:#E7EEF7;--gold:#A8834A;--navy:#0C1E35;--navy-2:#163A63;--navy-ink:#EAF1FA;--navy-muted:#A9BBD3;
-  --f-head:"Source Serif 4",Georgia,serif;--f-body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--radius:10px;--shadow:0 1px 2px rgba(14,27,44,.06),0 8px 24px -12px rgba(14,27,44,.18)}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0A111C;--surface:#111B2A;--sunk:#0C1522;--ink:#E5EBF3;--muted:#93A3B8;--line:#223047;--accent:#8CB8E8;--accent-hover:#A9CBF0;--accent-ink:#0A111C;--accent-soft:#17283F;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6)}}
-:root[data-theme="dark"]{--bg:#0A111C;--surface:#111B2A;--sunk:#0C1522;--ink:#E5EBF3;--muted:#93A3B8;--line:#223047;--accent:#8CB8E8;--accent-hover:#A9CBF0;--accent-ink:#0A111C;--accent-soft:#17283F}
-*{box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 var(--f-body);-webkit-font-smoothing:antialiased}
-a{color:var(--accent)}
-h1,h2,h3{font-family:var(--f-head);font-weight:600;letter-spacing:-.01em;margin:0}
-.wrap{max-width:1120px;margin:0 auto;padding:0 20px}
-/* top bar */
-.top{position:sticky;top:0;z-index:5;background:var(--navy);color:var(--navy-ink);border-bottom:1px solid rgba(255,255,255,.08)}
-.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;height:60px}
-.brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none}
-.brand b{font:600 17px/1.2 var(--f-head)}
-.brand span{display:block;font-size:11.5px;color:var(--navy-muted);letter-spacing:.02em}
-.nav{display:flex;gap:8px;align-items:center}
-.nav a.link{color:var(--navy-muted);text-decoration:none;font-size:14px;padding:8px 10px;border-radius:6px}
-.nav a.link:hover{color:#fff;background:rgba(255,255,255,.06)}
-.btn{display:inline-flex;align-items:center;gap:8px;border-radius:8px;padding:10px 16px;font:500 14px/1 var(--f-body);text-decoration:none;border:1px solid transparent;cursor:pointer;white-space:nowrap}
-.btn.primary{background:var(--gold);color:#1B1408;border-color:var(--gold)}
-.btn.primary:hover{background:#B99257}
-.btn.ghost{border-color:rgba(255,255,255,.35);color:#fff}
-.btn.ghost:hover{background:rgba(255,255,255,.08)}
-.btn.ink{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.btn.ink:hover{background:var(--accent-hover)}
-.btn.line{border-color:var(--line);color:var(--ink);background:var(--surface)}
-.btn.line:hover{border-color:var(--accent);color:var(--accent)}
-/* hero */
-.hero{background:linear-gradient(180deg,var(--navy) 0%,#10294A 100%);color:var(--navy-ink);padding:72px 0 0;overflow:hidden}
-.hero .wrap{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:48px;align-items:center}
-.eyebrow{font:600 12px/1 var(--f-body);letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-bottom:18px}
-.hero h1{font-size:46px;line-height:1.1;color:#fff}
-.hero p.lead{font-size:18px;color:var(--navy-muted);margin:20px 0 28px;max-width:52ch}
-.hero .cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
-.hero .cta small{display:block;width:100%;color:var(--navy-muted);font-size:13px;margin-top:4px}
-.shot{border-radius:12px 12px 0 0;border:1px solid rgba(255,255,255,.14);border-bottom:0;box-shadow:0 30px 60px -30px rgba(0,0,0,.7);background:#fff;display:block;width:100%;height:auto;align-self:end}
-.proof{background:var(--navy-2);color:var(--navy-ink);border-top:1px solid rgba(255,255,255,.08)}
-.proof .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
-.proof div{padding:18px 20px 18px 0;border-right:1px solid rgba(255,255,255,.1);margin-right:20px}
-.proof div:last-child{border:0}
-.proof b{display:block;font:600 22px/1.2 var(--f-head);color:#fff}
-.proof span{font-size:13px;color:var(--navy-muted)}
-/* sections */
-section{padding:72px 0}
-section.alt{background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.sec-h{max-width:68ch;margin-bottom:36px}
-.sec-h h2{font-size:32px;line-height:1.15}
-.sec-h p{color:var(--muted);font-size:17px;margin:12px 0 0}
-.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;counter-reset:step}
-.flow div{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
-.flow div::before{counter-increment:step;content:counter(step);display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font:600 12px/1 var(--f-body);margin-bottom:12px}
-.flow b{display:block;font:600 15px/1.3 var(--f-head);margin-bottom:6px}
-.flow p{margin:0;font-size:13.5px;color:var(--muted)}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:var(--shadow)}
-.card h3{font-size:19px;margin-bottom:8px}
-.card p{margin:0 0 10px;color:var(--muted);font-size:14.5px}
-.card ul{margin:0;padding-left:18px;font-size:14px;color:var(--ink)}
-.card li{margin:4px 0}
-.tag{display:inline-block;font:600 11px/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);background:var(--accent-soft);padding:6px 9px;border-radius:999px;margin-bottom:12px}
-.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:40px;align-items:center}
-.split img{width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line);box-shadow:var(--shadow);display:block}
-.split h2{font-size:30px;line-height:1.15;margin-bottom:12px}
-.split p{color:var(--muted)}
-.split ul{padding-left:18px;margin:12px 0 0}
-.split li{margin:6px 0}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.steps .card b{display:block;font:600 16px/1.3 var(--f-head);margin-bottom:6px}
-.trust{background:var(--navy);color:var(--navy-ink)}
-.trust .sec-h h2{color:#fff}
-.trust .sec-h p{color:var(--navy-muted)}
-.trust .card{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.12);box-shadow:none}
-.trust .card h3{color:#fff}
-.trust .card p,.trust .card li{color:var(--navy-muted)}
-.trust .card ul{color:var(--navy-ink)}
-.cta-band{text-align:center;padding:72px 0}
-.cta-band h2{font-size:34px;margin-bottom:10px}
-.cta-band p{color:var(--muted);margin:0 0 24px}
-footer{border-top:1px solid var(--line);padding:28px 0;font-size:13px;color:var(--muted)}
-footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
-footer p{margin:0;max-width:78ch}
-@media (max-width:960px){.hero .wrap{grid-template-columns:1fr}.hero h1{font-size:38px}.shot{margin-top:8px}.proof .wrap{grid-template-columns:1fr 1fr}.proof div:nth-child(2){border-right:0}.flow{grid-template-columns:1fr 1fr}.grid,.steps{grid-template-columns:1fr 1fr}.split{grid-template-columns:1fr}.split img{order:2}}
-@media (max-width:640px){.top .wrap{height:auto;padding:10px 16px;flex-wrap:wrap}.nav a.link{display:none}.hero{padding-top:44px}.hero h1{font-size:32px}.flow,.grid,.steps,.two,.proof .wrap{grid-template-columns:1fr}.proof .wrap{padding:0}.proof div{border-right:0;border-bottom:1px solid rgba(255,255,255,.1);margin:0;padding:14px 16px}.proof div:last-child{border:0}section{padding:52px 0}.sec-h h2{font-size:26px}.wrap{padding:0 16px}}
-</style>
-</head>
-<body>
+/* The landing page's text and screenshots (pages/welcome.js shows it): what the product is, for someone
+   who is not signed in. Marketing only, no client data. Its Sign in links (data-welcome="signin") open
+   the sign-in screen in place, at the same address; its other # links scroll within the page. */
+export const WELCOME_HTML = `
 <header class="top"><div class="wrap">
-  <a class="brand" href="/welcome"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="#163A63"/><path d="M8 22V10h3.2l4.8 7.4L20.8 10H24v12h-3v-7l-5 7.3L11 15v7z" fill="#fff"/><rect x="8" y="24.5" width="16" height="1.5" fill="#A8834A"/></svg><div><b>Household Wealth Profiler</b><span>For UK private wealth and advice firms</span></div></a>
-  <nav class="nav"><a class="link" href="#flow">How it works</a><a class="link" href="#features">Features</a><a class="link" href="#mortgage">Mortgage structuring</a><a class="link" href="#security">Security</a><a class="btn ghost" href="/">Sign in</a></nav>
+  <a class="brand" href="#top"><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="#163A63"/><path d="M8 22V10h3.2l4.8 7.4L20.8 10H24v12h-3v-7l-5 7.3L11 15v7z" fill="#fff"/><rect x="8" y="24.5" width="16" height="1.5" fill="#A8834A"/></svg><div><b>Household Wealth Profiler</b><span>For UK private wealth and advice firms</span></div></a>
+  <nav class="nav"><a class="link" href="#flow">How it works</a><a class="link" href="#features">Features</a><a class="link" href="#mortgage">Mortgage structuring</a><a class="link" href="#security">Security</a><a class="btn ghost" href="#sign-in" data-welcome="signin">Sign in</a></nav>
 </div></header>
 
 <section class="hero"><div class="wrap">
@@ -109,7 +12,7 @@ footer p{margin:0;max-width:78ch}
     <div class="eyebrow">Onboarding · Economic balance sheet · Mandate · Workflow</div>
     <h1>The whole client file, worked out from first principles.</h1>
     <p class="lead">One system for a UK wealth firm: KYC and AML onboarding, the CFA economic balance sheet, risk profiling, the investment mandate, the relationship workflow and household mortgage structuring. Every number traceable to its inputs, every step explained for an analyst.</p>
-    <div class="cta"><a class="btn primary" href="/">Sign in to the app</a><a class="btn ghost" href="mailto:sharmaumesh552@gmail.com?subject=Household%20Wealth%20Profiler%20demo">Request a demo</a><small>Indicative figures under 2026/27 rest-of-UK tax rules. Not advice; a suitability report is still required.</small></div>
+    <div class="cta"><a class="btn primary" href="#sign-in" data-welcome="signin">Sign in to the app</a><a class="btn ghost" href="mailto:sharmaumesh552@gmail.com?subject=Household%20Wealth%20Profiler%20demo">Request a demo</a><small>Indicative figures under 2026/27 rest-of-UK tax rules. Not advice; a suitability report is still required.</small></div>
   </div>
   <img class="shot" src="site/dashboard.png" alt="Household dashboard: economic net worth, funded ratio, risk profile, AML rating, mandate and what to do next" width="1360" height="860">
 </div></section>
@@ -179,12 +82,11 @@ footer p{margin:0;max-width:78ch}
 <div class="cta-band"><div class="wrap">
   <h2>See it with a real household</h2>
   <p>Sign in with the demo account you were given, or ask for a walk-through.</p>
-  <a class="btn ink" href="/">Sign in</a>&nbsp;&nbsp;<a class="btn line" href="mailto:sharmaumesh552@gmail.com?subject=Household%20Wealth%20Profiler%20demo">Request a demo</a>
+  <a class="btn ink" href="#sign-in" data-welcome="signin">Sign in</a>&nbsp;&nbsp;<a class="btn line" href="mailto:sharmaumesh552@gmail.com?subject=Household%20Wealth%20Profiler%20demo">Request a demo</a>
 </div></div>
 
 <footer><div class="wrap">
   <p>Figures are indicative and use 2026/27 rest-of-UK tax rules. They are not advice and do not replace a suitability report. Onboarding rules follow MLR 2017, JMLSG and FCA COBS as a starting framework: the firm's MLRO must approve them before use.</p>
   <p>© 2026 Household Wealth Profiler</p>
 </div></footer>
-</body>
-</html>
+`;

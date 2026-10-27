@@ -1,7 +1,8 @@
 /* The sign-in screens (Phase 2): shown instead of the app until a full session with a firm exists.
    One screen at a time, each a small form; every call goes to the sign-in API (/api/auth/).
-     runGate(probe)   drives the whole flow from what /api/me answered: the landing page (Sign in, with
-                      Create an account and Forgotten your password), registration and the link that
+     runGate(probe)   drives the whole flow from what /api/me answered: the landing page (welcome.js) for
+                      someone not signed in, then the sign-in page (Sign in, with Create an account,
+                      Forgotten your password and Back to the landing page), registration and the link that
                       confirms the address, the second step (a code from the
                       authenticator app, or a recovery code), first-time enrolment (QR code and key,
                       then the recovery codes shown once), the firm picker; a #reset= or #invite=
@@ -11,6 +12,7 @@
    Nothing here touches household data, and the screens never show the server's raw JSON. */
 import { $, esc } from '../lib/dom.js';
 import { authApi } from '../services/api/auth.js';
+import { welcome } from './welcome.js';
 
 const APP_NAME = 'Household Wealth Profiler';
 let pendingErr = '';
@@ -46,9 +48,10 @@ async function landing(lastEmail = '') {
   for (;;) {
     const v = await screen({ title: 'Sign in', intro: `${esc(APP_NAME)}. Client records are encrypted and every change is recorded.`,
       fields: [{ k: 'email', l: 'Email', t: 'email', ac: 'username', v: lastEmail }, { k: 'password', l: 'Password', t: 'password', ac: 'current-password' }],
-      submit: 'Sign in', extra: '<button class="btn ghost" type="button" data-gate="register">Create an account</button><button class="btn ghost" type="button" data-gate="forgot">Forgotten your password?</button>' });
+      submit: 'Sign in', extra: '<button class="btn ghost" type="button" data-gate="register">Create an account</button><button class="btn ghost" type="button" data-gate="forgot">Forgotten your password?</button><button class="btn ghost" type="button" data-gate="welcome">Back</button>' });
     if (v.action === 'register') { lastEmail = (await register()) || lastEmail; continue; }
     if (v.action === 'forgot') { await forgot(lastEmail); continue; }
+    if (v.action === 'welcome') return { state: 'welcome' };
     if (v.action) continue;
     lastEmail = v.email;
     try { return { ...(await authApi('POST', 'sign-in', { email: v.email, password: v.password })), email: v.email }; }
@@ -213,11 +216,12 @@ export async function runGate(probe) {
   let st;
   const m = /^#(reset|invite|verify)=([A-Za-z0-9_-]{43})$/.exec(location.hash);
   if (m) { history.replaceState(null, '', location.pathname + location.search); await (m[1] === 'verify' ? verifyLink(m[2]) : throughLink(m[1], m[2])); st = { state: 'out' }; }
-  else if (probe.code === 'sign_in_required') st = { state: 'out' };
+  else if (probe.code === 'sign_in_required') st = { state: 'welcome' }; // not signed in: the landing page first
   else { try { st = await authApi('GET', 'state'); } catch (e) { st = { state: 'out' }; } }
   let lastEmail = '';
   for (;;) {
-    if (st.state === 'out') { st = await landing(lastEmail); lastEmail = st.email || lastEmail; }
+    if (st.state === 'welcome') { $('#main').innerHTML = ''; await welcome(); st = { state: 'out' }; } // Back takes the sign-in form away too
+    else if (st.state === 'out') { st = await landing(lastEmail); lastEmail = st.email || lastEmail; }
     else if (st.stage === 'password' && st.next === 'enrol') st = await enrol();
     else if (st.stage === 'password') st = await totp(st);
     else if (st.stage === 'full' && st.next === 'enrol') st = (await enrol({ withPassword: true })) || { state: 'out' };

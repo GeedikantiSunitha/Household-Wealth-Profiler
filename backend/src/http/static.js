@@ -21,11 +21,4 @@ function createStatic({ publicDir, coreFile, send }) {
   };
 }
 
-/* The public landing page (frontend/src/landing.html at /welcome) and its images (site/*.png): marketing only,
-   no client data, so they are served before sign-in in every sign-in mode. Only these exact paths:
-   /site/ takes a plain file name, never a sub-folder or an encoded path. */
-const PUBLIC_PAGES = new Set(['/welcome', '/landing.html']);
-const isPublicPage = p => PUBLIC_PAGES.has(p) || /^\/site\/[\w-]+\.png$/.test(p);
-const publicFile = p => (p === '/welcome' ? '/landing.html' : p);
-
-module.exports = { createStatic, MIME, isPublicPage, publicFile };
+module.exports = { createStatic, MIME };

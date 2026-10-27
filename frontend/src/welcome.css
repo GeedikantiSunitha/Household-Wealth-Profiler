@@ -1,0 +1,107 @@
+/* The landing page (pages/welcome.js): the opening screen for someone who is not signed in.
+   Every rule is scoped to #welcome, so nothing here changes the app's own screens; while it is on
+   screen the app's top bar, side rail and footer are hidden (body.welcome). */
+body.welcome>header.top,body.welcome>.shell,body.welcome>.foot{display:none}
+#welcome{min-height:100vh}
+#welcome{--bg:#F4F6F9;--surface:#FFFFFF;--sunk:#EEF1F5;--ink:#0E1B2C;--muted:#5A6A7E;--line:#DDE3EA;--accent:#163A63;--accent-hover:#0F2C4D;--accent-ink:#fff;--accent-soft:#E7EEF7;--gold:#A8834A;--navy:#0C1E35;--navy-2:#163A63;--navy-ink:#EAF1FA;--navy-muted:#A9BBD3;
+  --f-head:"Source Serif 4",Georgia,serif;--f-body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--radius:10px;--shadow:0 1px 2px rgba(14,27,44,.06),0 8px 24px -12px rgba(14,27,44,.18)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) #welcome{--bg:#0A111C;--surface:#111B2A;--sunk:#0C1522;--ink:#E5EBF3;--muted:#93A3B8;--line:#223047;--accent:#8CB8E8;--accent-hover:#A9CBF0;--accent-ink:#0A111C;--accent-soft:#17283F;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6)}
+}
+:root[data-theme="dark"] #welcome{--bg:#0A111C;--surface:#111B2A;--sunk:#0C1522;--ink:#E5EBF3;--muted:#93A3B8;--line:#223047;--accent:#8CB8E8;--accent-hover:#A9CBF0;--accent-ink:#0A111C;--accent-soft:#17283F}
+#welcome *{box-sizing:border-box}
+#welcome{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 var(--f-body);-webkit-font-smoothing:antialiased}
+#welcome a{color:var(--accent)}
+#welcome h1,#welcome h2,#welcome h3{font-family:var(--f-head);font-weight:600;letter-spacing:-.01em;margin:0}
+#welcome .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
+#welcome .top{position:sticky;top:0;z-index:5;background:var(--navy);color:var(--navy-ink);border-bottom:1px solid rgba(255,255,255,.08)}
+#welcome .top .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;height:60px}
+#welcome .brand{display:flex;align-items:center;gap:10px;color:inherit;text-decoration:none}
+#welcome .brand b{font:600 17px/1.2 var(--f-head)}
+#welcome .brand span{display:block;font-size:11.5px;color:var(--navy-muted);letter-spacing:.02em}
+#welcome .nav{display:flex;gap:8px;align-items:center}
+#welcome .nav a.link{color:var(--navy-muted);text-decoration:none;font-size:14px;padding:8px 10px;border-radius:6px}
+#welcome .nav a.link:hover{color:#fff;background:rgba(255,255,255,.06)}
+#welcome .btn{display:inline-flex;align-items:center;gap:8px;border-radius:8px;padding:10px 16px;font:500 14px/1 var(--f-body);text-decoration:none;border:1px solid transparent;cursor:pointer;white-space:nowrap}
+#welcome .btn.primary{background:var(--gold);color:#1B1408;border-color:var(--gold)}
+#welcome .btn.primary:hover{background:#B99257}
+#welcome .btn.ghost{border-color:rgba(255,255,255,.35);color:#fff}
+#welcome .btn.ghost:hover{background:rgba(255,255,255,.08)}
+#welcome .btn.ink{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+#welcome .btn.ink:hover{background:var(--accent-hover)}
+#welcome .btn.line{border-color:var(--line);color:var(--ink);background:var(--surface)}
+#welcome .btn.line:hover{border-color:var(--accent);color:var(--accent)}
+#welcome .hero{background:linear-gradient(180deg,var(--navy) 0%,#10294A 100%);color:var(--navy-ink);padding:72px 0 0;overflow:hidden}
+#welcome .hero .wrap{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:48px;align-items:center}
+#welcome .eyebrow{font:600 12px/1 var(--f-body);letter-spacing:.14em;text-transform:uppercase;color:var(--gold);margin-bottom:18px}
+#welcome .hero h1{font-size:46px;line-height:1.1;color:#fff}
+#welcome .hero p.lead{font-size:18px;color:var(--navy-muted);margin:20px 0 28px;max-width:52ch}
+#welcome .hero .cta{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+#welcome .hero .cta small{display:block;width:100%;color:var(--navy-muted);font-size:13px;margin-top:4px}
+#welcome .shot{border-radius:12px 12px 0 0;border:1px solid rgba(255,255,255,.14);border-bottom:0;box-shadow:0 30px 60px -30px rgba(0,0,0,.7);background:#fff;display:block;width:100%;height:auto;align-self:end}
+#welcome .proof{background:var(--navy-2);color:var(--navy-ink);border-top:1px solid rgba(255,255,255,.08)}
+#welcome .proof .wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+#welcome .proof div{padding:18px 20px 18px 0;border-right:1px solid rgba(255,255,255,.1);margin-right:20px}
+#welcome .proof div:last-child{border:0}
+#welcome .proof b{display:block;font:600 22px/1.2 var(--f-head);color:#fff}
+#welcome .proof span{font-size:13px;color:var(--navy-muted)}
+#welcome section{padding:72px 0}
+#welcome section.alt{background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#welcome .sec-h{max-width:68ch;margin-bottom:36px}
+#welcome .sec-h h2{font-size:32px;line-height:1.15}
+#welcome .sec-h p{color:var(--muted);font-size:17px;margin:12px 0 0}
+#welcome .flow{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;counter-reset:step}
+#welcome .flow div{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+#welcome .flow div::before{counter-increment:step;content:counter(step);display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font:600 12px/1 var(--f-body);margin-bottom:12px}
+#welcome .flow b{display:block;font:600 15px/1.3 var(--f-head);margin-bottom:6px}
+#welcome .flow p{margin:0;font-size:13.5px;color:var(--muted)}
+#welcome .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+#welcome .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:var(--shadow)}
+#welcome .card h3{font-size:19px;margin-bottom:8px}
+#welcome .card p{margin:0 0 10px;color:var(--muted);font-size:14.5px}
+#welcome .card ul{margin:0;padding-left:18px;font-size:14px;color:var(--ink)}
+#welcome .card li{margin:4px 0}
+#welcome .tag{display:inline-block;font:600 11px/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);background:var(--accent-soft);padding:6px 9px;border-radius:999px;margin-bottom:12px}
+#welcome .split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:40px;align-items:center}
+#welcome .split img{width:100%;height:auto;border-radius:var(--radius);border:1px solid var(--line);box-shadow:var(--shadow);display:block}
+#welcome .split h2{font-size:30px;line-height:1.15;margin-bottom:12px}
+#welcome .split p{color:var(--muted)}
+#welcome .split ul{padding-left:18px;margin:12px 0 0}
+#welcome .split li{margin:6px 0}
+#welcome .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+#welcome .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+#welcome .steps .card b{display:block;font:600 16px/1.3 var(--f-head);margin-bottom:6px}
+#welcome .trust{background:var(--navy);color:var(--navy-ink)}
+#welcome .trust .sec-h h2{color:#fff}
+#welcome .trust .sec-h p{color:var(--navy-muted)}
+#welcome .trust .card{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.12);box-shadow:none}
+#welcome .trust .card h3{color:#fff}
+#welcome .trust .card p,#welcome .trust .card li{color:var(--navy-muted)}
+#welcome .trust .card ul{color:var(--navy-ink)}
+#welcome .cta-band{text-align:center;padding:72px 0}
+#welcome .cta-band h2{font-size:34px;margin-bottom:10px}
+#welcome .cta-band p{color:var(--muted);margin:0 0 24px}
+#welcome footer{border-top:1px solid var(--line);padding:28px 0;font-size:13px;color:var(--muted)}
+#welcome footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+#welcome footer p{margin:0;max-width:78ch}
+@media (max-width:960px){#welcome .hero .wrap{grid-template-columns:1fr}
+#welcome .hero h1{font-size:38px}
+#welcome .shot{margin-top:8px}
+#welcome .proof .wrap{grid-template-columns:1fr 1fr}
+#welcome .proof div:nth-child(2){border-right:0}
+#welcome .flow{grid-template-columns:1fr 1fr}
+#welcome .grid,#welcome .steps{grid-template-columns:1fr 1fr}
+#welcome .split{grid-template-columns:1fr}
+#welcome .split img{order:2}
+}
+@media (max-width:640px){#welcome .top .wrap{height:auto;padding:10px 16px;flex-wrap:wrap}
+#welcome .nav a.link{display:none}
+#welcome .hero{padding-top:44px}
+#welcome .hero h1{font-size:32px}
+#welcome .flow,#welcome .grid,#welcome .steps,#welcome .two,#welcome .proof .wrap{grid-template-columns:1fr}
+#welcome .proof .wrap{padding:0}
+#welcome .proof div{border-right:0;border-bottom:1px solid rgba(255,255,255,.1);margin:0;padding:14px 16px}
+#welcome .proof div:last-child{border:0}
+#welcome section{padding:52px 0}
+#welcome .sec-h h2{font-size:26px}
+#welcome .wrap{padding:0 16px}
+}
