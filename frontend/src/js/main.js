@@ -15,7 +15,7 @@
      events/         typing (editing.js), buttons and links (actions.js), the top bar (toolbar.js)
    Pages use components, hooks and services; components use hooks; hooks use services; services use nothing above them. */
 import { state, setState } from './hooks/state.js';
-import { $, esc } from './lib/dom.js';
+import { $, esc, shown } from './lib/dom.js';
 import { Store, setRenderer, setGate } from './hooks/store.js';
 import { runGate } from './pages/sign-in.js';
 import { render } from './pages/render.js';
@@ -31,8 +31,8 @@ setGate(runGate);
 (async()=>{
   // Sign in (or find the server), then the firm settings: if either fails, the app does not open
   try{await Store.init();await Store.loadFirm()}catch(e){document.body.classList.add('gated');
-    $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p></div>`;return}
+    $('#main').innerHTML=`<div class="panel gate"><h2>Cannot open the profiler</h2><p>${esc(e.message)}</p></div>`;shown();return}
   if(Store.mode==='server'){setState(H.blank());state.VIEW='clients'}
   else{setState(Store.loadLocal()||H.sample())}
-  resetUI(false);render();
+  resetUI(false);render();shown();
 })();

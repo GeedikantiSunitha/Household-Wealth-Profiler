@@ -27,6 +27,9 @@ test('the build copies the page, the styles, the libraries and core.js byte for 
     const html = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
     assert.match(html, /<script type="module" src="js\/main\.js"><\/script>/, 'the page loads the bundle by the same name');
     assert.doesNotMatch(html, /<script>/, 'no inline script');
+    assert.match(html, /<html lang="en-GB" class="booting">/, 'the page starts hidden, so no frame flashes before the app knows who is here');
+    const css = fs.readFileSync(path.join(out, 'styles.css'), 'utf8');
+    assert.match(css, /html\.booting body>header\.top,html\.booting body>\.shell,html\.booting body>\.foot\{visibility:hidden;animation:hwp-show 0s 8s forwards\}/, 'hidden while starting, and shown after 8 s whatever happens');
     assert.match(html, /<link rel="stylesheet" href="welcome\.css">/, 'the landing page\'s styles load with the app');
     for (const f of fs.readdirSync(path.join(SRC, 'site'))) assert.ok(fs.readFileSync(path.join(out, 'site', f)).equals(fs.readFileSync(path.join(SRC, 'site', f))), `site/${f}, a landing page screenshot, is copied`);
     assert.ok(!fs.existsSync(path.join(out, 'landing.html')), 'one page: the landing page is part of the app, not a second address');

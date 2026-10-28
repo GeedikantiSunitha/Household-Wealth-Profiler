@@ -10,7 +10,7 @@
                       app can open. With TOTP_REQUIRED=0 the password alone signs in.
      firmPicker()     the firm picker on its own (switching firm from the user menu)
    Nothing here touches household data, and the screens never show the server's raw JSON. */
-import { $, esc } from '../lib/dom.js';
+import { $, esc, shown } from '../lib/dom.js';
 import { authApi } from '../services/api/auth.js';
 import { welcome } from './welcome.js';
 
@@ -30,6 +30,7 @@ function fieldHtml(f) {
 // A form; resolves with its values, or { action } for a secondary link (data-gate)
 function screen({ title, intro = '', fields = [], submit = 'Continue', extra = '', before = '' }) {
   document.body.classList.add('gated');
+  shown();
   $('#main').innerHTML = `<form class="panel gate" id="gate" novalidate><h2>${esc(title)}</h2>${intro ? `<p class="muted">${intro}</p>` : ''}${before}
     ${fields.length ? '<div class="fields">' + fields.map(fieldHtml).join('') + '</div>' : ''}
     <p class="gate-err" id="gateErr" role="alert">${esc(pendingErr)}</p><div class="addrow">${submit ? `<button class="btn primary" type="submit">${esc(submit)}</button>` : ''}${extra}</div></form>`;

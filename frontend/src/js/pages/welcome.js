@@ -3,6 +3,7 @@
    the app at the same address: the top bar, side rail and footer are hidden while it shows (welcome.css).
      welcome()   shows it; resolves when Sign in is chosen, with the page taken away again */
 import { WELCOME_HTML } from '../content/welcome.js';
+import { shown } from '../lib/dom.js';
 
 export function welcome() {
   document.body.classList.add('welcome');
@@ -10,6 +11,7 @@ export function welcome() {
   el.id = 'welcome';
   el.innerHTML = WELCOME_HTML;
   document.body.prepend(el);
+  shown();
   window.scrollTo(0, 0);
   return new Promise(ok => {
     el.onclick = e => {

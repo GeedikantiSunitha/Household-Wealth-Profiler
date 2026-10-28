@@ -134,7 +134,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
     const type = (sel, value) => js(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     const text = sel => js(`document.querySelector(${JSON.stringify(sel)})?.textContent.trim() || ''`);
     // 30 s: a cold Chrome also fetches the Google fonts before the page counts as loaded
-    const go = async () => { await page.send('Page.navigate', { url: BASE }); await until(`document.readyState === 'complete' && !!document.querySelector('#main h2')`, 'the app to start', 30000); };
+    const go = async () => { await page.send('Page.navigate', { url: BASE }); await until(`document.readyState === 'complete' && !!document.querySelector('#main h2') && !document.documentElement.classList.contains('booting')`, 'the app to start, and shown', 30000); };
     fs.mkdirSync(OUT, { recursive: true });
     let n = 0;
     async function shot(name, width = 1366) {
@@ -357,6 +357,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
         await step('the landing page first, at the same address (no data on screen, no Basic prompt); its Sign in opens the sign-in page, with Create an account, Forgotten your password and Back to the landing page', async () => {
           await go2();
           await until(`!!document.querySelector('#welcome')`, 'the landing page');
+          if (await js(`document.documentElement.classList.contains('booting')`)) throw new Error('the page stayed hidden under the landing page');
           if (await js(`!!document.querySelector('[data-k]') || !!document.querySelector('#gate') || !!document.querySelector('#welcome a[href="/"], #welcome a[href="/welcome"]')`)) throw new Error('data, the sign-in form or a link to another address on the landing page');
           if (await js(`getComputedStyle(document.querySelector('body > header.top')).display`) !== 'none') throw new Error('the app\'s top bar shows over the landing page');
           await shot('welcome');
@@ -508,7 +509,7 @@ const fail = msg => { results.push('FAIL  ' + msg); problems.push(msg); console.
               await page.send('Network.enable'); await page.send('Network.clearBrowserCookies');
               await page.send('Network.setCookie', { name: 'hwp_session', value: sess.id, url: BASE2, httpOnly: true, sameSite: 'Strict' });
             };
-            const signInAs = async email => { await cookieFor(email, FIRM); await go2(); await until(`document.querySelector('#main h2')?.textContent === 'Households'`, 'the client list', 15000); };
+            const signInAs = async email => { await cookieFor(email, FIRM); await go2(); await until(`document.querySelector('#main h2')?.textContent === 'Households' && !document.documentElement.classList.contains('booting') && !document.querySelector('#welcome')`, 'the client list, straight away for a signed-in person', 15000); };
             const enabled = sel => js(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) throw new Error('No field ' + ${JSON.stringify(sel)}); return !e.disabled; })()`);
             const present = sel => js(`!!document.querySelector(${JSON.stringify(sel)})`);
             const expectTrue = async (ok, what) => { if (!(await ok)) throw new Error(what); };

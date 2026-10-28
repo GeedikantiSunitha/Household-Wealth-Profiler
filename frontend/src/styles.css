@@ -301,6 +301,14 @@ tr.sub td:first-child{padding-left:22px}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 
+/* ---------- start-up ---------- */
+/* Until the app knows who is here (the server's answer to "who is signed in?"), the page shows nothing:
+   a visitor then sees the landing page and a signed-in person the app, with no frame flashing first.
+   main.js, the sign-in screens and the landing page take the class away (lib/dom.js shown()). If the
+   app's code never runs, the page shows itself after 8 seconds anyway rather than staying blank. */
+html.booting body>header.top,html.booting body>.shell,html.booting body>.foot{visibility:hidden;animation:hwp-show 0s 8s forwards}
+@keyframes hwp-show{to{visibility:visible}}
+
 /* ---------- sign-in ---------- */
 .gated .actions,.gated .rail{display:none}
 .gated .shell{display:block}
